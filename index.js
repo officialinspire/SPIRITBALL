@@ -255,23 +255,23 @@ class BootScene extends Phaser.Scene {
         });
         graphics.clear();
         
-        // Create enhanced Saturn texture - detailed cartoon style
-        // Main planet body with gradient
-        graphics.fillGradientStyle(0xFFCC66, 0xFFCC66, 0xEE9944, 0xEE9944, 1);
+        // Create enhanced Saturn texture - detailed cartoon style with ORANGE color
+        // Main planet body with orange gradient
+        graphics.fillGradientStyle(0xFFA500, 0xFFA500, 0xFF8C00, 0xFF8C00, 1);
         graphics.fillCircle(50, 50, 42);
 
-        // Atmospheric bands - detailed
-        graphics.lineStyle(3, 0xFFDD88, 0.6);
+        // Atmospheric bands - detailed orange tones
+        graphics.lineStyle(3, 0xFFB347, 0.6);
         graphics.strokeCircle(50, 50, 38);
-        graphics.lineStyle(2, 0xFFAA55, 0.5);
+        graphics.lineStyle(2, 0xFF9933, 0.5);
         graphics.strokeCircle(50, 50, 32);
-        graphics.lineStyle(2, 0xFF9944, 0.4);
+        graphics.lineStyle(2, 0xFF8800, 0.4);
         graphics.strokeCircle(50, 50, 26);
-        graphics.lineStyle(1, 0xFF8833, 0.4);
+        graphics.lineStyle(1, 0xFF7700, 0.4);
         graphics.strokeCircle(50, 50, 20);
 
-        // Horizontal bands
-        graphics.lineStyle(2, 0xDD8833, 0.3);
+        // Horizontal bands - orange tones
+        graphics.lineStyle(2, 0xCC6600, 0.3);
         graphics.lineBetween(10, 40, 90, 40);
         graphics.lineBetween(10, 50, 90, 50);
         graphics.lineBetween(10, 60, 90, 60);
@@ -280,32 +280,32 @@ class BootScene extends Phaser.Scene {
         graphics.fillStyle(0x000000, 0.15);
         graphics.fillCircle(65, 50, 15);
 
-        // Highlight
-        graphics.fillStyle(0xFFFFDD, 0.4);
+        // Highlight - warm orange highlight
+        graphics.fillStyle(0xFFCC99, 0.4);
         graphics.fillCircle(35, 35, 12);
 
         graphics.generateTexture('saturn', 100, 100);
         graphics.clear();
 
-        // Create enhanced Saturn ring texture - golden rings
-        // Outer ring band
-        graphics.lineStyle(14, 0xFFDD88, 0.95);
+        // Create enhanced Saturn ring texture - bright GOLDEN rings
+        // Outer ring band - golden
+        graphics.lineStyle(14, 0xFFD700, 0.95);
         graphics.strokeEllipse(60, 30, 90, 25);
 
-        // Middle ring band
-        graphics.lineStyle(10, 0xFFCC55, 0.9);
+        // Middle ring band - golden
+        graphics.lineStyle(10, 0xFFD700, 0.9);
         graphics.strokeEllipse(60, 30, 90, 25);
 
-        // Inner ring band
-        graphics.lineStyle(6, 0xFFBB44, 0.85);
+        // Inner ring band - golden
+        graphics.lineStyle(6, 0xFFC700, 0.85);
         graphics.strokeEllipse(60, 30, 90, 25);
 
-        // Ring highlights
-        graphics.lineStyle(3, 0xFFFFAA, 1);
+        // Ring highlights - bright gold
+        graphics.lineStyle(3, 0xFFFF99, 1);
         graphics.strokeEllipse(60, 30, 90, 25);
 
-        // Ring shadows (Cassini division)
-        graphics.lineStyle(2, 0xCC8822, 0.6);
+        // Ring shadows (Cassini division) - darker gold
+        graphics.lineStyle(2, 0xCCA500, 0.6);
         graphics.strokeEllipse(60, 30, 75, 20);
 
         graphics.generateTexture('saturn-ring', 120, 60);
@@ -524,6 +524,7 @@ class GameScene extends Phaser.Scene {
         this.setupFlippers();
         this.setupPlunger();
         this.setupDrainZone();
+        this.setupCollisions();
         this.setupHUD();
         this.setupInput();
         this.setupParticles();
@@ -598,9 +599,9 @@ class GameScene extends Phaser.Scene {
     setupChakras() {
         this.chakras = [];
 
-        // Position chakras in a vertical alignment (like spine) - clustered much closer together
-        const startY = 200;
-        const spacing = 60; // Reduced from 80 to cluster closer
+        // Position chakras in a vertical alignment (like spine) - centered over flower of life
+        const startY = 380; // Lowered to center over flower of life in background
+        const spacing = 60; // Clustered close together
         const centerX = CONFIG.width / 2;
 
         for (let i = 0; i < CONFIG.chakraCount; i++) {
@@ -761,7 +762,21 @@ class GameScene extends Phaser.Scene {
         this.grimReaper.setDepth(200);
         this.grimReaper.setVisible(false);
     }
-    
+
+    setupCollisions() {
+        // Add colliders between ball and walls to keep ball within game board
+        this.walls.forEach(wall => {
+            this.physics.add.collider(this.ball, wall, (ball, wall) => {
+                // Add subtle visual feedback when ball hits wall
+                this.cameras.main.shake(40, 0.002);
+            });
+        });
+
+        // Add colliders for flippers
+        this.physics.add.collider(this.ball, this.leftFlipper);
+        this.physics.add.collider(this.ball, this.rightFlipper);
+    }
+
     setupHUD() {
         // Create styled header dashboard container
         const dashboardBg = this.add.graphics();
@@ -866,6 +881,7 @@ class GameScene extends Phaser.Scene {
     }
     
     setupInput() {
+        // Set up keyboard listeners
         this.input.keyboard.on('keydown-LEFT', () => this.activateLeftFlipper());
         this.input.keyboard.on('keyup-LEFT', () => this.deactivateLeftFlipper());
         this.input.keyboard.on('keydown-RIGHT', () => this.activateRightFlipper());
@@ -873,6 +889,13 @@ class GameScene extends Phaser.Scene {
         this.input.keyboard.on('keydown-SPACE', () => this.handleLaunchPress());
         this.input.keyboard.on('keyup-SPACE', () => this.handleLaunchRelease());
         this.input.keyboard.on('keydown-ESC', () => this.handlePause());
+
+        // Create keyboard object for direct key checking (more reliable for launch)
+        this.keys = {
+            space: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+            left: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
+            right: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT)
+        };
     }
     
     setupParticles() {
@@ -916,6 +939,7 @@ class GameScene extends Phaser.Scene {
     }
     
     updateInput() {
+        // Handle mobile input
         if (window.gameInputManager) {
             if (window.gameInputManager.state.leftFlipper) {
                 this.activateLeftFlipper();
@@ -950,6 +974,28 @@ class GameScene extends Phaser.Scene {
                 this.handlePause();
                 window.gameInputManager.state.pause = false;
             }
+        }
+
+        // Desktop keyboard backup - direct key checking for more reliability
+        if (this.keys && this.keys.space) {
+            // Track previous space key state for edge detection
+            if (!this.previousSpaceDown) {
+                this.previousSpaceDown = false;
+            }
+
+            const spaceCurrentlyDown = this.keys.space.isDown;
+
+            // Space key just pressed (edge detection)
+            if (spaceCurrentlyDown && !this.previousSpaceDown) {
+                this.handleLaunchPress();
+            }
+
+            // Space key just released (edge detection)
+            if (!spaceCurrentlyDown && this.previousSpaceDown) {
+                this.handleLaunchRelease();
+            }
+
+            this.previousSpaceDown = spaceCurrentlyDown;
         }
     }
 
@@ -993,26 +1039,26 @@ class GameScene extends Phaser.Scene {
             this.leftFlipperActive = true;
             this.tweens.add({
                 targets: this.leftFlipper,
-                angle: -40, // Increased angle for more aggressive flipping
-                duration: 25, // Faster response (was 40ms)
+                angle: -45, // More aggressive angle for better hitting
+                duration: 20, // Even faster response
                 ease: 'Power4' // More aggressive easing
             });
         }
 
-        // Enhanced ball collision with better physics - cooldown prevents multiple rapid hits
+        // Enhanced ball collision with better physics - more responsive and powerful
         if (this.physics.overlap(this.ball, this.leftFlipper) && this.ball.body && !this.leftFlipperCooldown) {
             this.leftFlipperCooldown = true;
 
             const ballSpeed = Math.sqrt(
                 this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
             );
-            const flipperPower = Math.max(850, ballSpeed * 1.5); // Increased power significantly
+            const flipperPower = Math.max(1000, ballSpeed * 1.7); // Increased base power and multiplier
 
             // Calculate angle based on where ball hits flipper
             const hitPosition = (this.ball.x - this.leftFlipper.x) / 40;
-            const angleAdjust = hitPosition * 20; // More angle variation
+            const angleAdjust = hitPosition * 25; // More angle variation for better control
 
-            const launchAngle = -60 - angleAdjust;
+            const launchAngle = -65 - angleAdjust; // Steeper angle for better upward momentum
             const radians = (launchAngle * Math.PI) / 180;
 
             this.ball.body.setVelocity(
@@ -1020,11 +1066,11 @@ class GameScene extends Phaser.Scene {
                 Math.sin(radians) * flipperPower
             );
 
-            // Visual feedback
-            this.cameras.main.shake(80, 0.004); // Stronger shake
+            // Visual feedback - more intense
+            this.cameras.main.shake(100, 0.005);
 
-            // Reset cooldown after brief delay
-            this.time.delayedCall(100, () => { // Reduced cooldown for better responsiveness
+            // Shorter cooldown for more responsive feel
+            this.time.delayedCall(80, () => {
                 this.leftFlipperCooldown = false;
             });
         }
@@ -1035,8 +1081,8 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({
             targets: this.leftFlipper,
             angle: 0,
-            duration: 80, // Faster return for better control
-            ease: 'Power3'
+            duration: 60, // Even faster return for snappier feel
+            ease: 'Power2'
         });
     }
 
@@ -1045,26 +1091,26 @@ class GameScene extends Phaser.Scene {
             this.rightFlipperActive = true;
             this.tweens.add({
                 targets: this.rightFlipper,
-                angle: 40, // Increased angle for more aggressive flipping
-                duration: 25, // Faster response (was 40ms)
+                angle: 45, // More aggressive angle for better hitting
+                duration: 20, // Even faster response
                 ease: 'Power4' // More aggressive easing
             });
         }
 
-        // Enhanced ball collision with better physics - cooldown prevents multiple rapid hits
+        // Enhanced ball collision with better physics - more responsive and powerful
         if (this.physics.overlap(this.ball, this.rightFlipper) && this.ball.body && !this.rightFlipperCooldown) {
             this.rightFlipperCooldown = true;
 
             const ballSpeed = Math.sqrt(
                 this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
             );
-            const flipperPower = Math.max(850, ballSpeed * 1.5); // Increased power significantly
+            const flipperPower = Math.max(1000, ballSpeed * 1.7); // Increased base power and multiplier
 
             // Calculate angle based on where ball hits flipper
             const hitPosition = (this.ball.x - this.rightFlipper.x) / 40;
-            const angleAdjust = hitPosition * 20; // More angle variation
+            const angleAdjust = hitPosition * 25; // More angle variation for better control
 
-            const launchAngle = -120 - angleAdjust;
+            const launchAngle = -115 - angleAdjust; // Steeper angle for better upward momentum
             const radians = (launchAngle * Math.PI) / 180;
 
             this.ball.body.setVelocity(
@@ -1072,11 +1118,11 @@ class GameScene extends Phaser.Scene {
                 Math.sin(radians) * flipperPower
             );
 
-            // Visual feedback
-            this.cameras.main.shake(80, 0.004); // Stronger shake
+            // Visual feedback - more intense
+            this.cameras.main.shake(100, 0.005);
 
-            // Reset cooldown after brief delay
-            this.time.delayedCall(100, () => { // Reduced cooldown for better responsiveness
+            // Shorter cooldown for more responsive feel
+            this.time.delayedCall(80, () => {
                 this.rightFlipperCooldown = false;
             });
         }
@@ -1087,8 +1133,8 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({
             targets: this.rightFlipper,
             angle: 0,
-            duration: 80, // Faster return for better control
-            ease: 'Power3'
+            duration: 60, // Even faster return for snappier feel
+            ease: 'Power2'
         });
     }
 
