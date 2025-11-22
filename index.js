@@ -1751,6 +1751,7 @@ class GameScene extends Phaser.Scene {
             alpha: { start: 1, end: 0 },
             lifespan: 600,
             blendMode: 'ADD',
+            frequency: -1,
             quantity: 15,
             tint: obstacle.tint || 0xffffff
         });
@@ -1785,6 +1786,7 @@ class GameScene extends Phaser.Scene {
             alpha: { start: 1, end: 0 },
             lifespan: 700,
             blendMode: 'ADD',
+            frequency: -1,
             quantity: 20,
             tint: CONFIG.colors.chakra[index]
         });
@@ -1885,6 +1887,7 @@ class GameScene extends Phaser.Scene {
             alpha: { start: 1, end: 0 },
             lifespan: 900,
             blendMode: 'ADD',
+            frequency: -1,
             quantity: 25,
             tint: CONFIG.colors.saturnRing
         });
