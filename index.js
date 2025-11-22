@@ -433,18 +433,23 @@ class MenuScene extends Phaser.Scene {
         }).setOrigin(0.5);
         
         const isMobile = window.gameInputManager && window.gameInputManager.isMobile;
-        const startText = isMobile ? 'HOLD & RELEASE ⚡ TO BEGIN' : 'HOLD & RELEASE SPACE TO BEGIN';
-        
+        const startText = isMobile ? 'TAP ⚡ TO START' : 'PRESS SPACE TO START';
+
         const startInstructions = this.add.text(CONFIG.width / 2, CONFIG.height * 0.65, startText, {
-            fontSize: '30px', fontFamily: 'Arial', color: '#00ff99',
+            fontSize: '36px', fontFamily: 'Arial', color: '#00ff99',
             stroke: '#000000', strokeThickness: 4
         }).setOrigin(0.5);
-        
+
         this.tweens.add({
             targets: startInstructions, alpha: 0.4, duration: 900, yoyo: true, repeat: -1
         });
-        
+
         this.input.keyboard.on('keydown-SPACE', () => this.startGame());
+
+        // Mobile touch support - tap anywhere to start
+        if (isMobile) {
+            this.input.once('pointerdown', () => this.startGame());
+        }
 
         this.launchTimer = this.time.addEvent({
             delay: 100,
@@ -505,7 +510,11 @@ class GameScene extends Phaser.Scene {
         };
         
         this.collisionCooldowns = new Map();
-        
+        this.leftFlipperActive = false;
+        this.rightFlipperActive = false;
+        this.leftFlipperCooldown = false;
+        this.rightFlipperCooldown = false;
+
         this.setupBackground();
         this.setupPhysics();
         this.setupTable();
@@ -588,14 +597,14 @@ class GameScene extends Phaser.Scene {
     
     setupChakras() {
         this.chakras = [];
-        
-        // Position chakras in a vertical alignment (like spine)
-        const startY = 180;
-        const spacing = 95;
+
+        // Position chakras in a vertical alignment (like spine) - clustered closer together
+        const startY = 200;
+        const spacing = 80;
         const centerX = CONFIG.width / 2;
-        
+
         for (let i = 0; i < CONFIG.chakraCount; i++) {
-            const chakra = this.add.sprite(centerX + (i % 2 === 0 ? -60 : 60), startY + (i * spacing), `chakra${i}`);
+            const chakra = this.add.sprite(centerX + (i % 2 === 0 ? -35 : 35), startY + (i * spacing), `chakra${i}`);
             chakra.setScale(0.8);
             chakra.setDepth(50);
             this.physics.add.existing(chakra, true);
@@ -658,9 +667,9 @@ class GameScene extends Phaser.Scene {
             ease: 'Sine.easeInOut'
         });
         
-        // Black hexagon vortex (hidden initially)
-        this.saturnHexagon = this.add.sprite(CONFIG.width / 2, 50, 'hexagon');
-        this.saturnHexagon.setScale(0.5);
+        // Black hexagon vortex (hidden initially) - positioned at Saturn's north pole
+        this.saturnHexagon = this.add.sprite(CONFIG.width / 2, 60, 'hexagon');
+        this.saturnHexagon.setScale(0.6);
         this.saturnHexagon.setDepth(51);
         this.saturnHexagon.setVisible(false);
         this.physics.add.existing(this.saturnHexagon, true);
@@ -754,27 +763,106 @@ class GameScene extends Phaser.Scene {
     }
     
     setupHUD() {
+        // Create styled header dashboard container
+        const dashboardBg = this.add.graphics();
+        dashboardBg.fillStyle(0x1a0033, 0.85);
+        dashboardBg.fillRoundedRect(0, 0, CONFIG.width, 85, 0);
+        dashboardBg.lineStyle(3, 0x9400D3, 1);
+        dashboardBg.strokeRoundedRect(0, 0, CONFIG.width, 85, 0);
+        dashboardBg.lineStyle(2, 0x00ffff, 0.6);
+        dashboardBg.strokeRoundedRect(2, 2, CONFIG.width - 4, 81, 0);
+        dashboardBg.setDepth(999);
+
+        // Decorative corner accents
+        const accentGraphics = this.add.graphics();
+        accentGraphics.lineStyle(2, 0xff00ff, 0.8);
+        // Top left corner
+        accentGraphics.lineBetween(10, 10, 30, 10);
+        accentGraphics.lineBetween(10, 10, 10, 30);
+        // Top right corner
+        accentGraphics.lineBetween(CONFIG.width - 30, 10, CONFIG.width - 10, 10);
+        accentGraphics.lineBetween(CONFIG.width - 10, 10, CONFIG.width - 10, 30);
+        // Bottom left corner
+        accentGraphics.lineBetween(10, 75, 30, 75);
+        accentGraphics.lineBetween(10, 55, 10, 75);
+        // Bottom right corner
+        accentGraphics.lineBetween(CONFIG.width - 30, 75, CONFIG.width - 10, 75);
+        accentGraphics.lineBetween(CONFIG.width - 10, 55, CONFIG.width - 10, 75);
+        accentGraphics.setDepth(1000);
+
         this.hud = {
-            scoreText: this.add.text(20, 20, 'SCORE: 0', {
-                fontSize: '22px', fontFamily: 'Arial', color: '#00ffff',
-                stroke: '#000000', strokeThickness: 3
-            }).setDepth(1000),
-            
-            highScoreText: this.add.text(20, 50, `HIGH: ${this.gameState.highScore}`, {
-                fontSize: '18px', fontFamily: 'Arial', color: '#ffff00',
-                stroke: '#000000', strokeThickness: 3
-            }).setDepth(1000),
-            
-            livesText: this.add.text(CONFIG.width - 20, 20, `❤️ ${this.gameState.lives}`, {
-                fontSize: '22px', fontFamily: 'Arial', color: '#ff0099',
-                stroke: '#000000', strokeThickness: 3
-            }).setOrigin(1, 0).setDepth(1000),
-            
-            comboText: this.add.text(CONFIG.width / 2, 20, '', {
-                fontSize: '24px', fontFamily: 'Arial', color: '#ffffff',
-                stroke: '#ff00ff', strokeThickness: 4
-            }).setOrigin(0.5, 0).setDepth(1000).setAlpha(0)
+            scoreLabel: this.add.text(20, 15, 'SCORE', {
+                fontSize: '16px',
+                fontFamily: 'Impact, Arial Black, Arial',
+                color: '#9400D3',
+                stroke: '#000000',
+                strokeThickness: 2,
+                letterSpacing: 2
+            }).setDepth(1001),
+
+            scoreText: this.add.text(20, 35, '0', {
+                fontSize: '28px',
+                fontFamily: 'Impact, Arial Black, Arial',
+                color: '#00ffff',
+                stroke: '#000000',
+                strokeThickness: 4,
+                letterSpacing: 1
+            }).setDepth(1001),
+
+            highScoreLabel: this.add.text(CONFIG.width / 2, 15, 'HIGH SCORE', {
+                fontSize: '16px',
+                fontFamily: 'Impact, Arial Black, Arial',
+                color: '#9400D3',
+                stroke: '#000000',
+                strokeThickness: 2,
+                letterSpacing: 2
+            }).setOrigin(0.5, 0).setDepth(1001),
+
+            highScoreText: this.add.text(CONFIG.width / 2, 35, `${this.gameState.highScore}`, {
+                fontSize: '28px',
+                fontFamily: 'Impact, Arial Black, Arial',
+                color: '#ffff00',
+                stroke: '#000000',
+                strokeThickness: 4,
+                letterSpacing: 1
+            }).setOrigin(0.5, 0).setDepth(1001),
+
+            livesLabel: this.add.text(CONFIG.width - 20, 15, 'LIVES', {
+                fontSize: '16px',
+                fontFamily: 'Impact, Arial Black, Arial',
+                color: '#9400D3',
+                stroke: '#000000',
+                strokeThickness: 2,
+                letterSpacing: 2
+            }).setOrigin(1, 0).setDepth(1001),
+
+            livesText: this.add.text(CONFIG.width - 20, 35, `❤️ ${this.gameState.lives}`, {
+                fontSize: '28px',
+                fontFamily: 'Impact, Arial Black, Arial',
+                color: '#ff0099',
+                stroke: '#000000',
+                strokeThickness: 4
+            }).setOrigin(1, 0).setDepth(1001),
+
+            comboText: this.add.text(CONFIG.width / 2, 95, '', {
+                fontSize: '24px',
+                fontFamily: 'Impact, Arial Black, Arial',
+                color: '#ffffff',
+                stroke: '#ff00ff',
+                strokeThickness: 4,
+                letterSpacing: 2
+            }).setOrigin(0.5, 0).setDepth(1001).setAlpha(0)
         };
+
+        // Add pulsing glow effect to dashboard
+        this.tweens.add({
+            targets: accentGraphics,
+            alpha: 0.4,
+            duration: 1500,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
     }
     
     setupInput() {
@@ -901,47 +989,105 @@ class GameScene extends Phaser.Scene {
     }
     
     activateLeftFlipper() {
-        this.tweens.add({
-            targets: this.leftFlipper,
-            angle: -30,
-            duration: 50,
-            ease: 'Power2'
-        });
-        this.physics.overlap(this.ball, this.leftFlipper, () => {
-            if (this.ball.body) {
-                this.ball.body.setVelocity(-400, -600);
-            }
-        });
+        if (!this.leftFlipperActive) {
+            this.leftFlipperActive = true;
+            this.tweens.add({
+                targets: this.leftFlipper,
+                angle: -35,
+                duration: 40,
+                ease: 'Power3'
+            });
+        }
+
+        // Enhanced ball collision with better physics - cooldown prevents multiple rapid hits
+        if (this.physics.overlap(this.ball, this.leftFlipper) && this.ball.body && !this.leftFlipperCooldown) {
+            this.leftFlipperCooldown = true;
+
+            const ballSpeed = Math.sqrt(
+                this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
+            );
+            const flipperPower = Math.max(700, ballSpeed * 1.3);
+
+            // Calculate angle based on where ball hits flipper
+            const hitPosition = (this.ball.x - this.leftFlipper.x) / 40;
+            const angleAdjust = hitPosition * 15;
+
+            const launchAngle = -60 - angleAdjust;
+            const radians = (launchAngle * Math.PI) / 180;
+
+            this.ball.body.setVelocity(
+                Math.cos(radians) * flipperPower,
+                Math.sin(radians) * flipperPower
+            );
+
+            // Visual feedback
+            this.cameras.main.shake(60, 0.003);
+
+            // Reset cooldown after brief delay
+            this.time.delayedCall(150, () => {
+                this.leftFlipperCooldown = false;
+            });
+        }
     }
-    
+
     deactivateLeftFlipper() {
+        this.leftFlipperActive = false;
         this.tweens.add({
             targets: this.leftFlipper,
             angle: 0,
-            duration: 100,
+            duration: 120,
             ease: 'Power2'
         });
     }
-    
+
     activateRightFlipper() {
-        this.tweens.add({
-            targets: this.rightFlipper,
-            angle: 30,
-            duration: 50,
-            ease: 'Power2'
-        });
-        this.physics.overlap(this.ball, this.rightFlipper, () => {
-            if (this.ball.body) {
-                this.ball.body.setVelocity(400, -600);
-            }
-        });
+        if (!this.rightFlipperActive) {
+            this.rightFlipperActive = true;
+            this.tweens.add({
+                targets: this.rightFlipper,
+                angle: 35,
+                duration: 40,
+                ease: 'Power3'
+            });
+        }
+
+        // Enhanced ball collision with better physics - cooldown prevents multiple rapid hits
+        if (this.physics.overlap(this.ball, this.rightFlipper) && this.ball.body && !this.rightFlipperCooldown) {
+            this.rightFlipperCooldown = true;
+
+            const ballSpeed = Math.sqrt(
+                this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
+            );
+            const flipperPower = Math.max(700, ballSpeed * 1.3);
+
+            // Calculate angle based on where ball hits flipper
+            const hitPosition = (this.ball.x - this.rightFlipper.x) / 40;
+            const angleAdjust = hitPosition * 15;
+
+            const launchAngle = -120 - angleAdjust;
+            const radians = (launchAngle * Math.PI) / 180;
+
+            this.ball.body.setVelocity(
+                Math.cos(radians) * flipperPower,
+                Math.sin(radians) * flipperPower
+            );
+
+            // Visual feedback
+            this.cameras.main.shake(60, 0.003);
+
+            // Reset cooldown after brief delay
+            this.time.delayedCall(150, () => {
+                this.rightFlipperCooldown = false;
+            });
+        }
     }
-    
+
     deactivateRightFlipper() {
+        this.rightFlipperActive = false;
         this.tweens.add({
             targets: this.rightFlipper,
             angle: 0,
-            duration: 100,
+            duration: 120,
             ease: 'Power2'
         });
     }
@@ -952,12 +1098,24 @@ class GameScene extends Phaser.Scene {
             this.gameState.plungerCharging = true;
             this.gameState.plungerChargeStart = Date.now();
             this.gameState.plungerPower = CONFIG.plungerMinPower;
+
+            // Auto-launch with minimum power if held less than 100ms (quick tap)
+            this.quickTapTimer = this.time.delayedCall(100, () => {
+                this.quickTapTimer = null;
+            });
         }
     }
 
     handleLaunchRelease() {
         // Launch the ball if plunger was charging
         if (this.gameState.plungerCharging) {
+            // Quick tap detection - launch with medium power for quick press
+            if (this.quickTapTimer) {
+                this.quickTapTimer.remove();
+                this.quickTapTimer = null;
+                this.gameState.plungerPower = CONFIG.plungerMinPower + (CONFIG.plungerMaxPower - CONFIG.plungerMinPower) * 0.6;
+            }
+
             this.launchBall();
             this.gameState.plungerCharging = false;
 
@@ -1448,10 +1606,10 @@ class GameScene extends Phaser.Scene {
     }
     
     updateHUD() {
-        this.hud.scoreText.setText(`SCORE: ${this.gameState.score}`);
-        this.hud.highScoreText.setText(`HIGH: ${this.gameState.highScore}`);
+        this.hud.scoreText.setText(`${this.gameState.score}`);
+        this.hud.highScoreText.setText(`${this.gameState.highScore}`);
         this.hud.livesText.setText(`❤️ ${this.gameState.lives}`);
-        
+
         if (this.gameState.comboMultiplier > 1) {
             this.hud.comboText.setText(`${this.gameState.comboMultiplier.toFixed(1)}x COMBO`);
             this.hud.comboText.setAlpha(1);
@@ -1575,16 +1733,21 @@ class GameOverScene extends Phaser.Scene {
         }
         
         const isMobile = window.gameInputManager && window.gameInputManager.isMobile;
-        const playAgainText = isMobile ? 'HOLD & RELEASE ⚡ TO PLAY AGAIN' : 'HOLD & RELEASE SPACE TO PLAY AGAIN';
-        
+        const playAgainText = isMobile ? 'TAP ⚡ TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
+
         const playAgain = this.add.text(CONFIG.width / 2, CONFIG.height - 120, playAgainText, {
-            fontSize: '26px', fontFamily: 'Arial', color: '#00ffff',
+            fontSize: '28px', fontFamily: 'Arial', color: '#00ffff',
             stroke: '#000000', strokeThickness: 4
         }).setOrigin(0.5);
-        
+
         this.tweens.add({ targets: playAgain, alpha: 0.35, duration: 900, yoyo: true, repeat: -1 });
-        
+
         this.input.keyboard.on('keydown-SPACE', () => this.restartGame());
+
+        // Mobile touch support - tap anywhere to restart
+        if (isMobile) {
+            this.input.once('pointerdown', () => this.restartGame());
+        }
 
         this.launchTimer = this.time.addEvent({
             delay: 100,
