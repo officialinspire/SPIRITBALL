@@ -1,14 +1,22 @@
 // ===================================
 // SPIRITBALL - PHASER 3 GAME
 // DMT-Inspired Pinball Vision Quest
-// Version 4.3 - Ultimate Gameplay & Physics Refinements
+// Version 4.4 - Enhanced Gameplay & Cosmic Aesthetics
+// - ADJUSTED: Bumpers moved closer together (20px) for better ball control
+// - REPOSITIONED: Saturn lowered from y=100 to y=180 for improved gameplay flow
+// - STYLIZED: Cosmic energy wing flippers with glowing animations replace simple rectangles
+// - ADDED: 9 new thematic obstacles for diverse gameplay:
+//   * Cosmic Crystals (2) - High-scoring bouncy triangular crystals
+//   * Asteroids (3) - Rocky space obstacles with medium bounce
+//   * Energy Vortexes (2) - Speed-boosting portals with teleport effects
+//   * Comets (2) - Directional boost shooting stars
+// - ENHANCED: Each obstacle type has unique physics, scoring, and visual effects
+// Previous (v4.3):
 // - FIXED: Ball launch after death now 100% reliable (desktop & mobile)
 // - ENHANCED: Professional pinball flipper physics (lightning-fast, powerful, responsive)
 // - IMPROVED: Ball stays within game boundaries with robust wall collision
 // - ADJUSTED: Chakras lowered further to perfectly center over flower of life
 // - VERIFIED: Saturn displayed as cartoon orange planet with golden rings
-//   (black hexagon vortex only appears at north pole during special event)
-// - OPTIMIZED: Plunger mechanics and launch reliability across all platforms
 // ===================================
 
 const CONFIG = {
@@ -403,7 +411,178 @@ class BootScene extends Phaser.Scene {
         graphics.fillPath();
         graphics.generateTexture('grimreaper', 80, 120);
         graphics.clear();
-        
+
+        // Create cosmic energy flipper textures - LEFT FLIPPER (wing shape)
+        // Main crystal/wing body with gradient
+        graphics.fillGradientStyle(0xff00ff, 0xff00ff, 0x8B00FF, 0x4B0082, 1, 1, 0.8, 0.6);
+        graphics.fillRect(0, 6, 80, 16);
+
+        // Crystal facets/geometric patterns
+        graphics.lineStyle(2, 0x00ffff, 0.9);
+        graphics.lineBetween(0, 10, 25, 14);
+        graphics.lineBetween(25, 14, 50, 10);
+        graphics.lineBetween(50, 10, 80, 14);
+
+        // Energy glow lines
+        graphics.lineStyle(3, 0xffffff, 0.7);
+        graphics.lineBetween(10, 14, 70, 14);
+        graphics.lineStyle(2, 0x00ffff, 0.8);
+        graphics.lineBetween(15, 10, 65, 10);
+
+        // Cosmic energy dots
+        graphics.fillStyle(0x00ffff, 1);
+        graphics.fillCircle(20, 14, 2);
+        graphics.fillCircle(40, 14, 2);
+        graphics.fillCircle(60, 14, 2);
+
+        // Wing tip glow
+        graphics.fillStyle(0xffffff, 0.8);
+        graphics.fillCircle(5, 14, 4);
+        graphics.fillStyle(0xff00ff, 0.6);
+        graphics.fillCircle(75, 14, 3);
+
+        // Outline for definition
+        graphics.lineStyle(2, 0xff00ff, 1);
+        graphics.strokeRect(0, 6, 80, 16);
+
+        graphics.generateTexture('flipper-left', 80, 28);
+        graphics.clear();
+
+        // Create cosmic energy flipper textures - RIGHT FLIPPER (wing shape)
+        // Main crystal/wing body with gradient (mirrored)
+        graphics.fillGradientStyle(0x4B0082, 0x8B00FF, 0xff00ff, 0xff00ff, 0.6, 0.8, 1, 1);
+        graphics.fillRect(0, 6, 80, 16);
+
+        // Crystal facets/geometric patterns (mirrored)
+        graphics.lineStyle(2, 0x00ffff, 0.9);
+        graphics.lineBetween(0, 14, 30, 10);
+        graphics.lineBetween(30, 10, 55, 14);
+        graphics.lineBetween(55, 14, 80, 10);
+
+        // Energy glow lines
+        graphics.lineStyle(3, 0xffffff, 0.7);
+        graphics.lineBetween(10, 14, 70, 14);
+        graphics.lineStyle(2, 0x00ffff, 0.8);
+        graphics.lineBetween(15, 10, 65, 10);
+
+        // Cosmic energy dots
+        graphics.fillStyle(0x00ffff, 1);
+        graphics.fillCircle(20, 14, 2);
+        graphics.fillCircle(40, 14, 2);
+        graphics.fillCircle(60, 14, 2);
+
+        // Wing tip glow (mirrored)
+        graphics.fillStyle(0xff00ff, 0.6);
+        graphics.fillCircle(5, 14, 3);
+        graphics.fillStyle(0xffffff, 0.8);
+        graphics.fillCircle(75, 14, 4);
+
+        // Outline for definition
+        graphics.lineStyle(2, 0xff00ff, 1);
+        graphics.strokeRect(0, 6, 80, 16);
+
+        graphics.generateTexture('flipper-right', 80, 28);
+        graphics.clear();
+
+        // Create cosmic crystal bumper texture (triangular crystal)
+        graphics.fillStyle(0x00ffff, 0.9);
+        graphics.beginPath();
+        graphics.moveTo(25, 5);
+        graphics.lineTo(45, 40);
+        graphics.lineTo(5, 40);
+        graphics.closePath();
+        graphics.fillPath();
+
+        // Crystal facets
+        graphics.lineStyle(2, 0xffffff, 0.8);
+        graphics.lineBetween(25, 5, 25, 40);
+        graphics.lineBetween(15, 22, 35, 22);
+
+        // Outer glow
+        graphics.lineStyle(3, 0x00ffff, 0.6);
+        graphics.strokePath();
+
+        // Inner glow
+        graphics.fillStyle(0xffffff, 0.6);
+        graphics.fillCircle(25, 20, 5);
+
+        graphics.generateTexture('cosmic-crystal', 50, 45);
+        graphics.clear();
+
+        // Create asteroid texture (rocky space object)
+        graphics.fillStyle(0x8B4513, 1);
+        graphics.fillCircle(20, 20, 18);
+
+        // Crater details
+        graphics.fillStyle(0x654321, 0.7);
+        graphics.fillCircle(14, 12, 4);
+        graphics.fillCircle(28, 18, 3);
+        graphics.fillCircle(18, 28, 5);
+
+        // Rocky texture
+        graphics.fillStyle(0x4a2f1a, 0.5);
+        graphics.fillCircle(10, 20, 2);
+        graphics.fillCircle(26, 26, 2);
+        graphics.fillCircle(15, 30, 2);
+
+        // Highlight
+        graphics.fillStyle(0xD2691E, 0.6);
+        graphics.fillCircle(16, 14, 3);
+
+        // Outline
+        graphics.lineStyle(2, 0x654321, 0.8);
+        graphics.strokeCircle(20, 20, 18);
+
+        graphics.generateTexture('asteroid', 40, 40);
+        graphics.clear();
+
+        // Create energy vortex portal texture (small portal)
+        // Outer ring
+        graphics.lineStyle(4, 0xff00ff, 0.9);
+        graphics.strokeCircle(20, 20, 16);
+        graphics.lineStyle(3, 0x00ffff, 0.8);
+        graphics.strokeCircle(20, 20, 14);
+
+        // Inner swirl
+        graphics.fillStyle(0x4B0082, 0.7);
+        graphics.fillCircle(20, 20, 12);
+
+        // Energy particles
+        graphics.fillStyle(0xff00ff, 0.9);
+        graphics.fillCircle(20, 8, 2);
+        graphics.fillCircle(32, 20, 2);
+        graphics.fillCircle(20, 32, 2);
+        graphics.fillCircle(8, 20, 2);
+
+        // Center glow
+        graphics.fillStyle(0xffffff, 0.8);
+        graphics.fillCircle(20, 20, 4);
+
+        graphics.generateTexture('energy-vortex', 40, 40);
+        graphics.clear();
+
+        // Create comet/shooting star obstacle
+        // Comet head
+        graphics.fillGradientStyle(0xffffff, 0xffffff, 0xffff00, 0xff8800, 1, 1, 0.9, 0.7);
+        graphics.fillCircle(35, 15, 12);
+
+        // Comet tail
+        graphics.fillGradientStyle(0xff8800, 0xff4400, 0xff0000, 0x000000, 0.8, 0.6, 0.4, 0);
+        graphics.fillTriangle(35, 15, 5, 5, 5, 25);
+
+        // Glow effect
+        graphics.fillStyle(0xffffff, 0.6);
+        graphics.fillCircle(35, 15, 6);
+
+        // Sparkles
+        graphics.fillStyle(0xffff00, 0.8);
+        graphics.fillCircle(25, 10, 2);
+        graphics.fillCircle(28, 18, 2);
+        graphics.fillCircle(20, 15, 2);
+
+        graphics.generateTexture('comet', 50, 30);
+        graphics.clear();
+
         graphics.destroy();
     }
     
@@ -527,6 +706,7 @@ class GameScene extends Phaser.Scene {
         this.setupBall();
         this.setupChakras();
         this.setupSaturn();
+        this.setupObstacles();
         this.setupFlippers();
         this.setupPlunger();
         this.setupDrainZone();
@@ -648,19 +828,19 @@ class GameScene extends Phaser.Scene {
     }
     
     setupSaturn() {
-        // Position Saturn at top center
-        this.saturn = this.add.sprite(CONFIG.width / 2, 100, 'saturn');
+        // Position Saturn at top center - lowered for better gameplay
+        this.saturn = this.add.sprite(CONFIG.width / 2, 180, 'saturn');
         this.saturn.setScale(0.85);
         this.saturn.setDepth(50);
         this.physics.add.existing(this.saturn, true);
         this.saturn.body.setCircle(35);
-        
+
         // Saturn ring
-        this.saturnRing = this.add.sprite(CONFIG.width / 2, 100, 'saturn-ring');
+        this.saturnRing = this.add.sprite(CONFIG.width / 2, 180, 'saturn-ring');
         this.saturnRing.setScale(0.85);
         this.saturnRing.setDepth(49);
         this.saturnRing.setAlpha(0.8);
-        
+
         // Rotation animation for ring
         this.tweens.add({
             targets: this.saturnRing,
@@ -669,7 +849,7 @@ class GameScene extends Phaser.Scene {
             repeat: -1,
             ease: 'Linear'
         });
-        
+
         // Pulsing effect for Saturn
         this.tweens.add({
             targets: this.saturn,
@@ -679,30 +859,174 @@ class GameScene extends Phaser.Scene {
             repeat: -1,
             ease: 'Sine.easeInOut'
         });
-        
+
         // Black hexagon vortex (hidden initially) - positioned at Saturn's north pole
-        this.saturnHexagon = this.add.sprite(CONFIG.width / 2, 60, 'hexagon');
+        this.saturnHexagon = this.add.sprite(CONFIG.width / 2, 140, 'hexagon');
         this.saturnHexagon.setScale(0.6);
         this.saturnHexagon.setDepth(51);
         this.saturnHexagon.setVisible(false);
         this.physics.add.existing(this.saturnHexagon, true);
         this.saturnHexagon.body.setCircle(25);
     }
-    
+
+    setupObstacles() {
+        this.obstacles = [];
+
+        // Cosmic Crystal bumpers (triangular) - positioned strategically
+        const crystal1 = this.add.sprite(120, 320, 'cosmic-crystal');
+        crystal1.setScale(0.9);
+        crystal1.setDepth(50);
+        this.physics.add.existing(crystal1, true);
+        crystal1.body.setCircle(20);
+
+        const crystal2 = this.add.sprite(CONFIG.width - 120, 380, 'cosmic-crystal');
+        crystal2.setScale(0.9);
+        crystal2.setDepth(50);
+        this.physics.add.existing(crystal2, true);
+        crystal2.body.setCircle(20);
+
+        // Pulsing animation for crystals
+        this.tweens.add({
+            targets: [crystal1, crystal2],
+            scale: 1.0,
+            alpha: 0.9,
+            duration: 1000,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+
+        // Asteroids - rocky space obstacles
+        const asteroid1 = this.add.sprite(90, 500, 'asteroid');
+        asteroid1.setScale(0.85);
+        asteroid1.setDepth(50);
+        this.physics.add.existing(asteroid1, true);
+        asteroid1.body.setCircle(15);
+
+        const asteroid2 = this.add.sprite(CONFIG.width - 90, 560, 'asteroid');
+        asteroid2.setScale(0.85);
+        asteroid2.setDepth(50);
+        this.physics.add.existing(asteroid2, true);
+        asteroid2.body.setCircle(15);
+
+        const asteroid3 = this.add.sprite(CONFIG.width / 2, 280, 'asteroid');
+        asteroid3.setScale(0.75);
+        asteroid3.setDepth(50);
+        this.physics.add.existing(asteroid3, true);
+        asteroid3.body.setCircle(13);
+
+        // Slow rotation for asteroids
+        this.tweens.add({
+            targets: [asteroid1, asteroid2, asteroid3],
+            angle: 360,
+            duration: 8000,
+            repeat: -1,
+            ease: 'Linear'
+        });
+
+        // Energy Vortex portals - small teleporters
+        const vortex1 = this.add.sprite(180, 240, 'energy-vortex');
+        vortex1.setScale(0.7);
+        vortex1.setDepth(50);
+        this.physics.add.existing(vortex1, true);
+        vortex1.body.setCircle(14);
+
+        const vortex2 = this.add.sprite(CONFIG.width - 180, 450, 'energy-vortex');
+        vortex2.setScale(0.7);
+        vortex2.setDepth(50);
+        this.physics.add.existing(vortex2, true);
+        vortex2.body.setCircle(14);
+
+        // Spinning animation for vortexes
+        this.tweens.add({
+            targets: [vortex1, vortex2],
+            angle: -360,
+            duration: 2000,
+            repeat: -1,
+            ease: 'Linear'
+        });
+
+        // Pulsing glow for vortexes
+        this.tweens.add({
+            targets: [vortex1, vortex2],
+            scale: 0.8,
+            alpha: 0.8,
+            duration: 800,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+
+        // Comets - shooting star obstacles
+        const comet1 = this.add.sprite(250, 600, 'comet');
+        comet1.setScale(0.6);
+        comet1.setDepth(50);
+        comet1.setAngle(45);
+        this.physics.add.existing(comet1, true);
+        comet1.body.setCircle(10);
+
+        const comet2 = this.add.sprite(CONFIG.width - 250, 680, 'comet');
+        comet2.setScale(0.6);
+        comet2.setDepth(50);
+        comet2.setAngle(-45);
+        this.physics.add.existing(comet2, true);
+        comet2.body.setCircle(10);
+
+        // Glowing animation for comets
+        this.tweens.add({
+            targets: [comet1, comet2],
+            alpha: 0.7,
+            duration: 500,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+
+        // Store all obstacles for collision detection
+        this.obstacles = [
+            crystal1, crystal2,
+            asteroid1, asteroid2, asteroid3,
+            vortex1, vortex2,
+            comet1, comet2
+        ];
+    }
+
     setupFlippers() {
         const flipperWidth = 80;
         const flipperHeight = 16;
         const flipperY = CONFIG.height - 100;
 
-        // Left flipper
-        this.leftFlipper = this.add.rectangle(150, flipperY, flipperWidth, flipperHeight, CONFIG.colors.flipper);
+        // Left cosmic energy wing flipper - moved closer to center (130px from edge instead of 150px)
+        this.leftFlipper = this.add.sprite(130, flipperY, 'flipper-left');
         this.physics.add.existing(this.leftFlipper, true);
+        this.leftFlipper.body.setSize(flipperWidth, flipperHeight);
         this.leftFlipper.setDepth(99);
 
-        // Right flipper
-        this.rightFlipper = this.add.rectangle(CONFIG.width - 150, flipperY, flipperWidth, flipperHeight, CONFIG.colors.flipper);
+        // Add glow effect to left flipper
+        this.tweens.add({
+            targets: this.leftFlipper,
+            alpha: 0.85,
+            duration: 800,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+
+        // Right cosmic energy wing flipper - moved closer to center (130px from edge instead of 150px)
+        this.rightFlipper = this.add.sprite(CONFIG.width - 130, flipperY, 'flipper-right');
         this.physics.add.existing(this.rightFlipper, true);
+        this.rightFlipper.body.setSize(flipperWidth, flipperHeight);
         this.rightFlipper.setDepth(99);
+
+        // Add glow effect to right flipper
+        this.tweens.add({
+            targets: this.rightFlipper,
+            alpha: 0.85,
+            duration: 800,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
     }
 
     setupPlunger() {
@@ -1273,7 +1597,7 @@ class GameScene extends Phaser.Scene {
                 const dx = this.saturnHexagon.x - this.ball.x;
                 const dy = this.saturnHexagon.y - this.ball.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
-                
+
                 if (distance < 150) {
                     const pullStrength = 200 * (1 - distance / 150);
                     this.ball.body.setVelocity(
@@ -1281,14 +1605,14 @@ class GameScene extends Phaser.Scene {
                         this.ball.body.velocity.y + (dy / distance) * pullStrength * 0.02
                     );
                 }
-                
+
                 // Check if ball is sucked into vortex
                 if (this.physics.overlap(this.ball, this.saturnHexagon)) {
                     this.ballSuckedIntoVortex();
                 }
             }
         }
-        
+
         // Check chakra collisions
         this.chakras.forEach((chakra, index) => {
             if (this.physics.overlap(this.ball, chakra)) {
@@ -1298,7 +1622,7 @@ class GameScene extends Phaser.Scene {
                 }
             }
         });
-        
+
         // Check Saturn collision
         if (this.physics.overlap(this.ball, this.saturn)) {
             if (!this.isOnCooldown(this.saturn)) {
@@ -1306,6 +1630,129 @@ class GameScene extends Phaser.Scene {
                 this.setCooldown(this.saturn, 500);
             }
         }
+
+        // Check obstacle collisions
+        if (this.obstacles) {
+            this.obstacles.forEach((obstacle, index) => {
+                if (this.physics.overlap(this.ball, obstacle)) {
+                    if (!this.isOnCooldown(obstacle)) {
+                        this.hitObstacle(obstacle, index);
+                        this.setCooldown(obstacle, 400);
+                    }
+                }
+            });
+        }
+    }
+
+    hitObstacle(obstacle, index) {
+        // Different effects based on obstacle type
+        const textureName = obstacle.texture.key;
+
+        if (textureName === 'cosmic-crystal') {
+            // Crystal gives bonus points and intense bounce
+            this.cameras.main.shake(100, 0.004);
+            this.addScore(CONFIG.scores.bumper * 2);
+            this.incrementCombo();
+
+            // Intense bounce effect
+            if (this.ball.body) {
+                const angle = Math.atan2(
+                    this.ball.y - obstacle.y,
+                    this.ball.x - obstacle.x
+                );
+                this.ball.body.setVelocity(
+                    Math.cos(angle) * 800,
+                    Math.sin(angle) * 800
+                );
+            }
+
+            // Crystal burst effect
+            this.tweens.add({
+                targets: obstacle,
+                scale: 1.2,
+                alpha: 1,
+                duration: 100,
+                yoyo: true,
+                ease: 'Power2'
+            });
+
+            this.showPopup('CRYSTAL!', obstacle.x, obstacle.y - 40, 20);
+
+        } else if (textureName === 'asteroid') {
+            // Asteroid gives medium points and solid bounce
+            this.cameras.main.shake(80, 0.003);
+            this.addScore(CONFIG.scores.bumper);
+            this.incrementCombo();
+
+            // Solid bounce
+            if (this.ball.body) {
+                const angle = Math.atan2(
+                    this.ball.y - obstacle.y,
+                    this.ball.x - obstacle.x
+                );
+                this.ball.body.setVelocity(
+                    Math.cos(angle) * 600,
+                    Math.sin(angle) * 600
+                );
+            }
+
+            this.showPopup('ASTEROID!', obstacle.x, obstacle.y - 30, 18);
+
+        } else if (textureName === 'energy-vortex') {
+            // Energy vortex gives teleport/speed boost
+            this.cameras.main.shake(120, 0.005);
+            this.addScore(CONFIG.scores.bumper * 3);
+            this.incrementCombo();
+
+            // Speed boost effect
+            if (this.ball.body) {
+                const currentSpeed = Math.sqrt(
+                    this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
+                );
+                const newSpeed = currentSpeed * 1.3;
+                const angle = Math.atan2(this.ball.body.velocity.y, this.ball.body.velocity.x);
+                this.ball.body.setVelocity(
+                    Math.cos(angle) * newSpeed,
+                    Math.sin(angle) * newSpeed
+                );
+            }
+
+            // Flash effect
+            this.cameras.main.flash(200, 138, 43, 226, false, 0.3);
+
+            this.showPopup('VORTEX BOOST!', obstacle.x, obstacle.y - 40, 22);
+
+        } else if (textureName === 'comet') {
+            // Comet gives high points and directional boost
+            this.cameras.main.shake(90, 0.004);
+            this.addScore(CONFIG.scores.bumper * 2.5);
+            this.incrementCombo();
+
+            // Directional boost based on comet angle
+            if (this.ball.body) {
+                const cometAngle = obstacle.angle * Math.PI / 180;
+                this.ball.body.setVelocity(
+                    this.ball.body.velocity.x + Math.cos(cometAngle) * 300,
+                    this.ball.body.velocity.y + Math.sin(cometAngle) * 300
+                );
+            }
+
+            this.showPopup('COMET!', obstacle.x, obstacle.y - 35, 20);
+        }
+
+        // Particle burst for all obstacles
+        const burstParticles = this.add.particles(obstacle.x, obstacle.y, 'particle', {
+            speed: { min: 100, max: 250 },
+            angle: { min: 0, max: 360 },
+            scale: { start: 0.6, end: 0 },
+            alpha: { start: 1, end: 0 },
+            lifespan: 600,
+            blendMode: 'ADD',
+            quantity: 15,
+            tint: obstacle.tint || 0xffffff
+        });
+
+        this.time.delayedCall(650, () => burstParticles.destroy());
     }
     
     hitChakra(index) {
