@@ -1250,8 +1250,7 @@ class GameScene extends Phaser.Scene {
     
     setupParticles() {
         // Ball trail using Phaser 3.60 particle system
-        const ballTrailManager = this.add.particles(0, 0, 'particle');
-        this.ballTrail = ballTrailManager.createEmitter({
+        this.ballTrail = this.add.particles(0, 0, 'particle', {
             speed: 10,
             scale: { start: 0.5, end: 0 },
             alpha: { start: 0.7, end: 0 },
@@ -1261,11 +1260,10 @@ class GameScene extends Phaser.Scene {
             tint: CONFIG.colors.eyeball,
             follow: this.ball
         });
-        ballTrailManager.setDepth(95);
+        this.ballTrail.setDepth(95);
 
         // Drain vortex particles
-        const drainParticleManager = this.add.particles(CONFIG.width / 2, CONFIG.height - 20, 'particle');
-        this.drainParticles = drainParticleManager.createEmitter({
+        this.drainParticles = this.add.particles(CONFIG.width / 2, CONFIG.height - 20, 'particle', {
             speed: { min: 50, max: 150 },
             angle: { min: 0, max: 360 },
             scale: { start: 0.6, end: 0 },
@@ -1275,7 +1273,7 @@ class GameScene extends Phaser.Scene {
             frequency: 50,
             tint: [0x9400D3, 0x000000, 0x4B0082]
         });
-        drainParticleManager.setDepth(10);
+        this.drainParticles.setDepth(10);
     }
     
     update(time, delta) {
@@ -1743,8 +1741,7 @@ class GameScene extends Phaser.Scene {
         }
 
         // Particle burst for all obstacles
-        const burstParticles = this.add.particles(obstacle.x, obstacle.y, 'particle');
-        burstParticles.createEmitter({
+        const burstParticles = this.add.particles(obstacle.x, obstacle.y, 'particle', {
             speed: { min: 100, max: 250 },
             angle: { min: 0, max: 360 },
             scale: { start: 0.6, end: 0 },
@@ -1778,8 +1775,7 @@ class GameScene extends Phaser.Scene {
         });
         
         // Particle burst
-        const burstParticles = this.add.particles(this.chakras[index].x, this.chakras[index].y, 'particle-triangle');
-        burstParticles.createEmitter({
+        const burstParticles = this.add.particles(this.chakras[index].x, this.chakras[index].y, 'particle-triangle', {
             speed: { min: 150, max: 300 },
             angle: { min: 0, max: 360 },
             scale: { start: 0.8, end: 0 },
@@ -1879,8 +1875,7 @@ class GameScene extends Phaser.Scene {
         });
         
         // Particle burst
-        const burstParticles = this.add.particles(this.saturn.x, this.saturn.y, 'particle-hex');
-        burstParticles.createEmitter({
+        const burstParticles = this.add.particles(this.saturn.x, this.saturn.y, 'particle-hex', {
             speed: { min: 180, max: 350 },
             angle: { min: 0, max: 360 },
             scale: { start: 0.8, end: 0 },
