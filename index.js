@@ -1,8 +1,13 @@
 // ===================================
 // SPIRITBALL - PHASER 3 GAME
 // DMT-Inspired Pinball Vision Quest
-// Version 4.1 - Bug Fixes & Enhancements
-// Fixed ball launch, improved flippers, better borders, clustered chakras
+// Version 4.2 - Major Gameplay Improvements
+// - Fixed ball launch after death (desktop & mobile)
+// - Enhanced flipper responsiveness and power (real pinball feel)
+// - Ball stays within game boundaries
+// - Chakras lowered to center over flower of life
+// - Saturn displayed as cartoon orange planet with golden rings
+// - Improved plunger mechanics and launch reliability
 // ===================================
 
 const CONFIG = {
@@ -583,7 +588,7 @@ class GameScene extends Phaser.Scene {
         this.physics.add.existing(this.ball);
         this.ball.body.setCircle(CONFIG.ballRadius);
         this.ball.body.setBounce(CONFIG.ballBounce);
-        this.ball.body.setCollideWorldBounds(false);
+        this.ball.body.setCollideWorldBounds(true); // Keep ball within bounds
         this.ball.setDepth(100);
         
         // Add subtle rotation to eyeball
@@ -600,7 +605,7 @@ class GameScene extends Phaser.Scene {
         this.chakras = [];
 
         // Position chakras in a vertical alignment (like spine) - centered over flower of life
-        const startY = 380; // Lowered to center over flower of life in background
+        const startY = 450; // Lowered further to center over flower of life in background
         const spacing = 60; // Clustered close together
         const centerX = CONFIG.width / 2;
 
@@ -976,10 +981,10 @@ class GameScene extends Phaser.Scene {
             }
         }
 
-        // Desktop keyboard backup - direct key checking for more reliability
+        // Desktop keyboard backup - direct key checking for maximum reliability
         if (this.keys && this.keys.space) {
-            // Track previous space key state for edge detection
-            if (!this.previousSpaceDown) {
+            // Initialize tracking variable if needed
+            if (this.previousSpaceDown === undefined) {
                 this.previousSpaceDown = false;
             }
 
@@ -990,7 +995,7 @@ class GameScene extends Phaser.Scene {
                 this.handleLaunchPress();
             }
 
-            // Space key just released (edge detection)
+            // Space key just released (edge detection) - CRITICAL for launch after death
             if (!spaceCurrentlyDown && this.previousSpaceDown) {
                 this.handleLaunchRelease();
             }
@@ -1039,8 +1044,8 @@ class GameScene extends Phaser.Scene {
             this.leftFlipperActive = true;
             this.tweens.add({
                 targets: this.leftFlipper,
-                angle: -45, // More aggressive angle for better hitting
-                duration: 20, // Even faster response
+                angle: -50, // Even more aggressive angle for better hitting
+                duration: 15, // Ultra-fast response for snappy feel
                 ease: 'Power4' // More aggressive easing
             });
         }
@@ -1052,11 +1057,11 @@ class GameScene extends Phaser.Scene {
             const ballSpeed = Math.sqrt(
                 this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
             );
-            const flipperPower = Math.max(1000, ballSpeed * 1.7); // Increased base power and multiplier
+            const flipperPower = Math.max(1200, ballSpeed * 2.0); // Even more base power and multiplier for real pinball feel
 
             // Calculate angle based on where ball hits flipper
             const hitPosition = (this.ball.x - this.leftFlipper.x) / 40;
-            const angleAdjust = hitPosition * 25; // More angle variation for better control
+            const angleAdjust = hitPosition * 30; // More angle variation for better control
 
             const launchAngle = -65 - angleAdjust; // Steeper angle for better upward momentum
             const radians = (launchAngle * Math.PI) / 180;
@@ -1067,10 +1072,10 @@ class GameScene extends Phaser.Scene {
             );
 
             // Visual feedback - more intense
-            this.cameras.main.shake(100, 0.005);
+            this.cameras.main.shake(120, 0.006);
 
-            // Shorter cooldown for more responsive feel
-            this.time.delayedCall(80, () => {
+            // Very short cooldown for ultra-responsive feel like real pinball
+            this.time.delayedCall(50, () => {
                 this.leftFlipperCooldown = false;
             });
         }
@@ -1081,7 +1086,7 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({
             targets: this.leftFlipper,
             angle: 0,
-            duration: 60, // Even faster return for snappier feel
+            duration: 50, // Ultra-fast return for snappier feel
             ease: 'Power2'
         });
     }
@@ -1091,8 +1096,8 @@ class GameScene extends Phaser.Scene {
             this.rightFlipperActive = true;
             this.tweens.add({
                 targets: this.rightFlipper,
-                angle: 45, // More aggressive angle for better hitting
-                duration: 20, // Even faster response
+                angle: 50, // Even more aggressive angle for better hitting
+                duration: 15, // Ultra-fast response for snappy feel
                 ease: 'Power4' // More aggressive easing
             });
         }
@@ -1104,11 +1109,11 @@ class GameScene extends Phaser.Scene {
             const ballSpeed = Math.sqrt(
                 this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
             );
-            const flipperPower = Math.max(1000, ballSpeed * 1.7); // Increased base power and multiplier
+            const flipperPower = Math.max(1200, ballSpeed * 2.0); // Even more base power and multiplier for real pinball feel
 
             // Calculate angle based on where ball hits flipper
             const hitPosition = (this.ball.x - this.rightFlipper.x) / 40;
-            const angleAdjust = hitPosition * 25; // More angle variation for better control
+            const angleAdjust = hitPosition * 30; // More angle variation for better control
 
             const launchAngle = -115 - angleAdjust; // Steeper angle for better upward momentum
             const radians = (launchAngle * Math.PI) / 180;
@@ -1119,10 +1124,10 @@ class GameScene extends Phaser.Scene {
             );
 
             // Visual feedback - more intense
-            this.cameras.main.shake(100, 0.005);
+            this.cameras.main.shake(120, 0.006);
 
-            // Shorter cooldown for more responsive feel
-            this.time.delayedCall(80, () => {
+            // Very short cooldown for ultra-responsive feel like real pinball
+            this.time.delayedCall(50, () => {
                 this.rightFlipperCooldown = false;
             });
         }
@@ -1133,7 +1138,7 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({
             targets: this.rightFlipper,
             angle: 0,
-            duration: 60, // Even faster return for snappier feel
+            duration: 50, // Ultra-fast return for snappier feel
             ease: 'Power2'
         });
     }
@@ -1153,32 +1158,29 @@ class GameScene extends Phaser.Scene {
     }
 
     handleLaunchRelease() {
-        // Launch the ball if plunger was charging OR if ball is ready to launch (improved responsiveness)
-        if (this.gameState.plungerCharging) {
-            // Quick tap detection - launch with medium power for quick press
-            if (this.quickTapTimer) {
-                this.quickTapTimer.remove();
-                this.quickTapTimer = null;
-                this.gameState.plungerPower = CONFIG.plungerMinPower + (CONFIG.plungerMaxPower - CONFIG.plungerMinPower) * 0.6;
+        // CRITICAL FIX: Always try to launch if ball is ready, regardless of charging state
+        // This ensures desktop space press works reliably after death
+        if (this.gameState.canLaunch && !this.gameState.ballInPlay) {
+
+            // If plunger was charging, use the charged power
+            if (this.gameState.plungerCharging) {
+                // Quick tap detection - launch with medium power for quick press
+                if (this.quickTapTimer) {
+                    this.quickTapTimer.remove();
+                    this.quickTapTimer = null;
+                    this.gameState.plungerPower = CONFIG.plungerMinPower + (CONFIG.plungerMaxPower - CONFIG.plungerMinPower) * 0.6;
+                }
+            } else {
+                // Fallback: if not charging but ball is ready, launch with good default power
+                // This is the critical fix for desktop launch after death
+                this.gameState.plungerPower = CONFIG.plungerMinPower + (CONFIG.plungerMaxPower - CONFIG.plungerMinPower) * 0.65;
             }
 
+            // Always launch the ball
             this.launchBall();
             this.gameState.plungerCharging = false;
 
-            // Reset plunger position
-            this.tweens.add({
-                targets: this.plunger,
-                y: CONFIG.height - 200,
-                duration: 100,
-                ease: 'Back.easeOut'
-            });
-        } else if (this.gameState.canLaunch && !this.gameState.ballInPlay) {
-            // Fallback: if not charging but ball is ready, launch with default power
-            // This helps when the press event is missed but release is caught
-            this.gameState.plungerPower = CONFIG.plungerMinPower + (CONFIG.plungerMaxPower - CONFIG.plungerMinPower) * 0.6;
-            this.launchBall();
-
-            // Reset plunger position
+            // Reset plunger position with satisfying animation
             this.tweens.add({
                 targets: this.plunger,
                 y: CONFIG.height - 200,
@@ -1619,14 +1621,24 @@ class GameScene extends Phaser.Scene {
             this.ball.body.setVelocity(0, 0);
             this.ball.body.setEnable(true);
             this.ball.body.setBounce(CONFIG.ballBounce);
+            this.ball.body.setCollideWorldBounds(true); // Ensure ball stays in bounds
         }
 
-        // Reset game state for launch
+        // Reset game state for launch - CRITICAL for desktop launch after death
         this.gameState.ballInPlay = false;
         this.gameState.canLaunch = true;
         this.gameState.plungerCharging = false;
         this.gameState.plungerPower = 0;
         this.collisionCooldowns.clear();
+
+        // Reset input tracking to ensure clean state for next launch
+        this.previousSpaceDown = false;
+
+        // Clear any existing quick tap timer
+        if (this.quickTapTimer) {
+            this.quickTapTimer.remove();
+            this.quickTapTimer = null;
+        }
 
         // Reset enlightenment if needed
         if (this.gameState.enlightenmentActive) {
