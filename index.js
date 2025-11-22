@@ -561,28 +561,28 @@ class GameScene extends Phaser.Scene {
         // Solid left wall - wider for reliable collision
         const leftWall = this.add.rectangle(15, CONFIG.height / 2, 30, CONFIG.height, CONFIG.colors.wall);
         this.physics.add.existing(leftWall, true);
-        leftWall.body.setImmovable(true);
+        leftWall.body.immovable = true;
 
         // Solid right wall - wider for reliable collision
         const rightWall = this.add.rectangle(CONFIG.width - 15, CONFIG.height / 2, 30, CONFIG.height, CONFIG.colors.wall);
         this.physics.add.existing(rightWall, true);
-        rightWall.body.setImmovable(true);
+        rightWall.body.immovable = true;
 
         // Solid top wall - thicker for reliable collision
         const topWall = this.add.rectangle(CONFIG.width / 2, 15, CONFIG.width, 30, CONFIG.colors.wall);
         this.physics.add.existing(topWall, true);
-        topWall.body.setImmovable(true);
+        topWall.body.immovable = true;
 
         // Angled walls for pinball feel - thicker for better collision
         const leftAngle = this.add.rectangle(80, CONFIG.height - 150, 150, 25, CONFIG.colors.wall);
         leftAngle.setRotation(-0.3);
         this.physics.add.existing(leftAngle, true);
-        leftAngle.body.setImmovable(true);
+        leftAngle.body.immovable = true;
 
         const rightAngle = this.add.rectangle(CONFIG.width - 80, CONFIG.height - 150, 150, 25, CONFIG.colors.wall);
         rightAngle.setRotation(0.3);
         this.physics.add.existing(rightAngle, true);
-        rightAngle.body.setImmovable(true);
+        rightAngle.body.immovable = true;
 
         this.walls = [leftWall, rightWall, topWall, leftAngle, rightAngle];
     }
