@@ -1,0 +1,194 @@
+/* ===================================
+   SPIRITBALL - STYLES
+   DMT-Inspired Pinball Game  
+   Version 3.3 - Proper Desktop Centering
+   =================================== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: 'Arial', 'Helvetica', sans-serif;
+    background: #000000;
+}
+
+#game-container {
+    width: 100%;
+    height: 100%;
+    background: #000000;
+}
+
+canvas {
+    display: block;
+}
+
+/* ===================================
+   MOBILE TOUCH CONTROLS
+   =================================== */
+
+#mobile-controls {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1000;
+    display: none;
+}
+
+.flipper-btn,
+.launch-btn,
+.pause-btn {
+    position: absolute;
+    pointer-events: auto;
+    background: rgba(138, 43, 226, 0.3);
+    border: 3px solid rgba(0, 255, 255, 0.6);
+    border-radius: 15px;
+    color: #00ffff;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    transition: all 0.1s ease;
+    backdrop-filter: blur(10px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-shadow: 0 0 10px #00ffff, 0 0 20px #ff00ff;
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+}
+
+.flipper-btn:active,
+.launch-btn:active,
+.pause-btn:active {
+    background: rgba(138, 43, 226, 0.6);
+    transform: scale(0.92);
+    border-color: rgba(0, 255, 255, 0.9);
+    box-shadow: 0 0 30px rgba(0, 255, 255, 0.7), inset 0 0 20px rgba(255, 0, 255, 0.4);
+}
+
+/* Left Flipper Button */
+.flipper-btn.left {
+    bottom: 100px;
+    left: 20px;
+    width: 130px;
+    height: 110px;
+}
+
+.flipper-btn.left span {
+    font-size: 36px;
+}
+
+/* Right Flipper Button */
+.flipper-btn.right {
+    bottom: 100px;
+    right: 20px;
+    width: 130px;
+    height: 110px;
+}
+
+.flipper-btn.right span {
+    font-size: 36px;
+}
+
+/* Launch Button */
+.launch-btn {
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 150px;
+    height: 70px;
+    font-size: 18px;
+    letter-spacing: 2px;
+}
+
+/* Pause Button */
+.pause-btn {
+    top: 20px;
+    right: 20px;
+    width: 55px;
+    height: 55px;
+    border-radius: 50%;
+    font-size: 24px;
+}
+
+/* Show mobile controls on touch devices and portrait orientation */
+@media (max-width: 767px), (orientation: portrait) {
+    #mobile-controls {
+        display: block !important;
+    }
+}
+
+/* Desktop - Ensure mobile controls stay hidden */
+@media (min-width: 768px) and (orientation: landscape) {
+    #mobile-controls {
+        display: none !important;
+    }
+}
+
+/* ===================================
+   RESPONSIVE DESIGN
+   =================================== */
+
+/* Very small phones */
+@media (max-width: 360px) {
+    .flipper-btn {
+        width: 110px;
+        height: 90px;
+        bottom: 90px;
+    }
+    
+    .flipper-btn.left {
+        left: 10px;
+    }
+    
+    .flipper-btn.right {
+        right: 10px;
+    }
+    
+    .launch-btn {
+        width: 130px;
+        height: 60px;
+        font-size: 16px;
+    }
+}
+
+/* Large phones */
+@media (min-width: 361px) and (max-width: 480px) {
+    .flipper-btn {
+        width: 120px;
+        height: 100px;
+    }
+}
+
+/* ===================================
+   ACCESSIBILITY
+   =================================== */
+
+button:focus {
+    outline: 2px solid #00ffff;
+    outline-offset: 2px;
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="description" content="SPIRITBALL - DMT-inspired psychedelic pinball game">
+    <title>SPIRITBALL - Vision Quest Pinball</title>
+    
+    <!-- Phaser 3 from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    
+    <!-- Game Styles -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="game-container"></div>
+    
+    <!-- Mobile Touch Controls Overlay -->
+    <div id="mobile-controls">
+        <button id="left-flipper-btn" class="flipper-btn left" aria-label="Left Flipper">
+            <span>◀</span>
+        </button>
+        <button id="right-flipper-btn" class="flipper-btn right" aria-label="Right Flipper">
+            <span>▶</span>
+        </button>
+        <button id="launch-btn" class="launch-btn" aria-label="Launch Ball">
+            <span>LAUNCH</span>
+        </button>
+        <button id="pause-btn" class="pause-btn" aria-label="Pause Game">
+            <span>⏸</span>
+        </button>
+    </div>
+    
+    <!-- Game Script -->
+    <script src="index.js"></script>
+</body>
+</html>

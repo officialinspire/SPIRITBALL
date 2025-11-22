@@ -1,0 +1,1376 @@
+// ===================================
+// SPIRITBALL - PHASER 3 GAME
+// DMT-Inspired Pinball Vision Quest
+// Version 3.3 - Complete Fix
+// All issues resolved
+// ===================================
+
+const CONFIG = {
+    width: 540,
+    height: 960,
+    gravity: 1400,
+    ballRadius: 20,
+    ballBounce: 0.75,
+    startingLives: 3,
+    comboTimeout: 2500,
+    maxComboMultiplier: 5,
+    chakraCount: 7,
+    saturnHitsRequired: 3,
+    enlightenmentDuration: 8000,
+    scores: {
+        bumper: 100,
+        chakra: 250,
+        saturn: 500,
+        lane: 250,
+        target: 500,
+        portal: 1500,
+        setComplete: 5000,
+        enlightenment: 10000
+    },
+    colors: {
+        background: 0x1a0033,
+        ball: 0xffffff,
+        eyeball: 0x00ffff,
+        flipper: 0xff00ff,
+        bumper1: 0xff0099,
+        bumper2: 0x00ffff,
+        bumper3: 0xff00ff,
+        bumper4: 0xffff00,
+        bumper5: 0x00ff99,
+        portal: 0x00ff99,
+        target: 0xffff00,
+        wall: 0x6600cc,
+        chakra: [0x9400D3, 0xFF1493, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0x8B00FF],
+        saturn: 0xFFA500,
+        saturnRing: 0xFFD700
+    },
+    powerupDurations: {
+        spiritAnimal: 10000,
+        ancestorGuide: 8000,
+        enlightenment: 8000
+    }
+};
+
+class InputManager {
+    constructor() {
+        this.state = {
+            leftFlipper: false,
+            rightFlipper: false,
+            launch: false,
+            pause: false
+        };
+        this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
+        this.setupMobileControls();
+    }
+    
+    setupMobileControls() {
+        const leftBtn = document.getElementById('left-flipper-btn');
+        if (leftBtn) {
+            leftBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.state.leftFlipper = true; }, { passive: false });
+            leftBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.state.leftFlipper = false; }, { passive: false });
+        }
+        
+        const rightBtn = document.getElementById('right-flipper-btn');
+        if (rightBtn) {
+            rightBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.state.rightFlipper = true; }, { passive: false });
+            rightBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.state.rightFlipper = false; }, { passive: false });
+        }
+        
+        const launchBtn = document.getElementById('launch-btn');
+        if (launchBtn) {
+            launchBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                this.state.launch = true;
+                setTimeout(() => this.state.launch = false, 150);
+            }, { passive: false });
+        }
+        
+        const pauseBtn = document.getElementById('pause-btn');
+        if (pauseBtn) {
+            pauseBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                this.state.pause = true;
+                setTimeout(() => this.state.pause = false, 150);
+            }, { passive: false });
+        }
+    }
+}
+
+class BootScene extends Phaser.Scene {
+    constructor() { super({ key: 'BootScene' }); }
+    
+    preload() {
+        this.add.text(CONFIG.width / 2, CONFIG.height / 2, 'SPIRITBALL\nLOADING...', {
+            fontSize: '36px', fontFamily: 'Arial', color: '#00ffff',
+            stroke: '#ff00ff', strokeThickness: 5, align: 'center'
+        }).setOrigin(0.5);
+        
+        // Skip background.png to avoid CORS warnings - using solid color background
+        
+        // Create enhanced particle textures
+        const graphics = this.add.graphics();
+        
+        // Circle particle
+        graphics.fillStyle(0xffffff, 1);
+        graphics.fillCircle(10, 10, 10);
+        graphics.generateTexture('particle', 20, 20);
+        graphics.clear();
+        
+        // Triangle particle
+        graphics.fillStyle(0xffffff, 1);
+        graphics.beginPath();
+        graphics.moveTo(10, 2);
+        graphics.lineTo(18, 18);
+        graphics.lineTo(2, 18);
+        graphics.closePath();
+        graphics.fillPath();
+        graphics.generateTexture('particle-triangle', 20, 20);
+        graphics.clear();
+        
+        // Hexagon particle
+        graphics.fillStyle(0xffffff, 1);
+        graphics.beginPath();
+        for (let i = 0; i < 6; i++) {
+            const angle = (i * Math.PI * 2) / 6 - Math.PI / 2;
+            const x = 10 + 8 * Math.cos(angle);
+            const y = 10 + 8 * Math.sin(angle);
+            if (i === 0) graphics.moveTo(x, y);
+            else graphics.lineTo(x, y);
+        }
+        graphics.closePath();
+        graphics.fillPath();
+        graphics.generateTexture('particle-hex', 20, 20);
+        graphics.clear();
+        
+        // Create detailed eyeball texture - more realistic
+        graphics.fillStyle(0xffffff, 1);
+        graphics.fillCircle(25, 25, 24);
+        // Add veins
+        graphics.lineStyle(1, 0xff6666, 0.3);
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            graphics.lineTo(25, 25);
+            graphics.lineTo(25 + Math.cos(angle) * 24, 25 + Math.sin(angle) * 24);
+        }
+        // Iris
+        graphics.fillStyle(0x00aaff, 1);
+        graphics.fillCircle(25, 25, 16);
+        // Pupil
+        graphics.fillStyle(0x000000, 1);
+        graphics.fillCircle(25, 25, 10);
+        // Highlight
+        graphics.fillStyle(0xffffff, 0.9);
+        graphics.fillCircle(22, 22, 5);
+        graphics.fillCircle(28, 28, 2);
+        graphics.generateTexture('eyeball', 50, 50);
+        graphics.clear();
+        
+        // Create flaming eyeball texture
+        graphics.fillStyle(0xffffff, 1);
+        graphics.fillCircle(25, 25, 24);
+        // Fire iris
+        graphics.fillStyle(0xff6600, 1);
+        graphics.fillCircle(25, 25, 16);
+        // Fire pupil
+        graphics.fillStyle(0xff0000, 1);
+        graphics.fillCircle(25, 25, 10);
+        // Yellow highlight
+        graphics.fillStyle(0xffff00, 0.9);
+        graphics.fillCircle(22, 22, 5);
+        graphics.generateTexture('eyeball-fire', 50, 50);
+        graphics.clear();
+        
+        // Create chakra textures (7 chakras) - more detailed like reference
+        const chakraColors = [0x9400D3, 0xFF1493, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0x8B00FF];
+        chakraColors.forEach((color, index) => {
+            graphics.clear();
+            
+            // Outer petal pattern
+            const petals = 8 + index;
+            for (let i = 0; i < petals; i++) {
+                const angle = (i / petals) * Math.PI * 2;
+                const petalX = 30 + Math.cos(angle) * 20;
+                const petalY = 30 + Math.sin(angle) * 20;
+                graphics.fillStyle(color, 0.4);
+                graphics.fillCircle(petalX, petalY, 8);
+            }
+            
+            // Outer ring
+            graphics.lineStyle(3, color, 0.8);
+            graphics.strokeCircle(30, 30, 25);
+            
+            // Middle ring
+            graphics.fillStyle(color, 0.7);
+            graphics.fillCircle(30, 30, 18);
+            
+            // Inner circle
+            graphics.fillStyle(color, 1);
+            graphics.fillCircle(30, 30, 12);
+            
+            // Center symbol
+            graphics.fillStyle(0xffffff, 0.9);
+            graphics.fillCircle(30, 30, 5);
+            
+            graphics.generateTexture(`chakra${index}`, 60, 60);
+        });
+        graphics.clear();
+        
+        // Create Saturn texture - more detailed
+        graphics.fillGradientStyle(0xFFAA33, 0xFFAA33, 0xFF6600, 0xFF6600, 1, 1, 1, 1);
+        graphics.fillCircle(40, 40, 35);
+        // Add bands
+        graphics.lineStyle(2, 0xFF8800, 0.5);
+        graphics.strokeCircle(40, 40, 28);
+        graphics.strokeCircle(40, 40, 20);
+        graphics.generateTexture('saturn', 80, 80);
+        graphics.clear();
+        
+        // Create Saturn ring texture - more detailed
+        graphics.lineStyle(12, 0xFFDD77, 0.9);
+        graphics.strokeEllipse(50, 25, 70, 20);
+        graphics.lineStyle(6, 0xFFAA44, 0.7);
+        graphics.strokeEllipse(50, 25, 70, 20);
+        graphics.lineStyle(3, 0xFFFFAA, 1);
+        graphics.strokeEllipse(50, 25, 70, 20);
+        graphics.generateTexture('saturn-ring', 100, 50);
+        graphics.clear();
+        
+        // Create black hexagon texture
+        graphics.fillStyle(0x000000, 1);
+        graphics.beginPath();
+        for (let i = 0; i < 6; i++) {
+            const angle = (i * Math.PI * 2) / 6 - Math.PI / 2;
+            const x = 30 + 25 * Math.cos(angle);
+            const y = 30 + 25 * Math.sin(angle);
+            if (i === 0) graphics.moveTo(x, y);
+            else graphics.lineTo(x, y);
+        }
+        graphics.closePath();
+        graphics.fillPath();
+        graphics.lineStyle(4, 0x9400D3, 1);
+        graphics.strokePath();
+        graphics.lineStyle(2, 0xFF00FF, 0.7);
+        graphics.strokePath();
+        graphics.generateTexture('hexagon', 60, 60);
+        graphics.clear();
+        
+        // Create Grim Reaper texture - more detailed
+        // Hood
+        graphics.fillStyle(0x1a1a1a, 1);
+        graphics.fillCircle(40, 30, 28);
+        // Face area
+        graphics.fillStyle(0x000000, 1);
+        graphics.fillEllipse(40, 30, 18, 22);
+        // Eyes
+        graphics.fillStyle(0xff0000, 0.8);
+        graphics.fillEllipse(32, 28, 5, 8);
+        graphics.fillEllipse(48, 28, 5, 8);
+        // Body
+        graphics.fillStyle(0x0a0a0a, 1);
+        graphics.fillRect(15, 50, 50, 70);
+        // Scythe handle
+        graphics.lineStyle(5, 0x4a3020, 1);
+        graphics.lineTo(55, 60);
+        graphics.lineTo(60, 100);
+        // Scythe blade
+        graphics.fillStyle(0x888888, 1);
+        graphics.beginPath();
+        graphics.moveTo(60, 85);
+        graphics.lineTo(75, 80);
+        graphics.lineTo(70, 95);
+        graphics.closePath();
+        graphics.fillPath();
+        graphics.generateTexture('grimreaper', 80, 120);
+        graphics.clear();
+        
+        graphics.destroy();
+    }
+    
+    create() {
+        this.time.delayedCall(500, () => this.scene.start('MenuScene'));
+    }
+}
+
+class MenuScene extends Phaser.Scene {
+    constructor() { super({ key: 'MenuScene' }); }
+    
+    create() {
+        this.cameras.main.setBackgroundColor(CONFIG.colors.background);
+        
+        const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.25, 'SPIRITBALL', {
+            fontSize: '72px', fontFamily: 'Arial', color: '#00ffff',
+            stroke: '#ff00ff', strokeThickness: 8
+        }).setOrigin(0.5);
+        
+        this.tweens.add({
+            targets: title, scale: 1.05, duration: 1200,
+            yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+        });
+        
+        this.add.text(CONFIG.width / 2, CONFIG.height * 0.35, 'DMT Vision Quest Pinball', {
+            fontSize: '22px', fontFamily: 'Arial', color: '#ffffff', alpha: 0.9
+        }).setOrigin(0.5);
+        
+        const highScore = localStorage.getItem('spiritball-highscore') || 0;
+        this.add.text(CONFIG.width / 2, CONFIG.height * 0.48, `HIGH SCORE: ${highScore}`, {
+            fontSize: '28px', fontFamily: 'Arial', color: '#ffff00',
+            stroke: '#000000', strokeThickness: 4
+        }).setOrigin(0.5);
+        
+        const isMobile = window.gameInputManager && window.gameInputManager.isMobile;
+        const startText = isMobile ? 'TAP LAUNCH TO BEGIN' : 'PRESS SPACE TO BEGIN';
+        
+        const startInstructions = this.add.text(CONFIG.width / 2, CONFIG.height * 0.65, startText, {
+            fontSize: '30px', fontFamily: 'Arial', color: '#00ff99',
+            stroke: '#000000', strokeThickness: 4
+        }).setOrigin(0.5);
+        
+        this.tweens.add({
+            targets: startInstructions, alpha: 0.4, duration: 900, yoyo: true, repeat: -1
+        });
+        
+        this.input.keyboard.on('keydown-SPACE', () => this.startGame());
+        
+        this.launchTimer = this.time.addEvent({
+            delay: 100,
+            callback: () => {
+                if (window.gameInputManager && window.gameInputManager.state.launch) {
+                    this.startGame();
+                    window.gameInputManager.state.launch = false;
+                }
+            },
+            loop: true
+        });
+    }
+    
+    startGame() {
+        if (this.launchTimer) this.launchTimer.remove();
+        this.scene.start('GameScene');
+    }
+}
+
+class GameScene extends Phaser.Scene {
+    constructor() { super({ key: 'GameScene' }); }
+    
+    create() {
+        this.gameState = {
+            score: 0,
+            lives: CONFIG.startingLives,
+            highScore: parseInt(localStorage.getItem('spiritball-highscore')) || 0,
+            comboCount: 0,
+            comboMultiplier: 1,
+            lastHitTime: 0,
+            isPaused: false,
+            ballInPlay: false,
+            canLaunch: true,
+            enlightenmentActive: false,
+            enlightenmentEndTime: 0,
+            saturnHitCount: 0,
+            saturnVortexActive: false,
+            chakrasLit: Array(CONFIG.chakraCount).fill(false),
+            powerups: {
+                spiritAnimal: { active: false, endTime: 0, multiplier: 2 },
+                ancestorGuide: { active: false, endTime: 0 },
+                secondChance: { available: false }
+            },
+            targets: {
+                spiritAnimal: [false, false, false],
+                fractalCrystals: [false, false, false],
+                rebirthRunes: [false, false, false]
+            },
+            statistics: {
+                spiritAnimalActivations: 0,
+                portalCrossings: 0,
+                enlightenmentCount: 0,
+                saturnVortexEscapes: 0
+            }
+        };
+        
+        this.collisionCooldowns = new Map();
+        
+        this.setupBackground();
+        this.setupPhysics();
+        this.setupTable();
+        this.setupBall();
+        this.setupChakras();
+        this.setupSaturn();
+        this.setupFlippers();
+        this.setupDrainZone();
+        this.setupHUD();
+        this.setupInput();
+        this.setupParticles();
+    }
+    
+    setupBackground() {
+        // Set solid background color
+        this.cameras.main.setBackgroundColor(CONFIG.colors.background);
+        
+        // Try to load background image if it exists
+        // Users can replace the 1x1 pixel with their actual background.png
+        if (this.textures.exists('background')) {
+            try {
+                const bg = this.add.image(CONFIG.width / 2, CONFIG.height / 2, 'background');
+                bg.setDisplaySize(CONFIG.width, CONFIG.height);
+                bg.setDepth(-10);
+                bg.setAlpha(0.8); // Slight transparency
+            } catch (e) {
+                console.log('Using default background');
+            }
+        }
+    }
+    
+    setupPhysics() {
+        this.physics.world.setBounds(0, 0, CONFIG.width, CONFIG.height);
+    }
+    
+    setupTable() {
+        // Left wall
+        const leftWall = this.add.rectangle(10, CONFIG.height / 2, 20, CONFIG.height, CONFIG.colors.wall);
+        this.physics.add.existing(leftWall, true);
+        
+        // Right wall
+        const rightWall = this.add.rectangle(CONFIG.width - 10, CONFIG.height / 2, 20, CONFIG.height, CONFIG.colors.wall);
+        this.physics.add.existing(rightWall, true);
+        
+        // Top wall
+        const topWall = this.add.rectangle(CONFIG.width / 2, 10, CONFIG.width, 20, CONFIG.colors.wall);
+        this.physics.add.existing(topWall, true);
+        
+        // Angled walls for pinball feel
+        const leftAngle = this.add.rectangle(80, CONFIG.height - 150, 150, 20, CONFIG.colors.wall);
+        leftAngle.setRotation(-0.3);
+        this.physics.add.existing(leftAngle, true);
+        
+        const rightAngle = this.add.rectangle(CONFIG.width - 80, CONFIG.height - 150, 150, 20, CONFIG.colors.wall);
+        rightAngle.setRotation(0.3);
+        this.physics.add.existing(rightAngle, true);
+        
+        this.walls = [leftWall, rightWall, topWall, leftAngle, rightAngle];
+    }
+    
+    setupBall() {
+        // Create eyeball as the ball
+        this.ball = this.add.sprite(CONFIG.width - 70, CONFIG.height - 220, 'eyeball');
+        this.ball.setScale(0.8);
+        this.physics.add.existing(this.ball);
+        this.ball.body.setCircle(CONFIG.ballRadius);
+        this.ball.body.setBounce(CONFIG.ballBounce);
+        this.ball.body.setCollideWorldBounds(false);
+        this.ball.setDepth(100);
+        
+        // Add subtle rotation to eyeball
+        this.tweens.add({
+            targets: this.ball,
+            angle: 360,
+            duration: 8000,
+            repeat: -1,
+            ease: 'Linear'
+        });
+    }
+    
+    setupChakras() {
+        this.chakras = [];
+        
+        // Position chakras in a vertical alignment (like spine)
+        const startY = 180;
+        const spacing = 95;
+        const centerX = CONFIG.width / 2;
+        
+        for (let i = 0; i < CONFIG.chakraCount; i++) {
+            const chakra = this.add.sprite(centerX + (i % 2 === 0 ? -60 : 60), startY + (i * spacing), `chakra${i}`);
+            chakra.setScale(0.8);
+            chakra.setDepth(50);
+            this.physics.add.existing(chakra, true);
+            chakra.body.setCircle(25);
+            
+            // Add rotation animation - each rotates at different speed
+            this.tweens.add({
+                targets: chakra,
+                angle: 360,
+                duration: 2500 + (i * 300),
+                repeat: -1,
+                ease: 'Linear'
+            });
+            
+            // Add pulsing glow - unique timing for each
+            this.tweens.add({
+                targets: chakra,
+                scale: 0.85,
+                alpha: 0.8,
+                duration: 1200 + (i * 150),
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+            
+            this.chakras.push(chakra);
+        }
+    }
+    
+    setupSaturn() {
+        // Position Saturn at top center
+        this.saturn = this.add.sprite(CONFIG.width / 2, 100, 'saturn');
+        this.saturn.setScale(0.85);
+        this.saturn.setDepth(50);
+        this.physics.add.existing(this.saturn, true);
+        this.saturn.body.setCircle(35);
+        
+        // Saturn ring
+        this.saturnRing = this.add.sprite(CONFIG.width / 2, 100, 'saturn-ring');
+        this.saturnRing.setScale(0.85);
+        this.saturnRing.setDepth(49);
+        this.saturnRing.setAlpha(0.8);
+        
+        // Rotation animation for ring
+        this.tweens.add({
+            targets: this.saturnRing,
+            angle: 360,
+            duration: 4000,
+            repeat: -1,
+            ease: 'Linear'
+        });
+        
+        // Pulsing effect for Saturn
+        this.tweens.add({
+            targets: this.saturn,
+            scale: 0.9,
+            duration: 2000,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+        
+        // Black hexagon vortex (hidden initially)
+        this.saturnHexagon = this.add.sprite(CONFIG.width / 2, 50, 'hexagon');
+        this.saturnHexagon.setScale(0.5);
+        this.saturnHexagon.setDepth(51);
+        this.saturnHexagon.setVisible(false);
+        this.physics.add.existing(this.saturnHexagon, true);
+        this.saturnHexagon.body.setCircle(25);
+    }
+    
+    setupFlippers() {
+        const flipperWidth = 80;
+        const flipperHeight = 16;
+        const flipperY = CONFIG.height - 100;
+        
+        // Left flipper
+        this.leftFlipper = this.add.rectangle(150, flipperY, flipperWidth, flipperHeight, CONFIG.colors.flipper);
+        this.physics.add.existing(this.leftFlipper, true);
+        this.leftFlipper.setDepth(99);
+        
+        // Right flipper
+        this.rightFlipper = this.add.rectangle(CONFIG.width - 150, flipperY, flipperWidth, flipperHeight, CONFIG.colors.flipper);
+        this.physics.add.existing(this.rightFlipper, true);
+        this.rightFlipper.setDepth(99);
+    }
+    
+    setupDrainZone() {
+        // Create black hole effect at bottom (drain)
+        this.drainZone = this.add.rectangle(CONFIG.width / 2, CONFIG.height + 30, CONFIG.width, 100, 0x000000);
+        this.physics.add.existing(this.drainZone, true);
+        this.drainZone.setDepth(5);
+        
+        // Grim reaper sprite (hidden initially)
+        this.grimReaper = this.add.sprite(CONFIG.width / 2, CONFIG.height + 100, 'grimreaper');
+        this.grimReaper.setScale(1.2);
+        this.grimReaper.setDepth(200);
+        this.grimReaper.setVisible(false);
+    }
+    
+    setupHUD() {
+        this.hud = {
+            scoreText: this.add.text(20, 20, 'SCORE: 0', {
+                fontSize: '22px', fontFamily: 'Arial', color: '#00ffff',
+                stroke: '#000000', strokeThickness: 3
+            }).setDepth(1000),
+            
+            highScoreText: this.add.text(20, 50, `HIGH: ${this.gameState.highScore}`, {
+                fontSize: '18px', fontFamily: 'Arial', color: '#ffff00',
+                stroke: '#000000', strokeThickness: 3
+            }).setDepth(1000),
+            
+            livesText: this.add.text(CONFIG.width - 20, 20, `❤️ ${this.gameState.lives}`, {
+                fontSize: '22px', fontFamily: 'Arial', color: '#ff0099',
+                stroke: '#000000', strokeThickness: 3
+            }).setOrigin(1, 0).setDepth(1000),
+            
+            comboText: this.add.text(CONFIG.width / 2, 20, '', {
+                fontSize: '24px', fontFamily: 'Arial', color: '#ffffff',
+                stroke: '#ff00ff', strokeThickness: 4
+            }).setOrigin(0.5, 0).setDepth(1000).setAlpha(0)
+        };
+    }
+    
+    setupInput() {
+        this.input.keyboard.on('keydown-LEFT', () => this.activateLeftFlipper());
+        this.input.keyboard.on('keyup-LEFT', () => this.deactivateLeftFlipper());
+        this.input.keyboard.on('keydown-RIGHT', () => this.activateRightFlipper());
+        this.input.keyboard.on('keyup-RIGHT', () => this.deactivateRightFlipper());
+        this.input.keyboard.on('keydown-SPACE', () => this.handleLaunch());
+        this.input.keyboard.on('keydown-ESC', () => this.handlePause());
+    }
+    
+    setupParticles() {
+        // Ball trail using Phaser 3.60 particle system
+        this.ballTrail = this.add.particles(this.ball.x, this.ball.y, 'particle', {
+            speed: 10,
+            scale: { start: 0.5, end: 0 },
+            alpha: { start: 0.7, end: 0 },
+            lifespan: 400,
+            blendMode: 'ADD',
+            frequency: 25,
+            tint: CONFIG.colors.eyeball,
+            follow: this.ball
+        });
+        this.ballTrail.setDepth(95);
+        
+        // Drain vortex particles
+        this.drainParticles = this.add.particles(CONFIG.width / 2, CONFIG.height - 20, 'particle', {
+            speed: { min: 50, max: 150 },
+            angle: { min: 0, max: 360 },
+            scale: { start: 0.6, end: 0 },
+            alpha: { start: 0.8, end: 0 },
+            lifespan: 1500,
+            blendMode: 'ADD',
+            frequency: 50,
+            tint: [0x9400D3, 0x000000, 0x4B0082]
+        });
+        this.drainParticles.setDepth(10);
+    }
+    
+    update(time, delta) {
+        if (this.gameState.isPaused) return;
+        
+        this.updateInput();
+        this.updateCombo();
+        this.updatePowerups();
+        this.checkDrain();
+        this.updateEnlightenment();
+        this.updateSaturnVortex();
+    }
+    
+    updateInput() {
+        if (window.gameInputManager) {
+            if (window.gameInputManager.state.leftFlipper) {
+                this.activateLeftFlipper();
+            } else {
+                this.deactivateLeftFlipper();
+            }
+            
+            if (window.gameInputManager.state.rightFlipper) {
+                this.activateRightFlipper();
+            } else {
+                this.deactivateRightFlipper();
+            }
+            
+            if (window.gameInputManager.state.launch) {
+                this.handleLaunch();
+                window.gameInputManager.state.launch = false;
+            }
+            
+            if (window.gameInputManager.state.pause) {
+                this.handlePause();
+                window.gameInputManager.state.pause = false;
+            }
+        }
+    }
+    
+    activateLeftFlipper() {
+        this.tweens.add({
+            targets: this.leftFlipper,
+            angle: -30,
+            duration: 50,
+            ease: 'Power2'
+        });
+        this.physics.overlap(this.ball, this.leftFlipper, () => {
+            if (this.ball.body) {
+                this.ball.body.setVelocity(-400, -600);
+            }
+        });
+    }
+    
+    deactivateLeftFlipper() {
+        this.tweens.add({
+            targets: this.leftFlipper,
+            angle: 0,
+            duration: 100,
+            ease: 'Power2'
+        });
+    }
+    
+    activateRightFlipper() {
+        this.tweens.add({
+            targets: this.rightFlipper,
+            angle: 30,
+            duration: 50,
+            ease: 'Power2'
+        });
+        this.physics.overlap(this.ball, this.rightFlipper, () => {
+            if (this.ball.body) {
+                this.ball.body.setVelocity(400, -600);
+            }
+        });
+    }
+    
+    deactivateRightFlipper() {
+        this.tweens.add({
+            targets: this.rightFlipper,
+            angle: 0,
+            duration: 100,
+            ease: 'Power2'
+        });
+    }
+    
+    handleLaunch() {
+        if (this.gameState.canLaunch && !this.gameState.ballInPlay) {
+            this.launchBall();
+        }
+    }
+    
+    handlePause() {
+        if (!this.gameState.isPaused) {
+            this.pauseGame();
+        } else {
+            this.resumeGame();
+        }
+    }
+    
+    updateCombo() {
+        const now = Date.now();
+        if (this.gameState.lastHitTime && now - this.gameState.lastHitTime > CONFIG.comboTimeout) {
+            this.gameState.comboCount = 0;
+            this.gameState.comboMultiplier = 1;
+            this.updateHUD();
+        }
+    }
+    
+    updatePowerups() {
+        const now = Date.now();
+        
+        if (this.gameState.powerups.spiritAnimal.active && now > this.gameState.powerups.spiritAnimal.endTime) {
+            this.gameState.powerups.spiritAnimal.active = false;
+            this.ballTrail.setConfig({ tint: CONFIG.colors.eyeball });
+        }
+        
+        if (this.gameState.powerups.ancestorGuide.active && now > this.gameState.powerups.ancestorGuide.endTime) {
+            this.gameState.powerups.ancestorGuide.active = false;
+        }
+    }
+    
+    updateEnlightenment() {
+        if (this.gameState.enlightenmentActive && Date.now() > this.gameState.enlightenmentEndTime) {
+            this.deactivateEnlightenment();
+        }
+    }
+    
+    updateSaturnVortex() {
+        if (this.gameState.saturnVortexActive && this.saturnHexagon.visible) {
+            // Pull ball toward vortex
+            if (this.ball.body && this.gameState.ballInPlay) {
+                const dx = this.saturnHexagon.x - this.ball.x;
+                const dy = this.saturnHexagon.y - this.ball.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < 150) {
+                    const pullStrength = 200 * (1 - distance / 150);
+                    this.ball.body.setVelocity(
+                        this.ball.body.velocity.x + (dx / distance) * pullStrength * 0.02,
+                        this.ball.body.velocity.y + (dy / distance) * pullStrength * 0.02
+                    );
+                }
+                
+                // Check if ball is sucked into vortex
+                if (this.physics.overlap(this.ball, this.saturnHexagon)) {
+                    this.ballSuckedIntoVortex();
+                }
+            }
+        }
+        
+        // Check chakra collisions
+        this.chakras.forEach((chakra, index) => {
+            if (this.physics.overlap(this.ball, chakra)) {
+                if (!this.isOnCooldown(chakra)) {
+                    this.hitChakra(index);
+                    this.setCooldown(chakra, 500);
+                }
+            }
+        });
+        
+        // Check Saturn collision
+        if (this.physics.overlap(this.ball, this.saturn)) {
+            if (!this.isOnCooldown(this.saturn)) {
+                this.hitSaturn();
+                this.setCooldown(this.saturn, 500);
+            }
+        }
+    }
+    
+    hitChakra(index) {
+        this.cameras.main.shake(80, 0.002);
+        this.addScore(CONFIG.scores.chakra);
+        this.incrementCombo();
+        
+        // Light up the chakra
+        this.gameState.chakrasLit[index] = true;
+        
+        // Visual feedback
+        this.tweens.add({
+            targets: this.chakras[index],
+            scale: 1.1,
+            alpha: 1,
+            duration: 150,
+            yoyo: true,
+            ease: 'Power2'
+        });
+        
+        // Particle burst
+        const burstParticles = this.add.particles(this.chakras[index].x, this.chakras[index].y, 'particle-triangle', {
+            speed: { min: 150, max: 300 },
+            angle: { min: 0, max: 360 },
+            scale: { start: 0.8, end: 0 },
+            alpha: { start: 1, end: 0 },
+            lifespan: 700,
+            blendMode: 'ADD',
+            quantity: 20,
+            tint: CONFIG.colors.chakra[index]
+        });
+        
+        this.time.delayedCall(750, () => burstParticles.destroy());
+        
+        this.showPopup(`CHAKRA ${index + 1}!`, this.chakras[index].x, this.chakras[index].y - 40, 22);
+        
+        // Check if all chakras are lit
+        if (this.gameState.chakrasLit.every(lit => lit)) {
+            this.activateEnlightenment();
+        }
+    }
+    
+    activateEnlightenment() {
+        this.gameState.enlightenmentActive = true;
+        this.gameState.enlightenmentEndTime = Date.now() + CONFIG.powerupDurations.enlightenment;
+        this.gameState.statistics.enlightenmentCount++;
+        
+        // Change ball to flaming eyeball
+        this.ball.setTexture('eyeball-fire');
+        
+        // Enhanced trail effect with fire
+        this.ballTrail.setConfig({
+            tint: [0xFF6600, 0xFF0000, 0xFFFF00],
+            frequency: 12,
+            scale: { start: 0.9, end: 0 },
+            alpha: { start: 1, end: 0 }
+        });
+        
+        // Intense screen shake
+        this.cameras.main.shake(500, 0.01);
+        
+        // Visual celebration
+        this.showPopup('ENLIGHTENMENT!', CONFIG.width / 2, CONFIG.height / 2, 42);
+        
+        // Award bonus score
+        this.addScore(CONFIG.scores.enlightenment);
+        
+        // Speed boost
+        if (this.ball.body) {
+            const currentSpeed = Math.sqrt(
+                this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
+            );
+            const newSpeed = currentSpeed * 1.5;
+            const angle = Math.atan2(this.ball.body.velocity.y, this.ball.body.velocity.x);
+            this.ball.body.setVelocity(
+                Math.cos(angle) * newSpeed,
+                Math.sin(angle) * newSpeed
+            );
+        }
+        
+        // Reset chakras for next cycle
+        this.gameState.chakrasLit = Array(CONFIG.chakraCount).fill(false);
+    }
+    
+    deactivateEnlightenment() {
+        this.gameState.enlightenmentActive = false;
+        
+        // Return to normal eyeball
+        this.ball.setTexture('eyeball');
+        
+        // Normal trail
+        this.ballTrail.setConfig({
+            tint: CONFIG.colors.eyeball,
+            frequency: 25,
+            scale: { start: 0.5, end: 0 },
+            alpha: { start: 0.7, end: 0 }
+        });
+    }
+    
+    hitSaturn() {
+        this.cameras.main.shake(100, 0.003);
+        this.addScore(CONFIG.scores.saturn);
+        this.incrementCombo();
+        
+        this.gameState.saturnHitCount++;
+        
+        // Increase ring glow
+        this.tweens.add({
+            targets: this.saturnRing,
+            alpha: 1.0,
+            scale: 0.95,
+            duration: 150,
+            yoyo: true,
+            ease: 'Power2',
+            onComplete: () => {
+                this.saturnRing.setAlpha(0.8 + (this.gameState.saturnHitCount * 0.1));
+            }
+        });
+        
+        // Particle burst
+        const burstParticles = this.add.particles(this.saturn.x, this.saturn.y, 'particle-hex', {
+            speed: { min: 180, max: 350 },
+            angle: { min: 0, max: 360 },
+            scale: { start: 0.8, end: 0 },
+            alpha: { start: 1, end: 0 },
+            lifespan: 900,
+            blendMode: 'ADD',
+            quantity: 25,
+            tint: CONFIG.colors.saturnRing
+        });
+        
+        this.time.delayedCall(950, () => burstParticles.destroy());
+        
+        this.showPopup(`SATURN ${this.gameState.saturnHitCount}/3!`, this.saturn.x, this.saturn.y - 50, 24);
+        
+        // Activate vortex after 3 hits
+        if (this.gameState.saturnHitCount >= CONFIG.saturnHitsRequired) {
+            this.activateSaturnVortex();
+        }
+    }
+    
+    activateSaturnVortex() {
+        this.gameState.saturnVortexActive = true;
+        this.gameState.saturnHitCount = 0;
+        
+        // Show hexagon
+        this.saturnHexagon.setVisible(true);
+        this.saturnHexagon.setScale(0);
+        
+        this.tweens.add({
+            targets: this.saturnHexagon,
+            scale: 1.2,
+            duration: 500,
+            ease: 'Back.easeOut'
+        });
+        
+        // Rotation animation
+        this.tweens.add({
+            targets: this.saturnHexagon,
+            angle: -360,
+            duration: 3000,
+            repeat: -1,
+            ease: 'Linear'
+        });
+        
+        // Pulsing effect
+        this.tweens.add({
+            targets: this.saturnHexagon,
+            alpha: 0.5,
+            scale: 1.3,
+            duration: 600,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+        
+        this.showPopup('VORTEX ACTIVE!', CONFIG.width / 2, 150, 32);
+        
+        // Reset ring glow
+        this.saturnRing.setAlpha(0.8);
+        
+        // Auto-deactivate after some time
+        this.time.delayedCall(8000, () => {
+            this.deactivateSaturnVortex();
+        });
+    }
+    
+    deactivateSaturnVortex() {
+        if (!this.gameState.saturnVortexActive) return;
+        
+        this.gameState.saturnVortexActive = false;
+        
+        this.tweens.add({
+            targets: this.saturnHexagon,
+            scale: 0,
+            alpha: 0,
+            duration: 400,
+            ease: 'Back.easeIn',
+            onComplete: () => {
+                this.saturnHexagon.setVisible(false);
+                this.saturnHexagon.setAlpha(1);
+                this.saturnHexagon.setScale(1.2);
+            }
+        });
+    }
+    
+    ballSuckedIntoVortex() {
+        this.gameState.saturnVortexActive = false;
+        this.gameState.ballInPlay = false;
+        
+        // Dramatic sucking effect
+        this.tweens.add({
+            targets: this.ball,
+            x: this.saturnHexagon.x,
+            y: this.saturnHexagon.y,
+            scale: 0,
+            duration: 400,
+            ease: 'Power2.easeIn',
+            onComplete: () => {
+                // Teleport ball to random location
+                const newX = Phaser.Math.Between(100, CONFIG.width - 100);
+                const newY = Phaser.Math.Between(250, 450);
+                
+                this.ball.setPosition(newX, newY);
+                this.ball.setScale(0.8);
+                
+                // Flash effect
+                this.cameras.main.flash(300, 138, 43, 226);
+                
+                this.gameState.ballInPlay = true;
+                this.gameState.statistics.saturnVortexEscapes++;
+                
+                this.showPopup('DIMENSION SHIFT!', newX, newY - 50, 28);
+            }
+        });
+        
+        this.deactivateSaturnVortex();
+    }
+    
+    checkDrain() {
+        if (this.gameState.ballInPlay && this.physics.overlap(this.ball, this.drainZone)) {
+            if (this.gameState.powerups.secondChance.available) {
+                this.gameState.powerups.secondChance.available = false;
+                this.showPopup('REBIRTH!', CONFIG.width / 2, CONFIG.height / 2, 44);
+                this.cameras.main.flash(600, 255, 255, 255);
+                this.resetBall();
+                return;
+            }
+            
+            // Show Grim Reaper
+            this.showGrimReaper();
+            
+            this.gameState.lives--;
+            this.gameState.ballInPlay = false;
+            this.gameState.comboCount = 0;
+            this.gameState.comboMultiplier = 1;
+            
+            // Deactivate enlightenment if active
+            if (this.gameState.enlightenmentActive) {
+                this.deactivateEnlightenment();
+            }
+            
+            // Deactivate Saturn vortex if active
+            if (this.gameState.saturnVortexActive) {
+                this.deactivateSaturnVortex();
+            }
+            
+            this.updateHUD();
+            
+            if (this.gameState.lives <= 0) {
+                this.time.delayedCall(2000, () => this.gameOver());
+            } else {
+                this.time.delayedCall(2000, () => {
+                    this.hideGrimReaper();
+                    this.resetBall();
+                });
+            }
+        }
+    }
+    
+    showGrimReaper() {
+        this.grimReaper.setVisible(true);
+        this.grimReaper.setY(CONFIG.height + 100);
+        this.grimReaper.setScale(1.2);
+        this.grimReaper.setAlpha(1);
+        
+        // Rise up from bottom
+        this.tweens.add({
+            targets: this.grimReaper,
+            y: CONFIG.height - 80,
+            duration: 400,
+            ease: 'Back.easeOut'
+        });
+        
+        // YOU DIED text
+        const youDiedText = this.add.text(CONFIG.width / 2, CONFIG.height / 2, 'YOU DIED', {
+            fontSize: '72px',
+            fontFamily: 'Arial',
+            color: '#ff0000',
+            stroke: '#000000',
+            strokeThickness: 8
+        }).setOrigin(0.5).setDepth(201).setAlpha(0);
+        
+        this.tweens.add({
+            targets: youDiedText,
+            alpha: 1,
+            scale: 1.2,
+            duration: 300,
+            ease: 'Power2',
+            onComplete: () => {
+                this.tweens.add({
+                    targets: youDiedText,
+                    scale: 1.05,
+                    duration: 400,
+                    yoyo: true,
+                    repeat: 2,
+                    onComplete: () => {
+                        youDiedText.destroy();
+                    }
+                });
+            }
+        });
+        
+        // Screen effect
+        this.cameras.main.shake(400, 0.008);
+        this.cameras.main.flash(200, 255, 0, 0, true);
+    }
+    
+    hideGrimReaper() {
+        this.tweens.add({
+            targets: this.grimReaper,
+            y: CONFIG.height + 100,
+            alpha: 0,
+            duration: 400,
+            ease: 'Power2.easeIn',
+            onComplete: () => {
+                this.grimReaper.setVisible(false);
+            }
+        });
+    }
+    
+    resetBall() {
+        this.ball.setPosition(CONFIG.width - 70, CONFIG.height - 220);
+        this.ball.setTexture('eyeball');
+        this.ball.setScale(0.8);
+        this.ball.body.setVelocity(0, 0);
+        this.gameState.ballInPlay = false;
+        this.gameState.canLaunch = true;
+        this.collisionCooldowns.clear();
+        
+        // Reset enlightenment if needed
+        if (this.gameState.enlightenmentActive) {
+            this.deactivateEnlightenment();
+        }
+    }
+    
+    launchBall() {
+        this.gameState.ballInPlay = true;
+        this.gameState.canLaunch = false;
+        this.ball.body.setVelocity(-250, -750);
+        this.cameras.main.shake(120, 0.003);
+    }
+    
+    addScore(points) {
+        let multiplier = this.gameState.comboMultiplier;
+        if (this.gameState.enlightenmentActive) {
+            multiplier *= 2;
+        }
+        const multipliedPoints = Math.floor(points * multiplier);
+        this.gameState.score += multipliedPoints;
+        
+        if (this.gameState.score > this.gameState.highScore) {
+            this.gameState.highScore = this.gameState.score;
+            localStorage.setItem('spiritball-highscore', this.gameState.highScore);
+        }
+        
+        this.updateHUD();
+    }
+    
+    incrementCombo() {
+        this.gameState.comboCount++;
+        this.gameState.lastHitTime = Date.now();
+        if (this.gameState.comboCount % 5 === 0) {
+            this.gameState.comboMultiplier = Math.min(this.gameState.comboMultiplier + 0.5, CONFIG.maxComboMultiplier);
+        }
+        this.updateHUD();
+    }
+    
+    updateHUD() {
+        this.hud.scoreText.setText(`SCORE: ${this.gameState.score}`);
+        this.hud.highScoreText.setText(`HIGH: ${this.gameState.highScore}`);
+        this.hud.livesText.setText(`❤️ ${this.gameState.lives}`);
+        
+        if (this.gameState.comboMultiplier > 1) {
+            this.hud.comboText.setText(`${this.gameState.comboMultiplier.toFixed(1)}x COMBO`);
+            this.hud.comboText.setAlpha(1);
+        } else {
+            this.hud.comboText.setAlpha(0);
+        }
+    }
+    
+    showPopup(text, x, y, fontSize = 26) {
+        const popup = this.add.text(x, y, text, {
+            fontSize: `${fontSize}px`, fontFamily: 'Arial', color: '#ffffff',
+            stroke: '#000000', strokeThickness: 5, align: 'center'
+        }).setOrigin(0.5).setDepth(1001);
+        
+        this.tweens.add({
+            targets: popup, y: y - 60, alpha: 0, scale: 1.2, duration: 1100,
+            ease: 'Power2', onComplete: () => popup.destroy()
+        });
+    }
+    
+    isOnCooldown(object) {
+        return this.collisionCooldowns.has(object);
+    }
+    
+    setCooldown(object, duration) {
+        this.collisionCooldowns.set(object, true);
+        this.time.delayedCall(duration, () => {
+            this.collisionCooldowns.delete(object);
+        });
+    }
+    
+    pauseGame() {
+        this.gameState.isPaused = true;
+        this.physics.pause();
+        
+        const bg = this.add.rectangle(CONFIG.width / 2, CONFIG.height / 2, CONFIG.width, CONFIG.height, 0x000000, 0.85).setDepth(2000);
+        const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.4, 'PAUSED', {
+            fontSize: '56px', fontFamily: 'Arial', color: '#00ffff', stroke: '#000000', strokeThickness: 7
+        }).setOrigin(0.5).setDepth(2001);
+        
+        const resumeText = this.add.text(CONFIG.width / 2, CONFIG.height * 0.55, 'TAP TO RESUME', {
+            fontSize: '24px', fontFamily: 'Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 4
+        }).setOrigin(0.5).setDepth(2001);
+        
+        this.pauseOverlay = [bg, title, resumeText];
+        
+        this.input.keyboard.once('keydown-SPACE', () => this.resumeGame());
+        this.input.keyboard.once('keydown-ESC', () => this.resumeGame());
+        this.input.once('pointerdown', () => this.resumeGame());
+    }
+    
+    resumeGame() {
+        this.gameState.isPaused = false;
+        this.physics.resume();
+        if (this.pauseOverlay) {
+            this.pauseOverlay.forEach(obj => obj.destroy());
+            this.pauseOverlay = null;
+        }
+    }
+    
+    gameOver() {
+        this.scene.start('GameOverScene', {
+            score: this.gameState.score,
+            highScore: this.gameState.highScore,
+            statistics: this.gameState.statistics
+        });
+    }
+}
+
+class GameOverScene extends Phaser.Scene {
+    constructor() { super({ key: 'GameOverScene' }); }
+    
+    init(data) {
+        this.finalScore = data.score;
+        this.highScore = data.highScore;
+        this.statistics = data.statistics;
+    }
+    
+    create() {
+        this.cameras.main.setBackgroundColor(CONFIG.colors.background);
+        
+        this.add.text(CONFIG.width / 2, 120, 'GAME OVER', {
+            fontSize: '64px', fontFamily: 'Arial', color: '#ff0099',
+            stroke: '#000000', strokeThickness: 7
+        }).setOrigin(0.5);
+        
+        this.add.text(CONFIG.width / 2, 230, 'FINAL SCORE', {
+            fontSize: '26px', fontFamily: 'Arial', color: '#ffffff'
+        }).setOrigin(0.5);
+        
+        this.add.text(CONFIG.width / 2, 280, `${this.finalScore}`, {
+            fontSize: '54px', fontFamily: 'Arial', color: '#00ffff',
+            stroke: '#000000', strokeThickness: 5
+        }).setOrigin(0.5);
+        
+        if (this.finalScore >= this.highScore) {
+            const newHigh = this.add.text(CONFIG.width / 2, 360, 'NEW HIGH SCORE!', {
+                fontSize: '36px', fontFamily: 'Arial', color: '#ffff00',
+                stroke: '#000000', strokeThickness: 5
+            }).setOrigin(0.5);
+            this.tweens.add({ targets: newHigh, scale: 1.12, duration: 600, yoyo: true, repeat: -1 });
+        } else {
+            this.add.text(CONFIG.width / 2, 360, `HIGH SCORE: ${this.highScore}`, {
+                fontSize: '26px', fontFamily: 'Arial', color: '#ffff00'
+            }).setOrigin(0.5);
+        }
+        
+        // Show statistics
+        let statsY = 450;
+        if (this.statistics.enlightenmentCount > 0) {
+            this.add.text(CONFIG.width / 2, statsY, `Enlightenments: ${this.statistics.enlightenmentCount}`, {
+                fontSize: '20px', fontFamily: 'Arial', color: '#ffffff'
+            }).setOrigin(0.5);
+            statsY += 30;
+        }
+        
+        if (this.statistics.saturnVortexEscapes > 0) {
+            this.add.text(CONFIG.width / 2, statsY, `Vortex Escapes: ${this.statistics.saturnVortexEscapes}`, {
+                fontSize: '20px', fontFamily: 'Arial', color: '#ffffff'
+            }).setOrigin(0.5);
+        }
+        
+        const isMobile = window.gameInputManager && window.gameInputManager.isMobile;
+        const playAgainText = isMobile ? 'TAP LAUNCH TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
+        
+        const playAgain = this.add.text(CONFIG.width / 2, CONFIG.height - 120, playAgainText, {
+            fontSize: '26px', fontFamily: 'Arial', color: '#00ffff',
+            stroke: '#000000', strokeThickness: 4
+        }).setOrigin(0.5);
+        
+        this.tweens.add({ targets: playAgain, alpha: 0.35, duration: 900, yoyo: true, repeat: -1 });
+        
+        this.input.keyboard.on('keydown-SPACE', () => this.restartGame());
+        
+        this.launchTimer = this.time.addEvent({
+            delay: 100,
+            callback: () => {
+                if (window.gameInputManager && window.gameInputManager.state.launch) {
+                    this.restartGame();
+                    window.gameInputManager.state.launch = false;
+                }
+            },
+            loop: true
+        });
+    }
+    
+    restartGame() {
+        if (this.launchTimer) this.launchTimer.remove();
+        this.scene.start('GameScene');
+    }
+}
+
+const gameConfig = {
+    type: Phaser.AUTO,
+    parent: 'game-container',
+    width: CONFIG.width,
+    height: CONFIG.height,
+    backgroundColor: CONFIG.colors.background,
+    physics: {
+        default: 'arcade',
+        arcade: { gravity: { y: CONFIG.gravity }, debug: false }
+    },
+    scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        width: CONFIG.width,
+        height: CONFIG.height
+    },
+    scene: [BootScene, MenuScene, GameScene, GameOverScene]
+};
+
+window.gameInputManager = new InputManager();
+
+window.addEventListener('load', () => {
+    new Phaser.Game(gameConfig);
+    document.addEventListener('contextmenu', e => e.preventDefault());
+});
