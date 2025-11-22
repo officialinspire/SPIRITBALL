@@ -1,8 +1,8 @@
 // ===================================
 // SPIRITBALL - PHASER 3 GAME
 // DMT-Inspired Pinball Vision Quest
-// Version 4.0 - Major Feature Update
-// Enhanced graphics, plunger system, improved mechanics
+// Version 4.1 - Bug Fixes & Enhancements
+// Fixed ball launch, improved flippers, better borders, clustered chakras
 // ===================================
 
 const CONFIG = {
@@ -42,7 +42,7 @@ const CONFIG = {
         bumper5: 0x00ff99,
         portal: 0x00ff99,
         target: 0xffff00,
-        wall: 0x6600cc,
+        wall: 0x00CCFF, // Changed to glowing cyan/turquoise
         chakra: [0x9400D3, 0xFF1493, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0x8B00FF],
         saturn: 0xFFA500,
         saturnRing: 0xFFD700
@@ -598,9 +598,9 @@ class GameScene extends Phaser.Scene {
     setupChakras() {
         this.chakras = [];
 
-        // Position chakras in a vertical alignment (like spine) - clustered closer together
+        // Position chakras in a vertical alignment (like spine) - clustered much closer together
         const startY = 200;
-        const spacing = 80;
+        const spacing = 60; // Reduced from 80 to cluster closer
         const centerX = CONFIG.width / 2;
 
         for (let i = 0; i < CONFIG.chakraCount; i++) {
@@ -767,15 +767,15 @@ class GameScene extends Phaser.Scene {
         const dashboardBg = this.add.graphics();
         dashboardBg.fillStyle(0x1a0033, 0.85);
         dashboardBg.fillRoundedRect(0, 0, CONFIG.width, 85, 0);
-        dashboardBg.lineStyle(3, 0x9400D3, 1);
+        dashboardBg.lineStyle(3, 0x00ffff, 1); // Changed to glowing cyan
         dashboardBg.strokeRoundedRect(0, 0, CONFIG.width, 85, 0);
-        dashboardBg.lineStyle(2, 0x00ffff, 0.6);
+        dashboardBg.lineStyle(2, 0x00ffff, 0.8); // Increased opacity for glow effect
         dashboardBg.strokeRoundedRect(2, 2, CONFIG.width - 4, 81, 0);
         dashboardBg.setDepth(999);
 
         // Decorative corner accents
         const accentGraphics = this.add.graphics();
-        accentGraphics.lineStyle(2, 0xff00ff, 0.8);
+        accentGraphics.lineStyle(2, 0x00ffff, 1); // Changed to glowing cyan
         // Top left corner
         accentGraphics.lineBetween(10, 10, 30, 10);
         accentGraphics.lineBetween(10, 10, 10, 30);
@@ -993,9 +993,9 @@ class GameScene extends Phaser.Scene {
             this.leftFlipperActive = true;
             this.tweens.add({
                 targets: this.leftFlipper,
-                angle: -35,
-                duration: 40,
-                ease: 'Power3'
+                angle: -40, // Increased angle for more aggressive flipping
+                duration: 25, // Faster response (was 40ms)
+                ease: 'Power4' // More aggressive easing
             });
         }
 
@@ -1006,11 +1006,11 @@ class GameScene extends Phaser.Scene {
             const ballSpeed = Math.sqrt(
                 this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
             );
-            const flipperPower = Math.max(700, ballSpeed * 1.3);
+            const flipperPower = Math.max(850, ballSpeed * 1.5); // Increased power significantly
 
             // Calculate angle based on where ball hits flipper
             const hitPosition = (this.ball.x - this.leftFlipper.x) / 40;
-            const angleAdjust = hitPosition * 15;
+            const angleAdjust = hitPosition * 20; // More angle variation
 
             const launchAngle = -60 - angleAdjust;
             const radians = (launchAngle * Math.PI) / 180;
@@ -1021,10 +1021,10 @@ class GameScene extends Phaser.Scene {
             );
 
             // Visual feedback
-            this.cameras.main.shake(60, 0.003);
+            this.cameras.main.shake(80, 0.004); // Stronger shake
 
             // Reset cooldown after brief delay
-            this.time.delayedCall(150, () => {
+            this.time.delayedCall(100, () => { // Reduced cooldown for better responsiveness
                 this.leftFlipperCooldown = false;
             });
         }
@@ -1035,8 +1035,8 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({
             targets: this.leftFlipper,
             angle: 0,
-            duration: 120,
-            ease: 'Power2'
+            duration: 80, // Faster return for better control
+            ease: 'Power3'
         });
     }
 
@@ -1045,9 +1045,9 @@ class GameScene extends Phaser.Scene {
             this.rightFlipperActive = true;
             this.tweens.add({
                 targets: this.rightFlipper,
-                angle: 35,
-                duration: 40,
-                ease: 'Power3'
+                angle: 40, // Increased angle for more aggressive flipping
+                duration: 25, // Faster response (was 40ms)
+                ease: 'Power4' // More aggressive easing
             });
         }
 
@@ -1058,11 +1058,11 @@ class GameScene extends Phaser.Scene {
             const ballSpeed = Math.sqrt(
                 this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
             );
-            const flipperPower = Math.max(700, ballSpeed * 1.3);
+            const flipperPower = Math.max(850, ballSpeed * 1.5); // Increased power significantly
 
             // Calculate angle based on where ball hits flipper
             const hitPosition = (this.ball.x - this.rightFlipper.x) / 40;
-            const angleAdjust = hitPosition * 15;
+            const angleAdjust = hitPosition * 20; // More angle variation
 
             const launchAngle = -120 - angleAdjust;
             const radians = (launchAngle * Math.PI) / 180;
@@ -1073,10 +1073,10 @@ class GameScene extends Phaser.Scene {
             );
 
             // Visual feedback
-            this.cameras.main.shake(60, 0.003);
+            this.cameras.main.shake(80, 0.004); // Stronger shake
 
             // Reset cooldown after brief delay
-            this.time.delayedCall(150, () => {
+            this.time.delayedCall(100, () => { // Reduced cooldown for better responsiveness
                 this.rightFlipperCooldown = false;
             });
         }
@@ -1087,8 +1087,8 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({
             targets: this.rightFlipper,
             angle: 0,
-            duration: 120,
-            ease: 'Power2'
+            duration: 80, // Faster return for better control
+            ease: 'Power3'
         });
     }
 
@@ -1107,7 +1107,7 @@ class GameScene extends Phaser.Scene {
     }
 
     handleLaunchRelease() {
-        // Launch the ball if plunger was charging
+        // Launch the ball if plunger was charging OR if ball is ready to launch (improved responsiveness)
         if (this.gameState.plungerCharging) {
             // Quick tap detection - launch with medium power for quick press
             if (this.quickTapTimer) {
@@ -1118,6 +1118,19 @@ class GameScene extends Phaser.Scene {
 
             this.launchBall();
             this.gameState.plungerCharging = false;
+
+            // Reset plunger position
+            this.tweens.add({
+                targets: this.plunger,
+                y: CONFIG.height - 200,
+                duration: 100,
+                ease: 'Back.easeOut'
+            });
+        } else if (this.gameState.canLaunch && !this.gameState.ballInPlay) {
+            // Fallback: if not charging but ball is ready, launch with default power
+            // This helps when the press event is missed but release is caught
+            this.gameState.plungerPower = CONFIG.plungerMinPower + (CONFIG.plungerMaxPower - CONFIG.plungerMinPower) * 0.6;
+            this.launchBall();
 
             // Reset plunger position
             this.tweens.add({
@@ -1547,14 +1560,28 @@ class GameScene extends Phaser.Scene {
     }
     
     resetBall() {
+        // Ensure ball is visible and physics enabled
+        this.ball.setVisible(true);
+        this.ball.setActive(true);
         this.ball.setPosition(CONFIG.width - 70, CONFIG.height - 220);
         this.ball.setTexture('eyeball');
         this.ball.setScale(0.8);
-        this.ball.body.setVelocity(0, 0);
+        this.ball.setAlpha(1);
+
+        // Reset physics body
+        if (this.ball.body) {
+            this.ball.body.setVelocity(0, 0);
+            this.ball.body.setEnable(true);
+            this.ball.body.setBounce(CONFIG.ballBounce);
+        }
+
+        // Reset game state for launch
         this.gameState.ballInPlay = false;
         this.gameState.canLaunch = true;
+        this.gameState.plungerCharging = false;
+        this.gameState.plungerPower = 0;
         this.collisionCooldowns.clear();
-        
+
         // Reset enlightenment if needed
         if (this.gameState.enlightenmentActive) {
             this.deactivateEnlightenment();

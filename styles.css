@@ -1,7 +1,7 @@
 /* ===================================
    SPIRITBALL - STYLES
-   DMT-Inspired Pinball Game  
-   Version 3.3 - Proper Desktop Centering
+   DMT-Inspired Pinball Game
+   Version 4.1 - Glowing Neon Borders
    =================================== */
 
 * {
@@ -31,6 +31,13 @@ body {
 
 canvas {
     display: block;
+    border: 3px solid #00ffff;
+    box-shadow:
+        0 0 10px #00ffff,
+        0 0 20px #00ffff,
+        0 0 30px #00ffff,
+        inset 0 0 10px rgba(0, 255, 255, 0.2);
+    border-radius: 3px;
 }
 
 /* ===================================
