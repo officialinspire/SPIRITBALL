@@ -104,9 +104,10 @@ class BootScene extends Phaser.Scene {
             fontSize: '36px', fontFamily: 'Arial', color: '#00ffff',
             stroke: '#ff00ff', strokeThickness: 5, align: 'center'
         }).setOrigin(0.5);
-        
-        // Skip background.png to avoid CORS warnings - using solid color background
-        
+
+        // Load background image
+        this.load.image('background', 'background.png');
+
         // Create enhanced particle textures
         const graphics = this.add.graphics();
         
@@ -402,19 +403,18 @@ class GameScene extends Phaser.Scene {
     }
     
     setupBackground() {
-        // Set solid background color
+        // Set solid background color as fallback
         this.cameras.main.setBackgroundColor(CONFIG.colors.background);
-        
-        // Try to load background image if it exists
-        // Users can replace the 1x1 pixel with their actual background.png
+
+        // Load background image if it exists
         if (this.textures.exists('background')) {
             try {
                 const bg = this.add.image(CONFIG.width / 2, CONFIG.height / 2, 'background');
                 bg.setDisplaySize(CONFIG.width, CONFIG.height);
                 bg.setDepth(-10);
-                bg.setAlpha(0.8); // Slight transparency
+                bg.setAlpha(0.6); // Slightly transparent so game elements are visible
             } catch (e) {
-                console.log('Using default background');
+                console.log('Background image failed to load, using solid color');
             }
         }
     }
@@ -566,11 +566,11 @@ class GameScene extends Phaser.Scene {
     }
     
     setupDrainZone() {
-        // Create black hole effect at bottom (drain)
-        this.drainZone = this.add.rectangle(CONFIG.width / 2, CONFIG.height + 30, CONFIG.width, 100, 0x000000);
+        // Create black hole effect at bottom (drain) - positioned to catch falling balls
+        this.drainZone = this.add.rectangle(CONFIG.width / 2, CONFIG.height + 50, CONFIG.width, 150, 0x000000);
         this.physics.add.existing(this.drainZone, true);
         this.drainZone.setDepth(5);
-        
+
         // Grim reaper sprite (hidden initially)
         this.grimReaper = this.add.sprite(CONFIG.width / 2, CONFIG.height + 100, 'grimreaper');
         this.grimReaper.setScale(1.2);
