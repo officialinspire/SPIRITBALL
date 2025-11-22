@@ -1,8 +1,8 @@
 // ===================================
 // SPIRITBALL - PHASER 3 GAME
 // DMT-Inspired Pinball Vision Quest
-// Version 3.3 - Complete Fix
-// All issues resolved
+// Version 4.0 - Major Feature Update
+// Enhanced graphics, plunger system, improved mechanics
 // ===================================
 
 const CONFIG = {
@@ -17,6 +17,9 @@ const CONFIG = {
     chakraCount: 7,
     saturnHitsRequired: 3,
     enlightenmentDuration: 8000,
+    plungerMaxPower: 1200,
+    plungerMinPower: 400,
+    plungerChargeTime: 2000,
     scores: {
         bumper: 100,
         chakra: 250,
@@ -56,35 +59,44 @@ class InputManager {
         this.state = {
             leftFlipper: false,
             rightFlipper: false,
-            launch: false,
+            launchHeld: false,
+            launchPressed: false,
+            launchReleased: false,
             pause: false
         };
         this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
         this.setupMobileControls();
     }
-    
+
     setupMobileControls() {
         const leftBtn = document.getElementById('left-flipper-btn');
         if (leftBtn) {
             leftBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.state.leftFlipper = true; }, { passive: false });
             leftBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.state.leftFlipper = false; }, { passive: false });
         }
-        
+
         const rightBtn = document.getElementById('right-flipper-btn');
         if (rightBtn) {
             rightBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.state.rightFlipper = true; }, { passive: false });
             rightBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.state.rightFlipper = false; }, { passive: false });
         }
-        
+
         const launchBtn = document.getElementById('launch-btn');
         if (launchBtn) {
             launchBtn.addEventListener('touchstart', (e) => {
                 e.preventDefault();
-                this.state.launch = true;
-                setTimeout(() => this.state.launch = false, 150);
+                this.state.launchHeld = true;
+                this.state.launchPressed = true;
+            }, { passive: false });
+
+            launchBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                this.state.launchHeld = false;
+                this.state.launchReleased = true;
+                setTimeout(() => this.state.launchReleased = false, 50);
             }, { passive: false });
         }
-        
+
         const pauseBtn = document.getElementById('pause-btn');
         if (pauseBtn) {
             pauseBtn.addEventListener('touchstart', (e) => {
@@ -181,78 +193,180 @@ class BootScene extends Phaser.Scene {
         graphics.generateTexture('eyeball-fire', 50, 50);
         graphics.clear();
         
-        // Create chakra textures (7 chakras) - more detailed like reference
+        // Create enhanced chakra textures (7 chakras) with lotus petals and sacred geometry
         const chakraColors = [0x9400D3, 0xFF1493, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0x8B00FF];
         chakraColors.forEach((color, index) => {
             graphics.clear();
-            
-            // Outer petal pattern
-            const petals = 8 + index;
+
+            // Outer lotus petal pattern - more detailed
+            const petals = 8 + index * 2;
             for (let i = 0; i < petals; i++) {
                 const angle = (i / petals) * Math.PI * 2;
-                const petalX = 30 + Math.cos(angle) * 20;
-                const petalY = 30 + Math.sin(angle) * 20;
-                graphics.fillStyle(color, 0.4);
-                graphics.fillCircle(petalX, petalY, 8);
+                const petalX = 35 + Math.cos(angle) * 28;
+                const petalY = 35 + Math.sin(angle) * 28;
+
+                // Draw petal shape
+                graphics.fillStyle(color, 0.5);
+                graphics.fillEllipse(petalX, petalY, 10, 15);
+
+                // Petal outline
+                graphics.lineStyle(1, color, 0.8);
+                graphics.strokeEllipse(petalX, petalY, 10, 15);
             }
-            
-            // Outer ring
-            graphics.lineStyle(3, color, 0.8);
-            graphics.strokeCircle(30, 30, 25);
-            
-            // Middle ring
-            graphics.fillStyle(color, 0.7);
-            graphics.fillCircle(30, 30, 18);
-            
-            // Inner circle
+
+            // Sacred geometry - outer triangles/sacred pattern
+            graphics.lineStyle(2, color, 0.6);
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                const x1 = 35 + Math.cos(angle) * 22;
+                const y1 = 35 + Math.sin(angle) * 22;
+                const x2 = 35 + Math.cos(angle + Math.PI / 6) * 22;
+                const y2 = 35 + Math.sin(angle + Math.PI / 6) * 22;
+                graphics.lineBetween(x1, y1, x2, y2);
+            }
+
+            // Outer ring with gradient effect
+            graphics.lineStyle(4, color, 0.9);
+            graphics.strokeCircle(35, 35, 26);
+            graphics.lineStyle(2, color, 0.7);
+            graphics.strokeCircle(35, 35, 24);
+
+            // Middle ring - sacred circle
+            graphics.fillStyle(color, 0.75);
+            graphics.fillCircle(35, 35, 20);
+
+            // Inner sacred geometry pattern
+            graphics.lineStyle(2, 0xffffff, 0.6);
+            graphics.strokeCircle(35, 35, 15);
+
+            // Inner circle with glow
             graphics.fillStyle(color, 1);
-            graphics.fillCircle(30, 30, 12);
-            
-            // Center symbol
-            graphics.fillStyle(0xffffff, 0.9);
-            graphics.fillCircle(30, 30, 5);
-            
-            graphics.generateTexture(`chakra${index}`, 60, 60);
+            graphics.fillCircle(35, 35, 14);
+
+            // Center yantra/symbol
+            graphics.fillStyle(0xffffff, 1);
+            graphics.fillCircle(35, 35, 6);
+
+            // Center dot (bindu)
+            graphics.fillStyle(color, 1);
+            graphics.fillCircle(35, 35, 3);
+
+            graphics.generateTexture(`chakra${index}`, 70, 70);
         });
         graphics.clear();
         
-        // Create Saturn texture - more detailed
-        graphics.fillGradientStyle(0xFFAA33, 0xFFAA33, 0xFF6600, 0xFF6600, 1, 1, 1, 1);
-        graphics.fillCircle(40, 40, 35);
-        // Add bands
-        graphics.lineStyle(2, 0xFF8800, 0.5);
-        graphics.strokeCircle(40, 40, 28);
-        graphics.strokeCircle(40, 40, 20);
-        graphics.generateTexture('saturn', 80, 80);
+        // Create enhanced Saturn texture - detailed cartoon style
+        // Main planet body with gradient
+        graphics.fillGradientStyle(0xFFCC66, 0xFFCC66, 0xEE9944, 0xEE9944, 1);
+        graphics.fillCircle(50, 50, 42);
+
+        // Atmospheric bands - detailed
+        graphics.lineStyle(3, 0xFFDD88, 0.6);
+        graphics.strokeCircle(50, 50, 38);
+        graphics.lineStyle(2, 0xFFAA55, 0.5);
+        graphics.strokeCircle(50, 50, 32);
+        graphics.lineStyle(2, 0xFF9944, 0.4);
+        graphics.strokeCircle(50, 50, 26);
+        graphics.lineStyle(1, 0xFF8833, 0.4);
+        graphics.strokeCircle(50, 50, 20);
+
+        // Horizontal bands
+        graphics.lineStyle(2, 0xDD8833, 0.3);
+        graphics.lineBetween(10, 40, 90, 40);
+        graphics.lineBetween(10, 50, 90, 50);
+        graphics.lineBetween(10, 60, 90, 60);
+
+        // Shadow/depth
+        graphics.fillStyle(0x000000, 0.15);
+        graphics.fillCircle(65, 50, 15);
+
+        // Highlight
+        graphics.fillStyle(0xFFFFDD, 0.4);
+        graphics.fillCircle(35, 35, 12);
+
+        graphics.generateTexture('saturn', 100, 100);
         graphics.clear();
-        
-        // Create Saturn ring texture - more detailed
-        graphics.lineStyle(12, 0xFFDD77, 0.9);
-        graphics.strokeEllipse(50, 25, 70, 20);
-        graphics.lineStyle(6, 0xFFAA44, 0.7);
-        graphics.strokeEllipse(50, 25, 70, 20);
+
+        // Create enhanced Saturn ring texture - golden rings
+        // Outer ring band
+        graphics.lineStyle(14, 0xFFDD88, 0.95);
+        graphics.strokeEllipse(60, 30, 90, 25);
+
+        // Middle ring band
+        graphics.lineStyle(10, 0xFFCC55, 0.9);
+        graphics.strokeEllipse(60, 30, 90, 25);
+
+        // Inner ring band
+        graphics.lineStyle(6, 0xFFBB44, 0.85);
+        graphics.strokeEllipse(60, 30, 90, 25);
+
+        // Ring highlights
         graphics.lineStyle(3, 0xFFFFAA, 1);
-        graphics.strokeEllipse(50, 25, 70, 20);
-        graphics.generateTexture('saturn-ring', 100, 50);
+        graphics.strokeEllipse(60, 30, 90, 25);
+
+        // Ring shadows (Cassini division)
+        graphics.lineStyle(2, 0xCC8822, 0.6);
+        graphics.strokeEllipse(60, 30, 75, 20);
+
+        graphics.generateTexture('saturn-ring', 120, 60);
         graphics.clear();
         
-        // Create black hexagon texture
+        // Create enhanced black hexagon vortex texture
+        // Dark void center
         graphics.fillStyle(0x000000, 1);
         graphics.beginPath();
         for (let i = 0; i < 6; i++) {
             const angle = (i * Math.PI * 2) / 6 - Math.PI / 2;
-            const x = 30 + 25 * Math.cos(angle);
-            const y = 30 + 25 * Math.sin(angle);
+            const x = 40 + 32 * Math.cos(angle);
+            const y = 40 + 32 * Math.sin(angle);
             if (i === 0) graphics.moveTo(x, y);
             else graphics.lineTo(x, y);
         }
         graphics.closePath();
         graphics.fillPath();
-        graphics.lineStyle(4, 0x9400D3, 1);
+
+        // Inner void
+        graphics.fillStyle(0x0a0a0a, 0.8);
+        graphics.fillCircle(40, 40, 24);
+
+        // Mystical outline layers
+        graphics.lineStyle(5, 0x4B0082, 1);
         graphics.strokePath();
-        graphics.lineStyle(2, 0xFF00FF, 0.7);
+        graphics.lineStyle(3, 0x9400D3, 0.9);
         graphics.strokePath();
-        graphics.generateTexture('hexagon', 60, 60);
+        graphics.lineStyle(2, 0xFF00FF, 0.8);
+        graphics.strokePath();
+        graphics.lineStyle(1, 0xFF1493, 0.7);
+        graphics.strokePath();
+
+        // Mystical energy lines radiating inward
+        graphics.lineStyle(1, 0xFF00FF, 0.5);
+        for (let i = 0; i < 12; i++) {
+            const angle = (i / 12) * Math.PI * 2;
+            graphics.lineBetween(
+                40 + Math.cos(angle) * 35,
+                40 + Math.sin(angle) * 35,
+                40 + Math.cos(angle) * 20,
+                40 + Math.sin(angle) * 20
+            );
+        }
+
+        graphics.generateTexture('hexagon', 80, 80);
+        graphics.clear();
+
+        // Create plunger/launcher graphics
+        graphics.fillStyle(0x8B4513, 1);
+        graphics.fillRect(5, 0, 20, 100);
+        graphics.lineStyle(2, 0xD2691E, 1);
+        graphics.strokeRect(5, 0, 20, 100);
+
+        // Plunger tip
+        graphics.fillStyle(0xFF6600, 1);
+        graphics.fillCircle(15, 5, 10);
+        graphics.lineStyle(2, 0xFF8833, 1);
+        graphics.strokeCircle(15, 5, 10);
+
+        graphics.generateTexture('plunger', 30, 100);
         graphics.clear();
         
         // Create Grim Reaper texture - more detailed
@@ -319,7 +433,7 @@ class MenuScene extends Phaser.Scene {
         }).setOrigin(0.5);
         
         const isMobile = window.gameInputManager && window.gameInputManager.isMobile;
-        const startText = isMobile ? 'TAP LAUNCH TO BEGIN' : 'PRESS SPACE TO BEGIN';
+        const startText = isMobile ? 'HOLD & RELEASE ⚡ TO BEGIN' : 'HOLD & RELEASE SPACE TO BEGIN';
         
         const startInstructions = this.add.text(CONFIG.width / 2, CONFIG.height * 0.65, startText, {
             fontSize: '30px', fontFamily: 'Arial', color: '#00ff99',
@@ -331,19 +445,19 @@ class MenuScene extends Phaser.Scene {
         });
         
         this.input.keyboard.on('keydown-SPACE', () => this.startGame());
-        
+
         this.launchTimer = this.time.addEvent({
             delay: 100,
             callback: () => {
-                if (window.gameInputManager && window.gameInputManager.state.launch) {
+                if (window.gameInputManager && window.gameInputManager.state.launchReleased) {
                     this.startGame();
-                    window.gameInputManager.state.launch = false;
+                    window.gameInputManager.state.launchReleased = false;
                 }
             },
             loop: true
         });
     }
-    
+
     startGame() {
         if (this.launchTimer) this.launchTimer.remove();
         this.scene.start('GameScene');
@@ -364,6 +478,9 @@ class GameScene extends Phaser.Scene {
             isPaused: false,
             ballInPlay: false,
             canLaunch: true,
+            plungerCharging: false,
+            plungerPower: 0,
+            plungerChargeStart: 0,
             enlightenmentActive: false,
             enlightenmentEndTime: 0,
             saturnHitCount: 0,
@@ -396,6 +513,7 @@ class GameScene extends Phaser.Scene {
         this.setupChakras();
         this.setupSaturn();
         this.setupFlippers();
+        this.setupPlunger();
         this.setupDrainZone();
         this.setupHUD();
         this.setupInput();
@@ -553,16 +671,48 @@ class GameScene extends Phaser.Scene {
         const flipperWidth = 80;
         const flipperHeight = 16;
         const flipperY = CONFIG.height - 100;
-        
+
         // Left flipper
         this.leftFlipper = this.add.rectangle(150, flipperY, flipperWidth, flipperHeight, CONFIG.colors.flipper);
         this.physics.add.existing(this.leftFlipper, true);
         this.leftFlipper.setDepth(99);
-        
+
         // Right flipper
         this.rightFlipper = this.add.rectangle(CONFIG.width - 150, flipperY, flipperWidth, flipperHeight, CONFIG.colors.flipper);
         this.physics.add.existing(this.rightFlipper, true);
         this.rightFlipper.setDepth(99);
+    }
+
+    setupPlunger() {
+        // Launch port/channel on the right side
+        this.launchPort = this.add.rectangle(CONFIG.width - 45, CONFIG.height - 300, 50, 250, 0x2a1a4a, 0.8);
+        this.launchPort.setDepth(10);
+
+        // Plunger sprite
+        this.plunger = this.add.sprite(CONFIG.width - 45, CONFIG.height - 200, 'plunger');
+        this.plunger.setScale(0.6);
+        this.plunger.setDepth(95);
+
+        // Power meter background
+        this.powerMeterBg = this.add.rectangle(CONFIG.width - 45, CONFIG.height - 450, 20, 100, 0x333333, 0.7);
+        this.powerMeterBg.setDepth(98);
+
+        // Power meter fill (starts empty)
+        this.powerMeter = this.add.rectangle(CONFIG.width - 45, CONFIG.height - 400, 16, 0, 0x00ff00, 0.9);
+        this.powerMeter.setDepth(99);
+        this.powerMeter.setOrigin(0.5, 1);
+
+        // Power meter outline
+        this.add.rectangle(CONFIG.width - 45, CONFIG.height - 450, 22, 102, 0xffffff, 0).setStrokeStyle(2, 0x00ffff, 1).setDepth(100);
+
+        // Charge text
+        this.chargeText = this.add.text(CONFIG.width - 45, CONFIG.height - 520, '', {
+            fontSize: '16px',
+            fontFamily: 'Arial',
+            color: '#00ffff',
+            stroke: '#000000',
+            strokeThickness: 3
+        }).setOrigin(0.5).setDepth(1000).setAlpha(0);
     }
     
     setupDrainZone() {
@@ -570,6 +720,31 @@ class GameScene extends Phaser.Scene {
         this.drainZone = this.add.rectangle(CONFIG.width / 2, CONFIG.height + 50, CONFIG.width, 150, 0x000000);
         this.physics.add.existing(this.drainZone, true);
         this.drainZone.setDepth(5);
+
+        // Add visual black void at the bottom
+        const voidGraphics = this.add.graphics();
+        voidGraphics.fillGradientStyle(0x4B0082, 0x4B0082, 0x000000, 0x000000, 0.6, 0.6, 1, 1);
+        voidGraphics.fillRect(0, CONFIG.height - 60, CONFIG.width, 60);
+        voidGraphics.setDepth(6);
+
+        // Add swirling void circles
+        for (let i = 0; i < 3; i++) {
+            const voidCircle = this.add.circle(CONFIG.width / 2, CONFIG.height - 30, 80 + i * 40, 0x000000, 0.1 + i * 0.1);
+            voidCircle.setDepth(7);
+            voidCircle.setStrokeStyle(2, 0x9400D3, 0.3);
+
+            // Rotating animation
+            this.tweens.add({
+                targets: voidCircle,
+                scaleX: 1.2,
+                scaleY: 0.8,
+                alpha: 0.05 + i * 0.05,
+                duration: 2000 + i * 500,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+        }
 
         // Grim reaper sprite (hidden initially)
         this.grimReaper = this.add.sprite(CONFIG.width / 2, CONFIG.height + 100, 'grimreaper');
@@ -607,7 +782,8 @@ class GameScene extends Phaser.Scene {
         this.input.keyboard.on('keyup-LEFT', () => this.deactivateLeftFlipper());
         this.input.keyboard.on('keydown-RIGHT', () => this.activateRightFlipper());
         this.input.keyboard.on('keyup-RIGHT', () => this.deactivateRightFlipper());
-        this.input.keyboard.on('keydown-SPACE', () => this.handleLaunch());
+        this.input.keyboard.on('keydown-SPACE', () => this.handleLaunchPress());
+        this.input.keyboard.on('keyup-SPACE', () => this.handleLaunchRelease());
         this.input.keyboard.on('keydown-ESC', () => this.handlePause());
     }
     
@@ -641,8 +817,9 @@ class GameScene extends Phaser.Scene {
     
     update(time, delta) {
         if (this.gameState.isPaused) return;
-        
+
         this.updateInput();
+        this.updatePlunger();
         this.updateCombo();
         this.updatePowerups();
         this.checkDrain();
@@ -657,22 +834,69 @@ class GameScene extends Phaser.Scene {
             } else {
                 this.deactivateLeftFlipper();
             }
-            
+
             if (window.gameInputManager.state.rightFlipper) {
                 this.activateRightFlipper();
             } else {
                 this.deactivateRightFlipper();
             }
-            
-            if (window.gameInputManager.state.launch) {
-                this.handleLaunch();
-                window.gameInputManager.state.launch = false;
+
+            // Handle plunger press
+            if (window.gameInputManager.state.launchPressed) {
+                this.handleLaunchPress();
+                window.gameInputManager.state.launchPressed = false;
             }
-            
+
+            // Handle plunger release
+            if (window.gameInputManager.state.launchReleased) {
+                this.handleLaunchRelease();
+                window.gameInputManager.state.launchReleased = false;
+            }
+
+            // Keep charging while held
+            if (window.gameInputManager.state.launchHeld && this.gameState.plungerCharging) {
+                // Charging is handled in updatePlunger()
+            }
+
             if (window.gameInputManager.state.pause) {
                 this.handlePause();
                 window.gameInputManager.state.pause = false;
             }
+        }
+    }
+
+    updatePlunger() {
+        if (this.gameState.plungerCharging) {
+            const now = Date.now();
+            const elapsed = now - this.gameState.plungerChargeStart;
+            const chargePercent = Math.min(elapsed / CONFIG.plungerChargeTime, 1);
+
+            // Update plunger power
+            this.gameState.plungerPower = CONFIG.plungerMinPower + (CONFIG.plungerMaxPower - CONFIG.plungerMinPower) * chargePercent;
+
+            // Update power meter visual
+            const meterHeight = 92 * chargePercent;
+            this.powerMeter.setDisplaySize(16, meterHeight);
+
+            // Change color based on charge level
+            if (chargePercent < 0.33) {
+                this.powerMeter.setFillStyle(0xff0000);
+            } else if (chargePercent < 0.66) {
+                this.powerMeter.setFillStyle(0xffff00);
+            } else {
+                this.powerMeter.setFillStyle(0x00ff00);
+            }
+
+            // Update charge text
+            this.chargeText.setText(`${Math.floor(chargePercent * 100)}%`);
+            this.chargeText.setAlpha(1);
+
+            // Pull plunger back visually
+            this.plunger.y = CONFIG.height - 200 + (chargePercent * 30);
+        } else {
+            // Reset visuals when not charging
+            this.powerMeter.setDisplaySize(16, 0);
+            this.chargeText.setAlpha(0);
         }
     }
     
@@ -721,13 +945,32 @@ class GameScene extends Phaser.Scene {
             ease: 'Power2'
         });
     }
-    
-    handleLaunch() {
+
+    handleLaunchPress() {
+        // Start charging the plunger if ball is ready to launch
         if (this.gameState.canLaunch && !this.gameState.ballInPlay) {
-            this.launchBall();
+            this.gameState.plungerCharging = true;
+            this.gameState.plungerChargeStart = Date.now();
+            this.gameState.plungerPower = CONFIG.plungerMinPower;
         }
     }
-    
+
+    handleLaunchRelease() {
+        // Launch the ball if plunger was charging
+        if (this.gameState.plungerCharging) {
+            this.launchBall();
+            this.gameState.plungerCharging = false;
+
+            // Reset plunger position
+            this.tweens.add({
+                targets: this.plunger,
+                y: CONFIG.height - 200,
+                duration: 100,
+                ease: 'Back.easeOut'
+            });
+        }
+    }
+
     handlePause() {
         if (!this.gameState.isPaused) {
             this.pauseGame();
@@ -1163,8 +1406,20 @@ class GameScene extends Phaser.Scene {
     launchBall() {
         this.gameState.ballInPlay = true;
         this.gameState.canLaunch = false;
-        this.ball.body.setVelocity(-250, -750);
-        this.cameras.main.shake(120, 0.003);
+
+        // Use plunger power to determine velocity
+        const power = this.gameState.plungerPower;
+        const velocityY = -power;
+        const velocityX = -250;
+
+        this.ball.body.setVelocity(velocityX, velocityY);
+
+        // Shake intensity based on power
+        const shakeIntensity = 0.002 + (power / CONFIG.plungerMaxPower) * 0.005;
+        this.cameras.main.shake(150, shakeIntensity);
+
+        // Visual feedback
+        this.showPopup('LAUNCH!', this.ball.x, this.ball.y - 40, 20);
     }
     
     addScore(points) {
@@ -1320,7 +1575,7 @@ class GameOverScene extends Phaser.Scene {
         }
         
         const isMobile = window.gameInputManager && window.gameInputManager.isMobile;
-        const playAgainText = isMobile ? 'TAP LAUNCH TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
+        const playAgainText = isMobile ? 'HOLD & RELEASE ⚡ TO PLAY AGAIN' : 'HOLD & RELEASE SPACE TO PLAY AGAIN';
         
         const playAgain = this.add.text(CONFIG.width / 2, CONFIG.height - 120, playAgainText, {
             fontSize: '26px', fontFamily: 'Arial', color: '#00ffff',
@@ -1330,19 +1585,19 @@ class GameOverScene extends Phaser.Scene {
         this.tweens.add({ targets: playAgain, alpha: 0.35, duration: 900, yoyo: true, repeat: -1 });
         
         this.input.keyboard.on('keydown-SPACE', () => this.restartGame());
-        
+
         this.launchTimer = this.time.addEvent({
             delay: 100,
             callback: () => {
-                if (window.gameInputManager && window.gameInputManager.state.launch) {
+                if (window.gameInputManager && window.gameInputManager.state.launchReleased) {
                     this.restartGame();
-                    window.gameInputManager.state.launch = false;
+                    window.gameInputManager.state.launchReleased = false;
                 }
             },
             loop: true
         });
     }
-    
+
     restartGame() {
         if (this.launchTimer) this.launchTimer.remove();
         this.scene.start('GameScene');
