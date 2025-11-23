@@ -1576,7 +1576,7 @@ class GameScene extends Phaser.Scene {
         
         if (this.gameState.powerups.spiritAnimal.active && now > this.gameState.powerups.spiritAnimal.endTime) {
             this.gameState.powerups.spiritAnimal.active = false;
-            this.ballTrail.setConfig({ tint: CONFIG.colors.eyeball });
+            this.ballTrail.setParticleTint(CONFIG.colors.eyeball);
         }
         
         if (this.gameState.powerups.ancestorGuide.active && now > this.gameState.powerups.ancestorGuide.endTime) {
@@ -1806,12 +1806,11 @@ class GameScene extends Phaser.Scene {
         this.ball.setTexture('eyeball-fire');
         
         // Enhanced trail effect with fire
-        this.ballTrail.setConfig({
-            tint: [0xFF6600, 0xFF0000, 0xFFFF00],
-            frequency: 12,
-            scale: { start: 0.9, end: 0 },
-            alpha: { start: 1, end: 0 }
-        });
+        this.ballTrail.setParticleTint([0xFF6600, 0xFF0000, 0xFFFF00]);
+        this.ballTrail.setFrequency(12);
+        this.ballTrail.setEmitterOp('scaleX', { start: 0.9, end: 0 });
+        this.ballTrail.setEmitterOp('scaleY', { start: 0.9, end: 0 });
+        this.ballTrail.setEmitterOp('alpha', { start: 1, end: 0 });
         
         // Intense screen shake
         this.cameras.main.shake(500, 0.01);
@@ -1846,12 +1845,11 @@ class GameScene extends Phaser.Scene {
         this.ball.setTexture('eyeball');
         
         // Normal trail
-        this.ballTrail.setConfig({
-            tint: CONFIG.colors.eyeball,
-            frequency: 25,
-            scale: { start: 0.5, end: 0 },
-            alpha: { start: 0.7, end: 0 }
-        });
+        this.ballTrail.setParticleTint(CONFIG.colors.eyeball);
+        this.ballTrail.setFrequency(25);
+        this.ballTrail.setEmitterOp('scaleX', { start: 0.5, end: 0 });
+        this.ballTrail.setEmitterOp('scaleY', { start: 0.5, end: 0 });
+        this.ballTrail.setEmitterOp('alpha', { start: 0.7, end: 0 });
     }
     
     hitSaturn() {
