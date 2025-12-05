@@ -1,22 +1,19 @@
 // ===================================
 // SPIRITBALL - PHASER 3 GAME
-// DMT-Inspired Pinball Vision Quest
-// Version 4.4 - Enhanced Gameplay & Cosmic Aesthetics
-// - ADJUSTED: Bumpers moved closer together (20px) for better ball control
-// - REPOSITIONED: Saturn lowered from y=100 to y=180 for improved gameplay flow
-// - STYLIZED: Cosmic energy wing flippers with glowing animations replace simple rectangles
-// - ADDED: 9 new thematic obstacles for diverse gameplay:
-//   * Cosmic Crystals (2) - High-scoring bouncy triangular crystals
-//   * Asteroids (3) - Rocky space obstacles with medium bounce
-//   * Energy Vortexes (2) - Speed-boosting portals with teleport effects
-//   * Comets (2) - Directional boost shooting stars
-// - ENHANCED: Each obstacle type has unique physics, scoring, and visual effects
-// Previous (v4.3):
-// - FIXED: Ball launch after death now 100% reliable (desktop & mobile)
-// - ENHANCED: Professional pinball flipper physics (lightning-fast, powerful, responsive)
-// - IMPROVED: Ball stays within game boundaries with robust wall collision
-// - ADJUSTED: Chakras lowered further to perfectly center over flower of life
-// - VERIFIED: Saturn displayed as cartoon orange planet with golden rings
+// Windows XP 3D Pinball Space Cadet Gameplay
+// Version 5.0 - XP Pinball Mechanics with Original Graphics
+// - OVERHAULED: Complete gameplay redesign based on Windows XP 3D Pinball
+// - ADDED: Mission system with 17 missions across 9 ranks
+// - ADDED: Fuel system with depletion during missions
+// - ADDED: Launch ramp for mission acceptance
+// - ADDED: Field multiplier system (2x, 3x, 5x, 10x)
+// - ADDED: Re-entry lanes and bonus lanes
+// - ADDED: Attack bumpers (4 bumpers at top)
+// - KEPT: All original graphics (chakras, saturn, cosmic theme)
+// - MAPPED: Chakras → Mission targets + Fuel lights
+// - MAPPED: Saturn → Satellite bumper
+// - MAPPED: Obstacles → Attack bumpers + Targets
+// - COMPATIBLE: Desktop (keyboard) and Mobile (touch) controls
 // ===================================
 
 const CONFIG = {
@@ -26,24 +23,94 @@ const CONFIG = {
     ballRadius: 20,
     ballBounce: 0.75,
     startingLives: 3,
-    comboTimeout: 2500,
-    maxComboMultiplier: 5,
-    chakraCount: 7,
-    saturnHitsRequired: 3,
-    enlightenmentDuration: 8000,
+    startingBalls: 3,
+
+    // XP Pinball Game Elements
+    attackBumperCount: 4,
+    missionTargetCount: 3,
+    fuelLightCount: 6,
+    reentryLaneCount: 3,
+
     plungerMaxPower: 1200,
     plungerMinPower: 400,
     plungerChargeTime: 2000,
-    scores: {
-        bumper: 100,
-        chakra: 250,
-        saturn: 500,
-        lane: 250,
-        target: 500,
-        portal: 1500,
-        setComplete: 5000,
-        enlightenment: 10000
+
+    // XP Pinball Ranks (9 total)
+    ranks: [
+        'Cadet', 'Ensign', 'Lieutenant', 'Captain',
+        'LT Commander', 'Commander', 'Commodore',
+        'Admiral', 'Fleet Admiral'
+    ],
+
+    // XP Pinball Missions (17 total, organized by rank)
+    missions: {
+        0: [ // Cadet
+            { id: 0, name: 'Launch Training', description: 'Pass the Launch Ramp 3 times', requirement: 3, type: 'ramp' },
+            { id: 1, name: 'Re-entry Training', description: 'Pass the Re-entry Lanes 3 times', requirement: 3, type: 'lane' },
+            { id: 2, name: 'Target Practice', description: 'Hit the Attack Bumpers 8 times', requirement: 8, type: 'bumper' }
+        ],
+        1: [ // Ensign
+            { id: 3, name: 'Science', description: 'Hit Mission Targets 5 times', requirement: 5, type: 'target' },
+            { id: 4, name: 'Launch Training', description: 'Pass the Launch Ramp 5 times', requirement: 5, type: 'ramp' },
+            { id: 5, name: 'Target Practice', description: 'Hit the Attack Bumpers 15 times', requirement: 15, type: 'bumper' }
+        ],
+        2: [ // Lieutenant
+            { id: 6, name: 'Satellite Retrieval', description: 'Hit the Satellite 3 times', requirement: 3, type: 'satellite' },
+            { id: 7, name: 'Recon', description: 'Pass through lanes 15 times', requirement: 15, type: 'alllanes' },
+            { id: 8, name: 'Upgrade', description: 'Light all Re-entry Lanes', requirement: 3, type: 'reentry' }
+        ],
+        3: [ // Captain
+            { id: 9, name: 'Alien Menace', description: 'Hit Attack Bumpers 20 times', requirement: 20, type: 'bumper' },
+            { id: 10, name: 'Time Warp', description: 'Collect all Fuel Lights', requirement: 6, type: 'fuel' },
+            { id: 11, name: 'Maelstrom', description: 'Hit all targets rapidly', requirement: 10, type: 'rapidtarget' }
+        ],
+        4: [ // LT Commander
+            { id: 12, name: 'Cosmic Plague', description: 'Achieve 75 flag rotations', requirement: 75, type: 'flags' },
+            { id: 13, name: 'Black Hole', description: 'Hit Satellite 5 times', requirement: 5, type: 'satellite' },
+            { id: 14, name: 'Space Radiation', description: 'Survive 30 seconds', requirement: 30, type: 'time' }
+        ],
+        5: [ // Commander - uses higher rank missions
+            { id: 12, name: 'Cosmic Plague', description: 'Achieve 100 flag rotations', requirement: 100, type: 'flags' },
+            { id: 13, name: 'Black Hole', description: 'Hit Satellite 7 times', requirement: 7, type: 'satellite' },
+            { id: 15, name: 'Bug Hunt', description: 'Hit all bumpers 30 times', requirement: 30, type: 'bumper' }
+        ],
+        6: [ // Commodore
+            { id: 12, name: 'Cosmic Plague', description: 'Achieve 150 flag rotations', requirement: 150, type: 'flags' },
+            { id: 16, name: 'Stray Comet', description: 'Score 500,000 points', requirement: 500000, type: 'score' },
+            { id: 13, name: 'Black Hole', description: 'Hit Satellite 10 times', requirement: 10, type: 'satellite' }
+        ],
+        7: [ // Admiral
+            { id: 12, name: 'Cosmic Plague', description: 'Achieve 200 flag rotations', requirement: 200, type: 'flags' },
+            { id: 16, name: 'Stray Comet', description: 'Score 1,000,000 points', requirement: 1000000, type: 'score' },
+            { id: 13, name: 'Black Hole', description: 'Hit Satellite 15 times', requirement: 15, type: 'satellite' }
+        ],
+        8: [ // Fleet Admiral
+            { id: 12, name: 'Cosmic Plague', description: 'Achieve 300 flag rotations', requirement: 300, type: 'flags' },
+            { id: 16, name: 'Stray Comet', description: 'Score 2,000,000 points', requirement: 2000000, type: 'score' },
+            { id: 13, name: 'Black Hole', description: 'Hit Satellite 20 times', requirement: 20, type: 'satellite' }
+        ]
     },
+
+    // XP Pinball Scoring
+    scores: {
+        attackBumper: 500,
+        attackBumperUpgraded: 1500,
+        satellite: 1000,
+        missionTarget: 750,
+        reentryLane: 2000,
+        bonusLane: 5000,
+        launchRamp: 2500,
+        fuelTarget: 500,
+        leftLane: 250,
+        rightLane: 250,
+        missionComplete: 25000,
+        rankUp: 100000,
+        extraBall: 0
+    },
+
+    // Field Multipliers (XP Pinball style)
+    multipliers: [1, 2, 3, 5, 10],
+
     colors: {
         background: 0x1a0033,
         ball: 0xffffff,
@@ -53,18 +120,14 @@ const CONFIG = {
         bumper2: 0x00ffff,
         bumper3: 0xff00ff,
         bumper4: 0xffff00,
-        bumper5: 0x00ff99,
-        portal: 0x00ff99,
-        target: 0xffff00,
-        wall: 0x00CCFF, // Changed to glowing cyan/turquoise
+        wall: 0x00CCFF,
         chakra: [0x9400D3, 0xFF1493, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0x8B00FF],
         saturn: 0xFFA500,
-        saturnRing: 0xFFD700
-    },
-    powerupDurations: {
-        spiritAnimal: 10000,
-        ancestorGuide: 8000,
-        enlightenment: 8000
+        saturnRing: 0xFFD700,
+        missionActive: 0x00FF00,
+        missionInactive: 0x666666,
+        fuelFull: 0x00FF00,
+        fuelLow: 0xFF0000
     }
 };
 
@@ -673,35 +736,61 @@ class GameScene extends Phaser.Scene {
             score: 0,
             lives: CONFIG.startingLives,
             highScore: parseInt(localStorage.getItem('spiritball-highscore')) || 0,
-            comboCount: 0,
-            comboMultiplier: 1,
-            lastHitTime: 0,
             isPaused: false,
             ballInPlay: false,
             canLaunch: true,
             plungerCharging: false,
             plungerPower: 0,
             plungerChargeStart: 0,
-            enlightenmentActive: false,
-            enlightenmentEndTime: 0,
-            saturnHitCount: 0,
-            saturnVortexActive: false,
-            chakrasLit: Array(CONFIG.chakraCount).fill(false),
-            powerups: {
-                spiritAnimal: { active: false, endTime: 0, multiplier: 2 },
-                ancestorGuide: { active: false, endTime: 0 },
-                secondChance: { available: false }
-            },
-            targets: {
-                spiritAnimal: [false, false, false],
-                fractalCrystals: [false, false, false],
-                rebirthRunes: [false, false, false]
-            },
+
+            // XP Pinball: Rank System
+            rank: 0, // Current rank index (0 = Cadet, 8 = Fleet Admiral)
+            rankProgress: 0, // Missions completed towards next rank
+            rankProgressRequired: 3, // Missions needed to rank up
+
+            // XP Pinball: Mission System
+            activeMission: null, // Currently active mission object
+            selectedMission: 0, // Selected mission index (0-2)
+            missionProgress: 0, // Progress towards current mission
+            missionActive: false, // Is a mission currently running
+            missionTargetsLit: [false, false, false], // Mission selection targets
+
+            // XP Pinball: Fuel System
+            fuel: 6, // Current fuel (0-6)
+            fuelLights: Array(CONFIG.fuelLightCount).fill(true), // Fuel light states
+            fuelDepleting: false, // Is fuel currently depleting
+            fuelDepletionRate: 1000, // Fuel depletes every 1 second during mission
+            lastFuelDepletion: 0,
+
+            // XP Pinball: Multiplier System
+            multiplierIndex: 0, // Current multiplier (0=1x, 1=2x, 2=3x, 3=5x, 4=10x)
+
+            // XP Pinball: Lane Systems
+            reentryLanes: [false, false, false], // Re-entry lane lights
+            reentryLanesComplete: false, // All re-entry lanes lit
+            leftLaneHits: 0,
+            rightLaneHits: 0,
+            allLaneHits: 0,
+
+            // XP Pinball: Bumper System
+            attackBumperHits: 0,
+            bumpersUpgraded: false, // Bumpers upgraded when all re-entry lanes lit
+
+            // XP Pinball: Satellite (Saturn)
+            satelliteHits: 0,
+
+            // XP Pinball: Flags (for flag rotation missions)
+            flagRotations: 0,
+
+            // XP Pinball: Mission Start Time (for timed missions)
+            missionStartTime: 0,
+
+            // XP Pinball: Statistics
             statistics: {
-                spiritAnimalActivations: 0,
-                portalCrossings: 0,
-                enlightenmentCount: 0,
-                saturnVortexEscapes: 0
+                missionsCompleted: 0,
+                totalBumperHits: 0,
+                totalLaneHits: 0,
+                totalSatelliteHits: 0
             }
         };
         
@@ -715,9 +804,10 @@ class GameScene extends Phaser.Scene {
         this.setupPhysics();
         this.setupTable();
         this.setupBall();
-        this.setupChakras();
-        this.setupSaturn();
-        this.setupObstacles();
+        this.setupChakras(); // Mission targets + Fuel lights
+        this.setupSaturn(); // Satellite bumper
+        this.setupObstacles(); // Attack bumpers + other obstacles
+        this.setupReentryLanes(); // Re-entry lanes, launch ramp, bonus lane
         this.setupFlippers();
         this.setupPlunger();
         this.setupDrainZone();
@@ -806,42 +896,85 @@ class GameScene extends Phaser.Scene {
     }
     
     setupChakras() {
-        this.chakras = [];
+        // XP Pinball: Split chakras into Mission Targets (3) and Fuel Lights (6)
+        this.missionTargets = [];
+        this.fuelLights = [];
 
-        // Position chakras in a vertical alignment (like spine) - centered over flower of life
-        const startY = 380; // Lowered significantly to center over flower of life in background.png
-        const spacing = 65; // Slightly increased spacing for better visual distribution
-        const centerX = CONFIG.width / 2;
+        // Mission Targets - Left side (3 chakras for mission selection)
+        const missionTargetX = 80;
+        const missionStartY = 350;
+        const missionSpacing = 120;
 
-        for (let i = 0; i < CONFIG.chakraCount; i++) {
-            const chakra = this.add.sprite(centerX + (i % 2 === 0 ? -35 : 35), startY + (i * spacing), `chakra${i}`);
-            chakra.setScale(0.8);
-            chakra.setDepth(50);
-            this.physics.add.existing(chakra, true);
-            chakra.body.setCircle(25);
-            
-            // Add rotation animation - each rotates at different speed
+        for (let i = 0; i < CONFIG.missionTargetCount; i++) {
+            const target = this.add.sprite(missionTargetX, missionStartY + (i * missionSpacing), `chakra${i}`);
+            target.setScale(0.7);
+            target.setDepth(50);
+            this.physics.add.existing(target, true);
+            target.body.setCircle(25);
+            target.missionIndex = i; // Store which mission this represents
+
+            // Add rotation animation
             this.tweens.add({
-                targets: chakra,
+                targets: target,
                 angle: 360,
                 duration: 2500 + (i * 300),
                 repeat: -1,
                 ease: 'Linear'
             });
-            
-            // Add pulsing glow - unique timing for each
+
+            // Add pulsing glow
             this.tweens.add({
-                targets: chakra,
-                scale: 0.85,
-                alpha: 0.8,
+                targets: target,
+                scale: 0.75,
+                alpha: 0.7,
                 duration: 1200 + (i * 150),
                 yoyo: true,
                 repeat: -1,
                 ease: 'Sine.easeInOut'
             });
-            
-            this.chakras.push(chakra);
+
+            this.missionTargets.push(target);
         }
+
+        // Fuel Lights - Right side (6 chakras as fuel indicators)
+        const fuelLightX = CONFIG.width - 80;
+        const fuelStartY = 250;
+        const fuelSpacing = 90;
+
+        for (let i = 0; i < CONFIG.fuelLightCount; i++) {
+            const chakraIndex = (i + 3) % 7; // Use chakras 3-6, then 0-1
+            const fuel = this.add.sprite(fuelLightX, fuelStartY + (i * fuelSpacing), `chakra${chakraIndex}`);
+            fuel.setScale(0.6);
+            fuel.setDepth(50);
+            this.physics.add.existing(fuel, true);
+            fuel.body.setCircle(20);
+            fuel.fuelIndex = i; // Store which fuel light this represents
+
+            // Add rotation animation
+            this.tweens.add({
+                targets: fuel,
+                angle: 360,
+                duration: 3000 + (i * 200),
+                repeat: -1,
+                ease: 'Linear'
+            });
+
+            // Add pulsing glow
+            this.tweens.add({
+                targets: fuel,
+                scale: 0.65,
+                alpha: 0.8,
+                duration: 1500 + (i * 100),
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+
+            this.fuelLights.push(fuel);
+        }
+
+        // For backwards compatibility, keep this.chakras as combined array
+        this.chakras = [...this.missionTargets, ...this.fuelLights];
     }
     
     setupSaturn() {
@@ -888,67 +1021,70 @@ class GameScene extends Phaser.Scene {
 
     setupObstacles() {
         this.obstacles = [];
+        this.attackBumpers = [];
 
-        // Cosmic Crystal bumpers (triangular) - positioned strategically
-        const crystal1 = this.add.sprite(120, 320, 'cosmic-crystal');
-        crystal1.setScale(0.9);
-        crystal1.setDepth(50);
-        this.physics.add.existing(crystal1, true);
-        crystal1.body.setCircle(20);
+        // XP Pinball: Attack Bumpers (4 bumpers at top) - using cosmic crystals and asteroids
+        const bumperY = 240;
+        const bumperSpacing = 120;
+        const bumperStartX = 120;
 
-        const crystal2 = this.add.sprite(CONFIG.width - 120, 380, 'cosmic-crystal');
-        crystal2.setScale(0.9);
-        crystal2.setDepth(50);
-        this.physics.add.existing(crystal2, true);
-        crystal2.body.setCircle(20);
+        // Attack Bumper 1
+        const bumper1 = this.add.sprite(bumperStartX, bumperY, 'cosmic-crystal');
+        bumper1.setScale(0.9);
+        bumper1.setDepth(50);
+        bumper1.setTint(CONFIG.colors.bumper1);
+        this.physics.add.existing(bumper1, true);
+        bumper1.body.setCircle(22);
+        bumper1.isAttackBumper = true;
 
-        // Pulsing animation for crystals
+        // Attack Bumper 2
+        const bumper2 = this.add.sprite(bumperStartX + bumperSpacing, bumperY, 'asteroid');
+        bumper2.setScale(0.9);
+        bumper2.setDepth(50);
+        bumper2.setTint(CONFIG.colors.bumper2);
+        this.physics.add.existing(bumper2, true);
+        bumper2.body.setCircle(22);
+        bumper2.isAttackBumper = true;
+
+        // Attack Bumper 3
+        const bumper3 = this.add.sprite(bumperStartX + bumperSpacing * 2, bumperY, 'cosmic-crystal');
+        bumper3.setScale(0.9);
+        bumper3.setDepth(50);
+        bumper3.setTint(CONFIG.colors.bumper3);
+        this.physics.add.existing(bumper3, true);
+        bumper3.body.setCircle(22);
+        bumper3.isAttackBumper = true;
+
+        // Attack Bumper 4
+        const bumper4 = this.add.sprite(bumperStartX + bumperSpacing * 3, bumperY, 'asteroid');
+        bumper4.setScale(0.9);
+        bumper4.setDepth(50);
+        bumper4.setTint(CONFIG.colors.bumper4);
+        this.physics.add.existing(bumper4, true);
+        bumper4.body.setCircle(22);
+        bumper4.isAttackBumper = true;
+
+        this.attackBumpers = [bumper1, bumper2, bumper3, bumper4];
+
+        // Pulsing animation for attack bumpers
         this.tweens.add({
-            targets: [crystal1, crystal2],
+            targets: this.attackBumpers,
             scale: 1.0,
-            alpha: 0.9,
-            duration: 1000,
+            alpha: 0.95,
+            duration: 800,
             yoyo: true,
             repeat: -1,
             ease: 'Sine.easeInOut'
         });
 
-        // Asteroids - rocky space obstacles
-        const asteroid1 = this.add.sprite(90, 500, 'asteroid');
-        asteroid1.setScale(0.85);
-        asteroid1.setDepth(50);
-        this.physics.add.existing(asteroid1, true);
-        asteroid1.body.setCircle(15);
-
-        const asteroid2 = this.add.sprite(CONFIG.width - 90, 560, 'asteroid');
-        asteroid2.setScale(0.85);
-        asteroid2.setDepth(50);
-        this.physics.add.existing(asteroid2, true);
-        asteroid2.body.setCircle(15);
-
-        const asteroid3 = this.add.sprite(CONFIG.width / 2, 280, 'asteroid');
-        asteroid3.setScale(0.75);
-        asteroid3.setDepth(50);
-        this.physics.add.existing(asteroid3, true);
-        asteroid3.body.setCircle(13);
-
-        // Slow rotation for asteroids
-        this.tweens.add({
-            targets: [asteroid1, asteroid2, asteroid3],
-            angle: 360,
-            duration: 8000,
-            repeat: -1,
-            ease: 'Linear'
-        });
-
-        // Energy Vortex portals - small teleporters
-        const vortex1 = this.add.sprite(180, 240, 'energy-vortex');
+        // Other obstacles (not attack bumpers) - positioned elsewhere
+        const vortex1 = this.add.sprite(180, 450, 'energy-vortex');
         vortex1.setScale(0.7);
         vortex1.setDepth(50);
         this.physics.add.existing(vortex1, true);
         vortex1.body.setCircle(14);
 
-        const vortex2 = this.add.sprite(CONFIG.width - 180, 450, 'energy-vortex');
+        const vortex2 = this.add.sprite(CONFIG.width - 180, 520, 'energy-vortex');
         vortex2.setScale(0.7);
         vortex2.setDepth(50);
         this.physics.add.existing(vortex2, true);
@@ -999,13 +1135,43 @@ class GameScene extends Phaser.Scene {
             ease: 'Sine.easeInOut'
         });
 
-        // Store all obstacles for collision detection
+        // Store all obstacles (including attack bumpers)
         this.obstacles = [
-            crystal1, crystal2,
-            asteroid1, asteroid2, asteroid3,
+            ...this.attackBumpers,
             vortex1, vortex2,
             comet1, comet2
         ];
+    }
+
+    setupReentryLanes() {
+        // XP Pinball: Re-entry lanes at top (3 lanes)
+        this.reentryLaneZones = [];
+        const laneWidth = 60;
+        const laneHeight = 40;
+        const laneY = 50;
+        const laneSpacing = (CONFIG.width - 100) / 3;
+
+        for (let i = 0; i < CONFIG.reentryLaneCount; i++) {
+            const laneX = 50 + (i * laneSpacing) + (laneSpacing / 2);
+            const laneZone = this.add.rectangle(laneX, laneY, laneWidth, laneHeight, 0x00FF00, 0.3);
+            laneZone.setDepth(40);
+            this.physics.add.existing(laneZone, true);
+            laneZone.laneIndex = i;
+            laneZone.isReentryLane = true;
+            this.reentryLaneZones.push(laneZone);
+        }
+
+        // Launch ramp zone (right side, going up)
+        this.launchRampZone = this.add.rectangle(CONFIG.width - 70, 300, 80, 200, 0xFFFF00, 0.2);
+        this.launchRampZone.setDepth(40);
+        this.physics.add.existing(this.launchRampZone, true);
+        this.launchRampZone.isLaunchRamp = true;
+
+        // Bonus lane (left side)
+        this.bonusLaneZone = this.add.rectangle(50, CONFIG.height - 200, 60, 100, 0xFF00FF, 0.2);
+        this.bonusLaneZone.setDepth(40);
+        this.physics.add.existing(this.bonusLaneZone, true);
+        this.bonusLaneZone.isBonusLane = true;
     }
 
     setupFlippers() {
@@ -1117,17 +1283,13 @@ class GameScene extends Phaser.Scene {
     }
 
     setupCollisions() {
-        // Add robust colliders between ball and walls - ball always bounces back
+        // Walls
         this.walls.forEach(wall => {
             this.physics.add.collider(this.ball, wall, (ball, wall) => {
-                // Ensure ball bounces with proper physics
                 if (ball.body && ball.body.touching) {
-                    // Add subtle visual feedback when ball hits wall
                     if (this.cameras && this.cameras.main) {
                         this.cameras.main.shake(40, 0.003);
                     }
-
-                    // Ensure minimum bounce velocity so ball doesn't get stuck
                     const minVelocity = 100;
                     if (Math.abs(ball.body.velocity.x) < minVelocity && ball.body.touching.left) {
                         ball.body.setVelocityX(minVelocity);
@@ -1141,96 +1303,208 @@ class GameScene extends Phaser.Scene {
             }, null, this);
         });
 
-        // Add colliders for flippers - ensure ball never passes through
+        // Flippers
         this.physics.add.collider(this.ball, this.leftFlipper, null, null, this);
         this.physics.add.collider(this.ball, this.rightFlipper, null, null, this);
+
+        // XP Pinball: Mission Targets
+        this.missionTargets.forEach((target, index) => {
+            this.physics.add.overlap(this.ball, target, () => {
+                if (!this.isOnCooldown(target)) {
+                    this.hitMissionTarget(target, index);
+                    this.setCooldown(target, 500);
+                }
+            }, null, this);
+        });
+
+        // XP Pinball: Fuel Lights
+        this.fuelLights.forEach((fuel, index) => {
+            this.physics.add.overlap(this.ball, fuel, () => {
+                if (!this.isOnCooldown(fuel)) {
+                    this.hitFuelLight(fuel, index);
+                    this.setCooldown(fuel, 800);
+                }
+            }, null, this);
+        });
+
+        // XP Pinball: Attack Bumpers
+        this.attackBumpers.forEach((bumper) => {
+            this.physics.add.collider(this.ball, bumper, () => {
+                if (!this.isOnCooldown(bumper)) {
+                    this.hitAttackBumper(bumper);
+                    this.setCooldown(bumper, 300);
+                }
+            }, null, this);
+        });
+
+        // XP Pinball: Satellite (Saturn)
+        this.physics.add.collider(this.ball, this.saturn, () => {
+            if (!this.isOnCooldown(this.saturn)) {
+                this.hitSatellite();
+                this.setCooldown(this.saturn, 400);
+            }
+        }, null, this);
+
+        // XP Pinball: Re-entry Lanes
+        this.reentryLaneZones.forEach((lane) => {
+            this.physics.add.overlap(this.ball, lane, () => {
+                if (!this.isOnCooldown(lane)) {
+                    this.hitReentryLane(lane);
+                    this.setCooldown(lane, 1000);
+                }
+            }, null, this);
+        });
+
+        // XP Pinball: Launch Ramp
+        this.physics.add.overlap(this.ball, this.launchRampZone, () => {
+            if (!this.isOnCooldown(this.launchRampZone)) {
+                this.hitLaunchRamp();
+                this.setCooldown(this.launchRampZone, 1500);
+            }
+        }, null, this);
+
+        // XP Pinball: Bonus Lane
+        this.physics.add.overlap(this.ball, this.bonusLaneZone, () => {
+            if (!this.isOnCooldown(this.bonusLaneZone)) {
+                this.hitBonusLane();
+                this.setCooldown(this.bonusLaneZone, 1500);
+            }
+        }, null, this);
+
+        // Other obstacles (vortexes, comets)
+        this.obstacles.forEach((obstacle) => {
+            if (!obstacle.isAttackBumper) {
+                this.physics.add.collider(this.ball, obstacle, () => {
+                    if (!this.isOnCooldown(obstacle)) {
+                        this.hitObstacle(obstacle);
+                        this.setCooldown(obstacle, 300);
+                    }
+                }, null, this);
+            }
+        });
     }
 
     setupHUD() {
-        // Create styled header dashboard container
+        // XP Pinball HUD - More comprehensive display
         const dashboardBg = this.add.graphics();
-        dashboardBg.fillStyle(0x1a0033, 0.85);
-        dashboardBg.fillRoundedRect(0, 0, CONFIG.width, 85, 0);
-        dashboardBg.lineStyle(3, 0x00ffff, 1); // Changed to glowing cyan
-        dashboardBg.strokeRoundedRect(0, 0, CONFIG.width, 85, 0);
-        dashboardBg.lineStyle(2, 0x00ffff, 0.8); // Increased opacity for glow effect
-        dashboardBg.strokeRoundedRect(2, 2, CONFIG.width - 4, 81, 0);
+        dashboardBg.fillStyle(0x1a0033, 0.9);
+        dashboardBg.fillRoundedRect(0, 0, CONFIG.width, 120, 0);
+        dashboardBg.lineStyle(3, 0x00ffff, 1);
+        dashboardBg.strokeRoundedRect(0, 0, CONFIG.width, 120, 0);
         dashboardBg.setDepth(999);
 
-        // Decorative corner accents
-        const accentGraphics = this.add.graphics();
-        accentGraphics.lineStyle(2, 0x00ffff, 1); // Changed to glowing cyan
-        // Top left corner
-        accentGraphics.lineBetween(10, 10, 30, 10);
-        accentGraphics.lineBetween(10, 10, 10, 30);
-        // Top right corner
-        accentGraphics.lineBetween(CONFIG.width - 30, 10, CONFIG.width - 10, 10);
-        accentGraphics.lineBetween(CONFIG.width - 10, 10, CONFIG.width - 10, 30);
-        // Bottom left corner
-        accentGraphics.lineBetween(10, 75, 30, 75);
-        accentGraphics.lineBetween(10, 55, 10, 75);
-        // Bottom right corner
-        accentGraphics.lineBetween(CONFIG.width - 30, 75, CONFIG.width - 10, 75);
-        accentGraphics.lineBetween(CONFIG.width - 10, 55, CONFIG.width - 10, 75);
-        accentGraphics.setDepth(1000);
-
         this.hud = {
-            scoreLabel: this.add.text(20, 15, 'SCORE', {
-                fontSize: '16px',
-                fontFamily: 'Impact, Arial Black, Arial',
+            // Top Row: Score, High Score, Lives
+            scoreLabel: this.add.text(20, 10, 'SCORE', {
+                fontSize: '14px',
+                fontFamily: 'Impact, Arial',
                 color: '#9400D3',
                 stroke: '#000000',
-                strokeThickness: 2,
-                letterSpacing: 2
+                strokeThickness: 2
             }).setDepth(1001),
 
-            scoreText: this.add.text(20, 35, '0', {
-                fontSize: '28px',
-                fontFamily: 'Impact, Arial Black, Arial',
+            scoreText: this.add.text(20, 28, '0', {
+                fontSize: '24px',
+                fontFamily: 'Impact, Arial',
                 color: '#00ffff',
                 stroke: '#000000',
-                strokeThickness: 4,
-                letterSpacing: 1
+                strokeThickness: 3
             }).setDepth(1001),
 
-            highScoreLabel: this.add.text(CONFIG.width / 2, 15, 'HIGH SCORE', {
-                fontSize: '16px',
-                fontFamily: 'Impact, Arial Black, Arial',
+            highScoreLabel: this.add.text(CONFIG.width / 2, 10, 'HIGH', {
+                fontSize: '14px',
+                fontFamily: 'Impact, Arial',
                 color: '#9400D3',
                 stroke: '#000000',
-                strokeThickness: 2,
-                letterSpacing: 2
+                strokeThickness: 2
             }).setOrigin(0.5, 0).setDepth(1001),
 
-            highScoreText: this.add.text(CONFIG.width / 2, 35, `${this.gameState.highScore}`, {
-                fontSize: '28px',
-                fontFamily: 'Impact, Arial Black, Arial',
+            highScoreText: this.add.text(CONFIG.width / 2, 28, `${this.gameState.highScore}`, {
+                fontSize: '24px',
+                fontFamily: 'Impact, Arial',
                 color: '#ffff00',
                 stroke: '#000000',
-                strokeThickness: 4,
-                letterSpacing: 1
+                strokeThickness: 3
             }).setOrigin(0.5, 0).setDepth(1001),
 
-            livesLabel: this.add.text(CONFIG.width - 20, 15, 'LIVES', {
-                fontSize: '16px',
-                fontFamily: 'Impact, Arial Black, Arial',
+            livesLabel: this.add.text(CONFIG.width - 20, 10, 'BALLS', {
+                fontSize: '14px',
+                fontFamily: 'Impact, Arial',
                 color: '#9400D3',
                 stroke: '#000000',
-                strokeThickness: 2,
-                letterSpacing: 2
+                strokeThickness: 2
             }).setOrigin(1, 0).setDepth(1001),
 
-            livesText: this.add.text(CONFIG.width - 20, 35, `❤️ ${this.gameState.lives}`, {
-                fontSize: '28px',
-                fontFamily: 'Impact, Arial Black, Arial',
+            livesText: this.add.text(CONFIG.width - 20, 28, `${this.gameState.lives}`, {
+                fontSize: '24px',
+                fontFamily: 'Impact, Arial',
                 color: '#ff0099',
                 stroke: '#000000',
-                strokeThickness: 4
+                strokeThickness: 3
             }).setOrigin(1, 0).setDepth(1001),
 
-            comboText: this.add.text(CONFIG.width / 2, 95, '', {
-                fontSize: '24px',
-                fontFamily: 'Impact, Arial Black, Arial',
+            // Second Row: Rank, Mission, Multiplier
+            rankLabel: this.add.text(20, 60, 'RANK', {
+                fontSize: '12px',
+                fontFamily: 'Arial',
+                color: '#00ffff',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setDepth(1001),
+
+            rankText: this.add.text(20, 75, CONFIG.ranks[0], {
+                fontSize: '18px',
+                fontFamily: 'Impact, Arial',
+                color: '#00ff00',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setDepth(1001),
+
+            missionLabel: this.add.text(CONFIG.width / 2, 60, 'MISSION', {
+                fontSize: '12px',
+                fontFamily: 'Arial',
+                color: '#00ffff',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setOrigin(0.5, 0).setDepth(1001),
+
+            missionText: this.add.text(CONFIG.width / 2, 75, 'Select Mission', {
+                fontSize: '16px',
+                fontFamily: 'Arial',
+                color: '#ffff00',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setOrigin(0.5, 0).setDepth(1001),
+
+            multiplierLabel: this.add.text(CONFIG.width - 20, 60, 'MULT', {
+                fontSize: '12px',
+                fontFamily: 'Arial',
+                color: '#00ffff',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setOrigin(1, 0).setDepth(1001),
+
+            multiplierText: this.add.text(CONFIG.width - 20, 75, '1x', {
+                fontSize: '20px',
+                fontFamily: 'Impact, Arial',
+                color: '#ff00ff',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setOrigin(1, 0).setDepth(1001),
+
+            // Third Row: Fuel indicator
+            fuelLabel: this.add.text(20, 100, 'FUEL', {
+                fontSize: '12px',
+                fontFamily: 'Arial',
+                color: '#00ffff',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setDepth(1001),
+
+            // Popup messages
+            comboText: this.add.text(CONFIG.width / 2, 130, '', {
+                fontSize: '20px',
+                fontFamily: 'Impact, Arial',
                 color: '#ffffff',
                 stroke: '#ff00ff',
                 strokeThickness: 4,
@@ -1323,11 +1597,17 @@ class GameScene extends Phaser.Scene {
 
         this.updateInput();
         this.updatePlunger();
-        this.updateCombo();
-        this.updatePowerups();
         this.checkDrain();
-        this.updateEnlightenment();
-        this.updateSaturnVortex();
+
+        // XP Pinball: Update mission fuel depletion
+        if (this.gameState.missionActive) {
+            this.depleteFuel();
+
+            // Check time-based missions
+            if (this.gameState.activeMission && this.gameState.activeMission.type === 'time') {
+                this.checkMissionComplete();
+            }
+        }
     }
 
     shutdown() {
@@ -1652,561 +1932,405 @@ class GameScene extends Phaser.Scene {
         }
     }
     
-    updateCombo() {
-        const now = Date.now();
-        if (this.gameState.lastHitTime && now - this.gameState.lastHitTime > CONFIG.comboTimeout) {
-            this.gameState.comboCount = 0;
-            this.gameState.comboMultiplier = 1;
+    // Old methods removed - replaced with XP Pinball mechanics
+
+    // ===================================
+    // XP PINBALL COLLISION HANDLERS
+    // ===================================
+
+    hitMissionTarget(target, index) {
+        // Select a mission by hitting a mission target
+        this.gameState.selectedMission = index;
+        this.gameState.missionTargetsLit[index] = true;
+
+        this.addScore(CONFIG.scores.missionTarget);
+        this.cameras.main.shake(60, 0.002);
+
+        // Visual feedback
+        target.setTint(CONFIG.colors.missionActive);
+        this.tweens.add({
+            targets: target,
+            scale: 0.85,
+            duration: 100,
+            yoyo: true
+        });
+
+        const missionName = CONFIG.missions[this.gameState.rank][index].name;
+        this.showPopup(`Selected: ${missionName}`, target.x, target.y - 50, 16);
+        this.updateHUD();
+    }
+
+    hitFuelLight(fuel, index) {
+        // Refuel by hitting fuel lights
+        if (this.gameState.fuel < CONFIG.fuelLightCount) {
+            this.gameState.fuel++;
+            this.gameState.fuelLights[index] = true;
+            fuel.setAlpha(1);
+            fuel.setTint(CONFIG.colors.fuelFull);
+
+            this.addScore(CONFIG.scores.fuelTarget);
+            this.cameras.main.shake(50, 0.002);
+            this.showPopup('+FUEL', fuel.x, fuel.y - 40, 18);
             this.updateHUD();
         }
     }
-    
-    updatePowerups() {
-        const now = Date.now();
-        
-        if (this.gameState.powerups.spiritAnimal.active && now > this.gameState.powerups.spiritAnimal.endTime) {
-            this.gameState.powerups.spiritAnimal.active = false;
-            this.ballTrail.particleTint = CONFIG.colors.eyeball;
-        }
-        
-        if (this.gameState.powerups.ancestorGuide.active && now > this.gameState.powerups.ancestorGuide.endTime) {
-            this.gameState.powerups.ancestorGuide.active = false;
-        }
-    }
-    
-    updateEnlightenment() {
-        if (this.gameState.enlightenmentActive && Date.now() > this.gameState.enlightenmentEndTime) {
-            this.deactivateEnlightenment();
-        }
-    }
-    
-    updateSaturnVortex() {
-        if (this.gameState.saturnVortexActive && this.saturnHexagon.visible) {
-            // Pull ball toward vortex
-            if (this.ball.body && this.gameState.ballInPlay) {
-                const dx = this.saturnHexagon.x - this.ball.x;
-                const dy = this.saturnHexagon.y - this.ball.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
 
-                if (distance < 150) {
-                    const pullStrength = 200 * (1 - distance / 150);
-                    this.ball.body.setVelocity(
-                        this.ball.body.velocity.x + (dx / distance) * pullStrength * 0.02,
-                        this.ball.body.velocity.y + (dy / distance) * pullStrength * 0.02
-                    );
-                }
+    hitAttackBumper(bumper) {
+        // XP Pinball attack bumper behavior
+        const baseScore = this.gameState.bumpersUpgraded ?
+            CONFIG.scores.attackBumperUpgraded :
+            CONFIG.scores.attackBumper;
 
-                // Check if ball is sucked into vortex
-                if (this.physics.overlap(this.ball, this.saturnHexagon)) {
-                    this.ballSuckedIntoVortex();
-                }
+        this.addScore(baseScore);
+        this.gameState.attackBumperHits++;
+        this.gameState.statistics.totalBumperHits++;
+
+        // Check if this advances current mission
+        if (this.gameState.missionActive && this.gameState.activeMission) {
+            if (this.gameState.activeMission.type === 'bumper') {
+                this.gameState.missionProgress++;
+                this.checkMissionComplete();
             }
         }
 
-        // Check chakra collisions
-        this.chakras.forEach((chakra, index) => {
-            if (this.physics.overlap(this.ball, chakra)) {
-                if (!this.isOnCooldown(chakra)) {
-                    this.hitChakra(index);
-                    this.setCooldown(chakra, 500);
-                }
-            }
+        // Bounce ball away
+        if (this.ball.body) {
+            const angle = Math.atan2(
+                this.ball.y - bumper.y,
+                this.ball.x - bumper.x
+            );
+            this.ball.body.setVelocity(
+                Math.cos(angle) * 700,
+                Math.sin(angle) * 700
+            );
+        }
+
+        this.cameras.main.shake(100, 0.004);
+        this.tweens.add({
+            targets: bumper,
+            scale: 1.1,
+            duration: 80,
+            yoyo: true
         });
 
-        // Check Saturn collision
-        if (this.physics.overlap(this.ball, this.saturn)) {
-            if (!this.isOnCooldown(this.saturn)) {
-                this.hitSaturn();
-                this.setCooldown(this.saturn, 500);
-            }
-        }
-
-        // Check obstacle collisions
-        if (this.obstacles) {
-            this.obstacles.forEach((obstacle, index) => {
-                if (this.physics.overlap(this.ball, obstacle)) {
-                    if (!this.isOnCooldown(obstacle)) {
-                        this.hitObstacle(obstacle, index);
-                        this.setCooldown(obstacle, 400);
-                    }
-                }
-            });
-        }
+        this.showPopup(`+${baseScore}`, bumper.x, bumper.y - 40, 20);
+        this.updateHUD();
     }
 
-    hitObstacle(obstacle, index) {
-        // Different effects based on obstacle type
+    hitSatellite() {
+        // XP Pinball satellite (Saturn) behavior
+        this.gameState.satelliteHits++;
+        this.gameState.statistics.totalSatelliteHits++;
+
+        this.addScore(CONFIG.scores.satellite);
+        this.cameras.main.shake(120, 0.005);
+
+        // Check if this advances current mission
+        if (this.gameState.missionActive && this.gameState.activeMission) {
+            if (this.gameState.activeMission.type === 'satellite') {
+                this.gameState.missionProgress++;
+                this.checkMissionComplete();
+            }
+        }
+
+        // Bounce away
+        if (this.ball.body) {
+            const angle = Math.atan2(
+                this.ball.y - this.saturn.y,
+                this.ball.x - this.saturn.x
+            );
+            this.ball.body.setVelocity(
+                Math.cos(angle) * 800,
+                Math.sin(angle) * 800
+            );
+        }
+
+        this.tweens.add({
+            targets: [this.saturn, this.saturnRing],
+            scale: 1.0,
+            duration: 100,
+            yoyo: true
+        });
+
+        this.showPopup('SATELLITE!', this.saturn.x, this.saturn.y - 60, 22);
+        this.updateHUD();
+    }
+
+    hitReentryLane(lane) {
+        // XP Pinball re-entry lane behavior
+        const laneIndex = lane.laneIndex;
+        this.gameState.reentryLanes[laneIndex] = true;
+        this.gameState.allLaneHits++;
+
+        this.addScore(CONFIG.scores.reentryLane);
+        this.cameras.main.shake(80, 0.003);
+
+        // Light up the lane
+        lane.setFillStyle(CONFIG.colors.missionActive, 0.5);
+
+        // Check if all re-entry lanes are lit
+        if (this.gameState.reentryLanes.every(lit => lit)) {
+            this.gameState.reentryLanesComplete = true;
+            this.gameState.bumpersUpgraded = true;
+            this.showPopup('WEAPONS UPGRADED!', CONFIG.width / 2, 200, 24);
+
+            // Check mission progress
+            if (this.gameState.missionActive && this.gameState.activeMission) {
+                if (this.gameState.activeMission.type === 'reentry') {
+                    this.gameState.missionProgress++;
+                    this.checkMissionComplete();
+                }
+            }
+        }
+
+        // Check mission progress for lane-based missions
+        if (this.gameState.missionActive && this.gameState.activeMission) {
+            if (this.gameState.activeMission.type === 'lane' ||
+                this.gameState.activeMission.type === 'alllanes') {
+                this.gameState.missionProgress++;
+                this.checkMissionComplete();
+            }
+        }
+
+        this.showPopup('RE-ENTRY!', lane.x, lane.y - 30, 18);
+        this.updateHUD();
+    }
+
+    hitLaunchRamp() {
+        // XP Pinball launch ramp - starts selected mission
+        this.addScore(CONFIG.scores.launchRamp);
+        this.cameras.main.shake(90, 0.003);
+
+        // Start mission if one is selected
+        if (!this.gameState.missionActive && this.gameState.selectedMission !== null) {
+            this.startMission();
+        } else if (this.gameState.missionActive && this.gameState.activeMission) {
+            // Count towards ramp missions
+            if (this.gameState.activeMission.type === 'ramp') {
+                this.gameState.missionProgress++;
+                this.checkMissionComplete();
+            }
+        }
+
+        this.showPopup('LAUNCH RAMP!', this.launchRampZone.x, this.launchRampZone.y - 40, 20);
+        this.updateHUD();
+    }
+
+    hitBonusLane() {
+        // XP Pinball bonus lane - big points
+        this.addScore(CONFIG.scores.bonusLane);
+        this.cameras.main.shake(150, 0.006);
+        this.cameras.main.flash(300);
+
+        // Award multiplier progress
+        if (this.gameState.multiplierIndex < CONFIG.multipliers.length - 1) {
+            this.gameState.multiplierIndex++;
+            this.showPopup(`MULTIPLIER ${CONFIG.multipliers[this.gameState.multiplierIndex]}x!`,
+                CONFIG.width / 2, 250, 26);
+        }
+
+        this.showPopup('BONUS LANE!', this.bonusLaneZone.x, this.bonusLaneZone.y - 40, 24);
+        this.updateHUD();
+    }
+
+    hitObstacle(obstacle) {
+        // Regular obstacles (vortexes, comets) - minor scoring
         const textureName = obstacle.texture.key;
+        let points = 100;
 
-        if (textureName === 'cosmic-crystal') {
-            // Crystal gives bonus points and intense bounce
-            if (this.cameras && this.cameras.main) {
-                this.cameras.main.shake(100, 0.004);
-            }
-            this.addScore(CONFIG.scores.bumper * 2);
-            this.incrementCombo();
-
-            // Intense bounce effect
-            if (this.ball.body) {
-                const angle = Math.atan2(
-                    this.ball.y - obstacle.y,
-                    this.ball.x - obstacle.x
-                );
-                this.ball.body.setVelocity(
-                    Math.cos(angle) * 800,
-                    Math.sin(angle) * 800
-                );
-            }
-
-            // Crystal burst effect
-            this.tweens.add({
-                targets: obstacle,
-                scale: 1.2,
-                alpha: 1,
-                duration: 100,
-                yoyo: true,
-                ease: 'Power2'
-            });
-
-            this.showPopup('CRYSTAL!', obstacle.x, obstacle.y - 40, 20);
-
-        } else if (textureName === 'asteroid') {
-            // Asteroid gives medium points and solid bounce
-            if (this.cameras && this.cameras.main) {
-                this.cameras.main.shake(80, 0.003);
-            }
-            this.addScore(CONFIG.scores.bumper);
-            this.incrementCombo();
-
-            // Solid bounce
-            if (this.ball.body) {
-                const angle = Math.atan2(
-                    this.ball.y - obstacle.y,
-                    this.ball.x - obstacle.x
-                );
-                this.ball.body.setVelocity(
-                    Math.cos(angle) * 600,
-                    Math.sin(angle) * 600
-                );
-            }
-
-            this.showPopup('ASTEROID!', obstacle.x, obstacle.y - 30, 18);
-
-        } else if (textureName === 'energy-vortex') {
-            // Energy vortex gives teleport/speed boost
-            if (this.cameras && this.cameras.main) {
-                this.cameras.main.shake(120, 0.005);
-            }
-            this.addScore(CONFIG.scores.bumper * 3);
-            this.incrementCombo();
-
-            // Speed boost effect
+        if (textureName === 'energy-vortex') {
+            points = 300;
+            // Speed boost
             if (this.ball.body) {
                 const currentSpeed = Math.sqrt(
                     this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
                 );
-                const newSpeed = currentSpeed * 1.3;
+                const newSpeed = currentSpeed * 1.2;
                 const angle = Math.atan2(this.ball.body.velocity.y, this.ball.body.velocity.x);
                 this.ball.body.setVelocity(
                     Math.cos(angle) * newSpeed,
                     Math.sin(angle) * newSpeed
                 );
             }
-
-            // Flash effect
-            if (this.cameras && this.cameras.main) {
-                this.cameras.main.flash(200, 138, 43, 226, false, 0.3);
-            }
-
-            this.showPopup('VORTEX BOOST!', obstacle.x, obstacle.y - 40, 22);
-
         } else if (textureName === 'comet') {
-            // Comet gives high points and directional boost
-            if (this.cameras && this.cameras.main) {
-                this.cameras.main.shake(90, 0.004);
-            }
-            this.addScore(CONFIG.scores.bumper * 2.5);
-            this.incrementCombo();
-
-            // Directional boost based on comet angle
-            if (this.ball.body) {
-                const cometAngle = obstacle.angle * Math.PI / 180;
-                this.ball.body.setVelocity(
-                    this.ball.body.velocity.x + Math.cos(cometAngle) * 300,
-                    this.ball.body.velocity.y + Math.sin(cometAngle) * 300
-                );
-            }
-
-            this.showPopup('COMET!', obstacle.x, obstacle.y - 35, 20);
+            points = 250;
         }
 
-        // Particle burst for all obstacles
-        if (this.textures.exists('particle')) {
-            try {
-                const burstParticles = this.add.particles(obstacle.x, obstacle.y, 'particle', {
-                    speed: { min: 100, max: 250 },
-                    angle: { min: 0, max: 360 },
-                    scale: { start: 0.6, end: 0 },
-                    alpha: { start: 1, end: 0 },
-                    lifespan: 600,
-                    blendMode: 'ADD',
-                    frequency: -1,
-                    quantity: 15,
-                    tint: obstacle.tint || 0xffffff
-                });
-
-                // Track for cleanup
-                if (this.dynamicParticles) {
-                    this.dynamicParticles.push(burstParticles);
-                }
-
-                this.time.delayedCall(650, () => {
-                    if (burstParticles && burstParticles.active) {
-                        burstParticles.destroy();
-                        // Remove from tracking array
-                        if (this.dynamicParticles) {
-                            const index = this.dynamicParticles.indexOf(burstParticles);
-                            if (index > -1) {
-                                this.dynamicParticles.splice(index, 1);
-                            }
-                        }
-                    }
-                });
-            } catch (error) {
-                console.error('Failed to create obstacle burst particles:', error);
-            }
-        }
+        this.addScore(points);
+        this.cameras.main.shake(60, 0.002);
     }
     
-    hitChakra(index) {
-        if (this.cameras && this.cameras.main) {
-            this.cameras.main.shake(80, 0.002);
-        }
-        this.addScore(CONFIG.scores.chakra);
-        this.incrementCombo();
-        
-        // Light up the chakra
-        this.gameState.chakrasLit[index] = true;
-        
-        // Visual feedback
-        this.tweens.add({
-            targets: this.chakras[index],
-            scale: 1.1,
-            alpha: 1,
-            duration: 150,
-            yoyo: true,
-            ease: 'Power2'
-        });
-        
-        // Particle burst
-        if (this.textures.exists('particle-triangle')) {
-            try {
-                const burstParticles = this.add.particles(this.chakras[index].x, this.chakras[index].y, 'particle-triangle', {
-                    speed: { min: 150, max: 300 },
-                    angle: { min: 0, max: 360 },
-                    scale: { start: 0.8, end: 0 },
-                    alpha: { start: 1, end: 0 },
-                    lifespan: 700,
-                    blendMode: 'ADD',
-                    frequency: -1,
-                    quantity: 20,
-                    tint: CONFIG.colors.chakra[index]
-                });
+    // ===================================
+    // XP PINBALL MISSION MANAGEMENT
+    // ===================================
 
-                // Track for cleanup
-                if (this.dynamicParticles) {
-                    this.dynamicParticles.push(burstParticles);
-                }
+    startMission() {
+        // Start the selected mission
+        const mission = CONFIG.missions[this.gameState.rank][this.gameState.selectedMission];
+        this.gameState.activeMission = mission;
+        this.gameState.missionActive = true;
+        this.gameState.missionProgress = 0;
+        this.gameState.fuel = CONFIG.fuelLightCount;
+        this.gameState.fuelDepleting = true;
+        this.gameState.lastFuelDepletion = Date.now();
+        this.gameState.missionStartTime = Date.now();
 
-                this.time.delayedCall(750, () => {
-                    if (burstParticles && burstParticles.active) {
-                        burstParticles.destroy();
-                        // Remove from tracking array
-                        if (this.dynamicParticles) {
-                            const idx = this.dynamicParticles.indexOf(burstParticles);
-                            if (idx > -1) {
-                                this.dynamicParticles.splice(idx, 1);
-                            }
-                        }
-                    }
-                });
-            } catch (error) {
-                console.error('Failed to create chakra burst particles:', error);
-            }
-        }
-        
-        this.showPopup(`CHAKRA ${index + 1}!`, this.chakras[index].x, this.chakras[index].y - 40, 22);
-        
-        // Check if all chakras are lit
-        if (this.gameState.chakrasLit.every(lit => lit)) {
-            this.activateEnlightenment();
-        }
+        this.cameras.main.shake(150, 0.006);
+        this.cameras.main.flash(400);
+        this.showPopup(`MISSION: ${mission.name}`, CONFIG.width / 2, CONFIG.height / 2 - 50, 28);
+        this.showPopup(mission.description, CONFIG.width / 2, CONFIG.height / 2, 18);
+
+        this.updateHUD();
     }
-    
-    activateEnlightenment() {
-        this.gameState.enlightenmentActive = true;
-        this.gameState.enlightenmentEndTime = Date.now() + CONFIG.powerupDurations.enlightenment;
-        this.gameState.statistics.enlightenmentCount++;
 
-        // Change ball to flaming eyeball
-        if (this.ball && this.textures.exists('eyeball-fire')) {
-            this.ball.setTexture('eyeball-fire');
+    checkMissionComplete() {
+        if (!this.gameState.activeMission) return;
+
+        const mission = this.gameState.activeMission;
+        let isComplete = false;
+
+        switch (mission.type) {
+            case 'bumper':
+            case 'ramp':
+            case 'lane':
+            case 'alllanes':
+            case 'satellite':
+            case 'target':
+            case 'reentry':
+                isComplete = this.gameState.missionProgress >= mission.requirement;
+                break;
+            case 'fuel':
+                isComplete = this.gameState.fuel >= mission.requirement;
+                break;
+            case 'flags':
+                isComplete = this.gameState.flagRotations >= mission.requirement;
+                break;
+            case 'score':
+                isComplete = this.gameState.score >= mission.requirement;
+                break;
+            case 'time':
+                const elapsed = (Date.now() - this.gameState.missionStartTime) / 1000;
+                isComplete = elapsed >= mission.requirement;
+                break;
+            case 'rapidtarget':
+                isComplete = this.gameState.missionProgress >= mission.requirement;
+                break;
         }
 
-        // Enhanced trail effect with fire
-        if (this.ballTrail && this.ballTrail.active) {
-            this.ballTrail.particleTint = [0xFF6600, 0xFF0000, 0xFFFF00];
-            this.ballTrail.frequency = 12;
-            this.ballTrail.particleScaleX = { start: 0.9, end: 0 };
-            this.ballTrail.particleScaleY = { start: 0.9, end: 0 };
-            this.ballTrail.particleAlpha = { start: 1, end: 0 };
+        if (isComplete) {
+            this.completeMission();
         }
 
-        // Intense screen shake
-        if (this.cameras && this.cameras.main) {
-            this.cameras.main.shake(500, 0.01);
-        }
+        this.updateHUD();
+    }
+
+    completeMission() {
+        const mission = this.gameState.activeMission;
+
+        // Award points
+        this.addScore(CONFIG.scores.missionComplete);
+
+        // Track completion
+        this.gameState.statistics.missionsCompleted++;
+        this.gameState.rankProgress++;
 
         // Visual celebration
-        this.showPopup('ENLIGHTENMENT!', CONFIG.width / 2, CONFIG.height / 2, 42);
-        
-        // Award bonus score
-        this.addScore(CONFIG.scores.enlightenment);
-        
-        // Speed boost
-        if (this.ball.body) {
-            const currentSpeed = Math.sqrt(
-                this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
-            );
-            const newSpeed = currentSpeed * 1.5;
-            const angle = Math.atan2(this.ball.body.velocity.y, this.ball.body.velocity.x);
-            this.ball.body.setVelocity(
-                Math.cos(angle) * newSpeed,
-                Math.sin(angle) * newSpeed
-            );
-        }
-        
-        // Reset chakras for next cycle
-        this.gameState.chakrasLit = Array(CONFIG.chakraCount).fill(false);
-    }
-    
-    deactivateEnlightenment() {
-        this.gameState.enlightenmentActive = false;
+        this.cameras.main.shake(250, 0.008);
+        this.cameras.main.flash(600);
+        this.showPopup('MISSION COMPLETE!', CONFIG.width / 2, CONFIG.height / 2 - 50, 36);
+        this.showPopup(`+${CONFIG.scores.missionComplete}`, CONFIG.width / 2, CONFIG.height / 2 + 20, 28);
 
-        // Return to normal eyeball
-        if (this.ball && this.textures.exists('eyeball')) {
-            this.ball.setTexture('eyeball');
+        // Check rank up
+        if (this.gameState.rankProgress >= this.gameState.rankProgressRequired) {
+            this.rankUp();
         }
 
-        // Normal trail
-        if (this.ballTrail && this.ballTrail.active) {
-            this.ballTrail.particleTint = CONFIG.colors.eyeball;
-            this.ballTrail.frequency = 25;
-            this.ballTrail.particleScaleX = { start: 0.5, end: 0 };
-            this.ballTrail.particleScaleY = { start: 0.5, end: 0 };
-            this.ballTrail.particleAlpha = { start: 0.7, end: 0 };
+        // End mission
+        this.gameState.missionActive = false;
+        this.gameState.activeMission = null;
+        this.gameState.fuelDepleting = false;
+        this.gameState.selectedMission = null;
+        this.gameState.missionTargetsLit = [false, false, false];
+
+        // Reset mission targets visually
+        this.missionTargets.forEach(target => {
+            target.clearTint();
+        });
+
+        this.updateHUD();
+    }
+
+    rankUp() {
+        if (this.gameState.rank < CONFIG.ranks.length - 1) {
+            this.gameState.rank++;
+            this.gameState.rankProgress = 0;
+
+            this.addScore(CONFIG.scores.rankUp);
+
+            this.cameras.main.shake(400, 0.01);
+            this.cameras.main.flash(1000);
+            this.showPopup('RANK UP!', CONFIG.width / 2, CONFIG.height / 2 - 60, 44);
+            this.showPopup(CONFIG.ranks[this.gameState.rank], CONFIG.width / 2, CONFIG.height / 2, 36);
+
+            this.updateHUD();
         }
     }
-    
-    hitSaturn() {
-        if (this.cameras && this.cameras.main) {
-            this.cameras.main.shake(100, 0.003);
-        }
-        this.addScore(CONFIG.scores.saturn);
-        this.incrementCombo();
-        
-        this.gameState.saturnHitCount++;
-        
-        // Increase ring glow
-        this.tweens.add({
-            targets: this.saturnRing,
-            alpha: 1.0,
-            scale: 0.95,
-            duration: 150,
-            yoyo: true,
-            ease: 'Power2',
-            onComplete: () => {
-                this.saturnRing.setAlpha(0.8 + (this.gameState.saturnHitCount * 0.1));
+
+    depleteFuel() {
+        if (!this.gameState.fuelDepleting || !this.gameState.missionActive) return;
+
+        const now = Date.now();
+        if (now - this.gameState.lastFuelDepletion >= this.gameState.fuelDepletionRate) {
+            this.gameState.fuel--;
+            this.gameState.lastFuelDepletion = now;
+
+            // Update fuel light visuals
+            if (this.gameState.fuel >= 0 && this.gameState.fuel < this.fuelLights.length) {
+                this.fuelLights[this.gameState.fuel].setAlpha(0.3);
+                this.fuelLights[this.gameState.fuel].setTint(CONFIG.colors.fuelLow);
             }
-        });
-        
-        // Particle burst
-        if (this.textures.exists('particle-hex')) {
-            try {
-                const burstParticles = this.add.particles(this.saturn.x, this.saturn.y, 'particle-hex', {
-                    speed: { min: 180, max: 350 },
-                    angle: { min: 0, max: 360 },
-                    scale: { start: 0.8, end: 0 },
-                    alpha: { start: 1, end: 0 },
-                    lifespan: 900,
-                    blendMode: 'ADD',
-                    frequency: -1,
-                    quantity: 25,
-                    tint: CONFIG.colors.saturnRing
-                });
 
-                // Track for cleanup
-                if (this.dynamicParticles) {
-                    this.dynamicParticles.push(burstParticles);
-                }
-
-                this.time.delayedCall(950, () => {
-                    if (burstParticles && burstParticles.active) {
-                        burstParticles.destroy();
-                        // Remove from tracking array
-                        if (this.dynamicParticles) {
-                            const idx = this.dynamicParticles.indexOf(burstParticles);
-                            if (idx > -1) {
-                                this.dynamicParticles.splice(idx, 1);
-                            }
-                        }
-                    }
-                });
-            } catch (error) {
-                console.error('Failed to create saturn burst particles:', error);
+            if (this.gameState.fuel <= 0) {
+                this.abortMission();
             }
-        }
-        
-        this.showPopup(`SATURN ${this.gameState.saturnHitCount}/3!`, this.saturn.x, this.saturn.y - 50, 24);
-        
-        // Activate vortex after 3 hits
-        if (this.gameState.saturnHitCount >= CONFIG.saturnHitsRequired) {
-            this.activateSaturnVortex();
+
+            this.updateHUD();
         }
     }
-    
-    activateSaturnVortex() {
-        this.gameState.saturnVortexActive = true;
-        this.gameState.saturnHitCount = 0;
-        
-        // Show hexagon
-        this.saturnHexagon.setVisible(true);
-        this.saturnHexagon.setScale(0);
-        
-        this.tweens.add({
-            targets: this.saturnHexagon,
-            scale: 1.2,
-            duration: 500,
-            ease: 'Back.easeOut'
-        });
-        
-        // Rotation animation
-        this.tweens.add({
-            targets: this.saturnHexagon,
-            angle: -360,
-            duration: 3000,
-            repeat: -1,
-            ease: 'Linear'
-        });
-        
-        // Pulsing effect
-        this.tweens.add({
-            targets: this.saturnHexagon,
-            alpha: 0.5,
-            scale: 1.3,
-            duration: 600,
-            yoyo: true,
-            repeat: -1,
-            ease: 'Sine.easeInOut'
-        });
-        
-        this.showPopup('VORTEX ACTIVE!', CONFIG.width / 2, 150, 32);
-        
-        // Reset ring glow
-        this.saturnRing.setAlpha(0.8);
-        
-        // Auto-deactivate after some time
-        this.time.delayedCall(8000, () => {
-            this.deactivateSaturnVortex();
-        });
-    }
-    
-    deactivateSaturnVortex() {
-        if (!this.gameState.saturnVortexActive) return;
-        
-        this.gameState.saturnVortexActive = false;
-        
-        this.tweens.add({
-            targets: this.saturnHexagon,
-            scale: 0,
-            alpha: 0,
-            duration: 400,
-            ease: 'Back.easeIn',
-            onComplete: () => {
-                this.saturnHexagon.setVisible(false);
-                this.saturnHexagon.setAlpha(1);
-                this.saturnHexagon.setScale(1.2);
-            }
-        });
-    }
-    
-    ballSuckedIntoVortex() {
-        this.gameState.saturnVortexActive = false;
-        this.gameState.ballInPlay = false;
-        
-        // Dramatic sucking effect
-        this.tweens.add({
-            targets: this.ball,
-            x: this.saturnHexagon.x,
-            y: this.saturnHexagon.y,
-            scale: 0,
-            duration: 400,
-            ease: 'Power2.easeIn',
-            onComplete: () => {
-                // Teleport ball to random location
-                const newX = Phaser.Math.Between(100, CONFIG.width - 100);
-                const newY = Phaser.Math.Between(250, 450);
-                
-                this.ball.setPosition(newX, newY);
-                this.ball.setScale(0.8);
 
-                // Flash effect
-                if (this.cameras && this.cameras.main) {
-                    this.cameras.main.flash(300, 138, 43, 226);
-                }
+    abortMission() {
+        this.gameState.missionActive = false;
+        this.gameState.activeMission = null;
+        this.gameState.fuelDepleting = false;
+        this.gameState.selectedMission = null;
+        this.gameState.missionTargetsLit = [false, false, false];
 
-                this.gameState.ballInPlay = true;
-                this.gameState.statistics.saturnVortexEscapes++;
-                
-                this.showPopup('DIMENSION SHIFT!', newX, newY - 50, 28);
-            }
+        // Reset mission targets visually
+        this.missionTargets.forEach(target => {
+            target.clearTint();
         });
-        
-        this.deactivateSaturnVortex();
+
+        this.showPopup('MISSION ABORTED', CONFIG.width / 2, CONFIG.height / 2, 32);
+        this.cameras.main.shake(120, 0.004);
+
+        this.updateHUD();
     }
     
     checkDrain() {
         if (this.gameState.ballInPlay && this.physics.overlap(this.ball, this.drainZone)) {
-            if (this.gameState.powerups.secondChance.available) {
-                this.gameState.powerups.secondChance.available = false;
-                this.showPopup('REBIRTH!', CONFIG.width / 2, CONFIG.height / 2, 44);
-                if (this.cameras && this.cameras.main) {
-                    this.cameras.main.flash(600, 255, 255, 255);
-                }
-                this.resetBall();
-                return;
-            }
-            
             // Show Grim Reaper
             this.showGrimReaper();
-            
+
             this.gameState.lives--;
             this.gameState.ballInPlay = false;
-            this.gameState.comboCount = 0;
-            this.gameState.comboMultiplier = 1;
-            
-            // Deactivate enlightenment if active
-            if (this.gameState.enlightenmentActive) {
-                this.deactivateEnlightenment();
+
+            // XP Pinball: Abort any active mission
+            if (this.gameState.missionActive) {
+                this.abortMission();
             }
-            
-            // Deactivate Saturn vortex if active
-            if (this.gameState.saturnVortexActive) {
-                this.deactivateSaturnVortex();
-            }
-            
+
             this.updateHUD();
-            
+
             if (this.gameState.lives <= 0) {
                 this.time.delayedCall(2000, () => this.gameOver());
             } else {
@@ -2329,9 +2453,9 @@ class GameScene extends Phaser.Scene {
             this.quickTapTimer = null;
         }
 
-        // Reset enlightenment if needed
-        if (this.gameState.enlightenmentActive) {
-            this.deactivateEnlightenment();
+        // XP Pinball: Abort mission if ball is lost
+        if (this.gameState.missionActive) {
+            this.abortMission();
         }
     }
     
@@ -2365,40 +2489,72 @@ class GameScene extends Phaser.Scene {
     }
     
     addScore(points) {
-        let multiplier = this.gameState.comboMultiplier;
-        if (this.gameState.enlightenmentActive) {
-            multiplier *= 2;
-        }
+        // XP Pinball: Apply field multiplier
+        const multiplier = CONFIG.multipliers[this.gameState.multiplierIndex];
         const multipliedPoints = Math.floor(points * multiplier);
         this.gameState.score += multipliedPoints;
-        
+
+        // Track flags for flag missions
+        this.gameState.flagRotations++;
+
         if (this.gameState.score > this.gameState.highScore) {
             this.gameState.highScore = this.gameState.score;
             localStorage.setItem('spiritball-highscore', this.gameState.highScore);
         }
-        
-        this.updateHUD();
-    }
-    
-    incrementCombo() {
-        this.gameState.comboCount++;
-        this.gameState.lastHitTime = Date.now();
-        if (this.gameState.comboCount % 5 === 0) {
-            this.gameState.comboMultiplier = Math.min(this.gameState.comboMultiplier + 0.5, CONFIG.maxComboMultiplier);
+
+        // Check mission progress for score-based missions
+        if (this.gameState.missionActive && this.gameState.activeMission) {
+            if (this.gameState.activeMission.type === 'score') {
+                this.checkMissionComplete();
+            }
         }
+
         this.updateHUD();
     }
-    
+
     updateHUD() {
+        // Update basic stats
         this.hud.scoreText.setText(`${this.gameState.score}`);
         this.hud.highScoreText.setText(`${this.gameState.highScore}`);
-        this.hud.livesText.setText(`❤️ ${this.gameState.lives}`);
+        this.hud.livesText.setText(`${this.gameState.lives}`);
 
-        if (this.gameState.comboMultiplier > 1) {
-            this.hud.comboText.setText(`${this.gameState.comboMultiplier.toFixed(1)}x COMBO`);
-            this.hud.comboText.setAlpha(1);
+        // Update rank
+        this.hud.rankText.setText(CONFIG.ranks[this.gameState.rank]);
+
+        // Update mission
+        if (this.gameState.missionActive && this.gameState.activeMission) {
+            const progress = this.gameState.missionProgress;
+            const required = this.gameState.activeMission.requirement;
+            this.hud.missionText.setText(`${this.gameState.activeMission.name} (${progress}/${required})`);
+        } else if (this.gameState.selectedMission !== null) {
+            const mission = CONFIG.missions[this.gameState.rank][this.gameState.selectedMission];
+            this.hud.missionText.setText(`Selected: ${mission.name}`);
         } else {
-            this.hud.comboText.setAlpha(0);
+            this.hud.missionText.setText('Select Mission');
+        }
+
+        // Update multiplier
+        const mult = CONFIG.multipliers[this.gameState.multiplierIndex];
+        this.hud.multiplierText.setText(`${mult}x`);
+
+        // Update fuel display (create fuel dots if needed)
+        if (!this.fuelDots) {
+            this.fuelDots = [];
+            for (let i = 0; i < CONFIG.fuelLightCount; i++) {
+                const dot = this.add.circle(70 + (i * 15), 110, 5, 0x00FF00).setDepth(1001);
+                this.fuelDots.push(dot);
+            }
+        }
+
+        // Update fuel dots
+        for (let i = 0; i < this.fuelDots.length; i++) {
+            if (i < this.gameState.fuel) {
+                this.fuelDots[i].setFillStyle(0x00FF00);
+                this.fuelDots[i].setAlpha(1);
+            } else {
+                this.fuelDots[i].setFillStyle(0xFF0000);
+                this.fuelDots[i].setAlpha(0.3);
+            }
         }
     }
     
