@@ -1511,16 +1511,6 @@ class GameScene extends Phaser.Scene {
                 letterSpacing: 2
             }).setOrigin(0.5, 0).setDepth(1001).setAlpha(0)
         };
-
-        // Add pulsing glow effect to dashboard
-        this.tweens.add({
-            targets: accentGraphics,
-            alpha: 0.4,
-            duration: 1500,
-            yoyo: true,
-            repeat: -1,
-            ease: 'Sine.easeInOut'
-        });
     }
     
     setupInput() {
