@@ -1753,7 +1753,11 @@ class GameScene extends Phaser.Scene {
             tint: obstacle.tint || 0xffffff
         });
 
-        this.time.delayedCall(650, () => burstParticles.destroy());
+        this.time.delayedCall(650, () => {
+            if (burstParticles && burstParticles.active) {
+                burstParticles.destroy();
+            }
+        });
     }
     
     hitChakra(index) {
@@ -1787,7 +1791,11 @@ class GameScene extends Phaser.Scene {
             tint: CONFIG.colors.chakra[index]
         });
 
-        this.time.delayedCall(750, () => burstParticles.destroy());
+        this.time.delayedCall(750, () => {
+            if (burstParticles && burstParticles.active) {
+                burstParticles.destroy();
+            }
+        });
         
         this.showPopup(`CHAKRA ${index + 1}!`, this.chakras[index].x, this.chakras[index].y - 40, 22);
         
@@ -1885,7 +1893,11 @@ class GameScene extends Phaser.Scene {
             tint: CONFIG.colors.saturnRing
         });
 
-        this.time.delayedCall(950, () => burstParticles.destroy());
+        this.time.delayedCall(950, () => {
+            if (burstParticles && burstParticles.active) {
+                burstParticles.destroy();
+            }
+        });
         
         this.showPopup(`SATURN ${this.gameState.saturnHitCount}/3!`, this.saturn.x, this.saturn.y - 50, 24);
         
