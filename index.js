@@ -593,30 +593,30 @@ class BootScene extends Phaser.Scene {
 
 class MenuScene extends Phaser.Scene {
     constructor() { super({ key: 'MenuScene' }); }
-    
+
     create() {
         this.cameras.main.setBackgroundColor(CONFIG.colors.background);
-        
+
         const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.25, 'SPIRITBALL', {
             fontSize: '72px', fontFamily: 'Arial', color: '#00ffff',
             stroke: '#ff00ff', strokeThickness: 8
         }).setOrigin(0.5);
-        
+
         this.tweens.add({
             targets: title, scale: 1.05, duration: 1200,
             yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
         });
-        
+
         this.add.text(CONFIG.width / 2, CONFIG.height * 0.35, 'DMT Vision Quest Pinball', {
             fontSize: '22px', fontFamily: 'Arial', color: '#ffffff', alpha: 0.9
         }).setOrigin(0.5);
-        
+
         const highScore = localStorage.getItem('spiritball-highscore') || 0;
         this.add.text(CONFIG.width / 2, CONFIG.height * 0.48, `HIGH SCORE: ${highScore}`, {
             fontSize: '28px', fontFamily: 'Arial', color: '#ffff00',
             stroke: '#000000', strokeThickness: 4
         }).setOrigin(0.5);
-        
+
         const isMobile = window.gameInputManager && window.gameInputManager.isMobile;
         const startText = isMobile ? 'TAP ⚡ TO START' : 'PRESS SPACE TO START';
 
@@ -651,6 +651,17 @@ class MenuScene extends Phaser.Scene {
     startGame() {
         if (this.launchTimer) this.launchTimer.remove();
         this.scene.start('GameScene');
+    }
+
+    shutdown() {
+        // Clean up launch timer
+        if (this.launchTimer) {
+            this.launchTimer.remove();
+            this.launchTimer = null;
+        }
+
+        // Remove all input listeners
+        this.input.keyboard.removeAllListeners();
     }
 }
 
@@ -768,6 +779,12 @@ class GameScene extends Phaser.Scene {
     }
     
     setupBall() {
+        // Verify eyeball texture exists
+        if (!this.textures.exists('eyeball')) {
+            console.error('Eyeball texture missing - cannot create ball');
+            return;
+        }
+
         // Create eyeball as the ball
         this.ball = this.add.sprite(CONFIG.width - 70, CONFIG.height - 220, 'eyeball');
         this.ball.setScale(0.8);
@@ -1249,33 +1266,56 @@ class GameScene extends Phaser.Scene {
     }
     
     setupParticles() {
+        // Track dynamic particle emitters for cleanup
+        this.dynamicParticles = [];
+
+        // Verify particle texture exists
+        if (!this.textures.exists('particle')) {
+            console.error('Particle texture missing - skipping particle setup');
+            return;
+        }
+
+        // Verify ball exists before creating trail
+        if (!this.ball) {
+            console.error('Ball not created - skipping particle setup');
+            return;
+        }
+
         // Ball trail using Phaser 3.60 particle system
-        this.ballTrail = this.add.particles(0, 0, 'particle', {
-            speed: 10,
-            scale: { start: 0.5, end: 0 },
-            alpha: { start: 0.7, end: 0 },
-            lifespan: 400,
-            blendMode: 'ADD',
-            frequency: 25,
-            tint: CONFIG.colors.eyeball,
-            follow: this.ball
-        });
-        this.ballTrail.setDepth(95);
+        try {
+            this.ballTrail = this.add.particles(0, 0, 'particle', {
+                speed: 10,
+                scale: { start: 0.5, end: 0 },
+                alpha: { start: 0.7, end: 0 },
+                lifespan: 400,
+                blendMode: 'ADD',
+                frequency: 25,
+                tint: CONFIG.colors.eyeball,
+                follow: this.ball
+            });
+            this.ballTrail.setDepth(95);
+        } catch (error) {
+            console.error('Failed to create ball trail particles:', error);
+        }
 
         // Drain vortex particles
-        this.drainParticles = this.add.particles(CONFIG.width / 2, CONFIG.height - 20, 'particle', {
-            speed: { min: 50, max: 150 },
-            angle: { min: 0, max: 360 },
-            scale: { start: 0.6, end: 0 },
-            alpha: { start: 0.8, end: 0 },
-            lifespan: 1500,
-            blendMode: 'ADD',
-            frequency: 50,
-            tint: [0x9400D3, 0x000000, 0x4B0082]
-        });
-        this.drainParticles.setDepth(10);
+        try {
+            this.drainParticles = this.add.particles(CONFIG.width / 2, CONFIG.height - 20, 'particle', {
+                speed: { min: 50, max: 150 },
+                angle: { min: 0, max: 360 },
+                scale: { start: 0.6, end: 0 },
+                alpha: { start: 0.8, end: 0 },
+                lifespan: 1500,
+                blendMode: 'ADD',
+                frequency: 50,
+                tint: [0x9400D3, 0x000000, 0x4B0082]
+            });
+            this.drainParticles.setDepth(10);
+        } catch (error) {
+            console.error('Failed to create drain particles:', error);
+        }
     }
-    
+
     update(time, delta) {
         if (this.gameState.isPaused) return;
 
@@ -1286,6 +1326,50 @@ class GameScene extends Phaser.Scene {
         this.checkDrain();
         this.updateEnlightenment();
         this.updateSaturnVortex();
+    }
+
+    shutdown() {
+        // Clean up particle emitters
+        if (this.ballTrail && this.ballTrail.active) {
+            this.ballTrail.destroy();
+        }
+        if (this.drainParticles && this.drainParticles.active) {
+            this.drainParticles.destroy();
+        }
+
+        // Clean up any dynamic particle emitters
+        if (this.dynamicParticles) {
+            this.dynamicParticles.forEach(particles => {
+                if (particles && particles.active) {
+                    particles.destroy();
+                }
+            });
+            this.dynamicParticles = [];
+        }
+
+        // Clear all timers
+        if (this.quickTapTimer) {
+            this.quickTapTimer.remove();
+            this.quickTapTimer = null;
+        }
+
+        // Clear collision cooldowns
+        if (this.collisionCooldowns) {
+            this.collisionCooldowns.clear();
+        }
+
+        // Remove all input listeners
+        this.input.keyboard.removeAllListeners();
+
+        // Clear pause overlay
+        if (this.pauseOverlay) {
+            this.pauseOverlay.forEach(obj => {
+                if (obj && obj.active) {
+                    obj.destroy();
+                }
+            });
+            this.pauseOverlay = null;
+        }
     }
     
     updateInput() {
@@ -1741,23 +1825,41 @@ class GameScene extends Phaser.Scene {
         }
 
         // Particle burst for all obstacles
-        const burstParticles = this.add.particles(obstacle.x, obstacle.y, 'particle', {
-            speed: { min: 100, max: 250 },
-            angle: { min: 0, max: 360 },
-            scale: { start: 0.6, end: 0 },
-            alpha: { start: 1, end: 0 },
-            lifespan: 600,
-            blendMode: 'ADD',
-            frequency: -1,
-            quantity: 15,
-            tint: obstacle.tint || 0xffffff
-        });
+        if (this.textures.exists('particle')) {
+            try {
+                const burstParticles = this.add.particles(obstacle.x, obstacle.y, 'particle', {
+                    speed: { min: 100, max: 250 },
+                    angle: { min: 0, max: 360 },
+                    scale: { start: 0.6, end: 0 },
+                    alpha: { start: 1, end: 0 },
+                    lifespan: 600,
+                    blendMode: 'ADD',
+                    frequency: -1,
+                    quantity: 15,
+                    tint: obstacle.tint || 0xffffff
+                });
 
-        this.time.delayedCall(650, () => {
-            if (burstParticles && burstParticles.active) {
-                burstParticles.destroy();
+                // Track for cleanup
+                if (this.dynamicParticles) {
+                    this.dynamicParticles.push(burstParticles);
+                }
+
+                this.time.delayedCall(650, () => {
+                    if (burstParticles && burstParticles.active) {
+                        burstParticles.destroy();
+                        // Remove from tracking array
+                        if (this.dynamicParticles) {
+                            const index = this.dynamicParticles.indexOf(burstParticles);
+                            if (index > -1) {
+                                this.dynamicParticles.splice(index, 1);
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Failed to create obstacle burst particles:', error);
             }
-        });
+        }
     }
     
     hitChakra(index) {
@@ -1779,23 +1881,41 @@ class GameScene extends Phaser.Scene {
         });
         
         // Particle burst
-        const burstParticles = this.add.particles(this.chakras[index].x, this.chakras[index].y, 'particle-triangle', {
-            speed: { min: 150, max: 300 },
-            angle: { min: 0, max: 360 },
-            scale: { start: 0.8, end: 0 },
-            alpha: { start: 1, end: 0 },
-            lifespan: 700,
-            blendMode: 'ADD',
-            frequency: -1,
-            quantity: 20,
-            tint: CONFIG.colors.chakra[index]
-        });
+        if (this.textures.exists('particle-triangle')) {
+            try {
+                const burstParticles = this.add.particles(this.chakras[index].x, this.chakras[index].y, 'particle-triangle', {
+                    speed: { min: 150, max: 300 },
+                    angle: { min: 0, max: 360 },
+                    scale: { start: 0.8, end: 0 },
+                    alpha: { start: 1, end: 0 },
+                    lifespan: 700,
+                    blendMode: 'ADD',
+                    frequency: -1,
+                    quantity: 20,
+                    tint: CONFIG.colors.chakra[index]
+                });
 
-        this.time.delayedCall(750, () => {
-            if (burstParticles && burstParticles.active) {
-                burstParticles.destroy();
+                // Track for cleanup
+                if (this.dynamicParticles) {
+                    this.dynamicParticles.push(burstParticles);
+                }
+
+                this.time.delayedCall(750, () => {
+                    if (burstParticles && burstParticles.active) {
+                        burstParticles.destroy();
+                        // Remove from tracking array
+                        if (this.dynamicParticles) {
+                            const idx = this.dynamicParticles.indexOf(burstParticles);
+                            if (idx > -1) {
+                                this.dynamicParticles.splice(idx, 1);
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Failed to create chakra burst particles:', error);
             }
-        });
+        }
         
         this.showPopup(`CHAKRA ${index + 1}!`, this.chakras[index].x, this.chakras[index].y - 40, 22);
         
@@ -1809,16 +1929,20 @@ class GameScene extends Phaser.Scene {
         this.gameState.enlightenmentActive = true;
         this.gameState.enlightenmentEndTime = Date.now() + CONFIG.powerupDurations.enlightenment;
         this.gameState.statistics.enlightenmentCount++;
-        
+
         // Change ball to flaming eyeball
-        this.ball.setTexture('eyeball-fire');
-        
+        if (this.ball && this.textures.exists('eyeball-fire')) {
+            this.ball.setTexture('eyeball-fire');
+        }
+
         // Enhanced trail effect with fire
-        this.ballTrail.particleTint = [0xFF6600, 0xFF0000, 0xFFFF00];
-        this.ballTrail.frequency = 12;
-        this.ballTrail.particleScaleX = { start: 0.9, end: 0 };
-        this.ballTrail.particleScaleY = { start: 0.9, end: 0 };
-        this.ballTrail.particleAlpha = { start: 1, end: 0 };
+        if (this.ballTrail && this.ballTrail.active) {
+            this.ballTrail.particleTint = [0xFF6600, 0xFF0000, 0xFFFF00];
+            this.ballTrail.frequency = 12;
+            this.ballTrail.particleScaleX = { start: 0.9, end: 0 };
+            this.ballTrail.particleScaleY = { start: 0.9, end: 0 };
+            this.ballTrail.particleAlpha = { start: 1, end: 0 };
+        }
         
         // Intense screen shake
         this.cameras.main.shake(500, 0.01);
@@ -1848,16 +1972,20 @@ class GameScene extends Phaser.Scene {
     
     deactivateEnlightenment() {
         this.gameState.enlightenmentActive = false;
-        
+
         // Return to normal eyeball
-        this.ball.setTexture('eyeball');
-        
+        if (this.ball && this.textures.exists('eyeball')) {
+            this.ball.setTexture('eyeball');
+        }
+
         // Normal trail
-        this.ballTrail.particleTint = CONFIG.colors.eyeball;
-        this.ballTrail.frequency = 25;
-        this.ballTrail.particleScaleX = { start: 0.5, end: 0 };
-        this.ballTrail.particleScaleY = { start: 0.5, end: 0 };
-        this.ballTrail.particleAlpha = { start: 0.7, end: 0 };
+        if (this.ballTrail && this.ballTrail.active) {
+            this.ballTrail.particleTint = CONFIG.colors.eyeball;
+            this.ballTrail.frequency = 25;
+            this.ballTrail.particleScaleX = { start: 0.5, end: 0 };
+            this.ballTrail.particleScaleY = { start: 0.5, end: 0 };
+            this.ballTrail.particleAlpha = { start: 0.7, end: 0 };
+        }
     }
     
     hitSaturn() {
@@ -1881,23 +2009,41 @@ class GameScene extends Phaser.Scene {
         });
         
         // Particle burst
-        const burstParticles = this.add.particles(this.saturn.x, this.saturn.y, 'particle-hex', {
-            speed: { min: 180, max: 350 },
-            angle: { min: 0, max: 360 },
-            scale: { start: 0.8, end: 0 },
-            alpha: { start: 1, end: 0 },
-            lifespan: 900,
-            blendMode: 'ADD',
-            frequency: -1,
-            quantity: 25,
-            tint: CONFIG.colors.saturnRing
-        });
+        if (this.textures.exists('particle-hex')) {
+            try {
+                const burstParticles = this.add.particles(this.saturn.x, this.saturn.y, 'particle-hex', {
+                    speed: { min: 180, max: 350 },
+                    angle: { min: 0, max: 360 },
+                    scale: { start: 0.8, end: 0 },
+                    alpha: { start: 1, end: 0 },
+                    lifespan: 900,
+                    blendMode: 'ADD',
+                    frequency: -1,
+                    quantity: 25,
+                    tint: CONFIG.colors.saturnRing
+                });
 
-        this.time.delayedCall(950, () => {
-            if (burstParticles && burstParticles.active) {
-                burstParticles.destroy();
+                // Track for cleanup
+                if (this.dynamicParticles) {
+                    this.dynamicParticles.push(burstParticles);
+                }
+
+                this.time.delayedCall(950, () => {
+                    if (burstParticles && burstParticles.active) {
+                        burstParticles.destroy();
+                        // Remove from tracking array
+                        if (this.dynamicParticles) {
+                            const idx = this.dynamicParticles.indexOf(burstParticles);
+                            if (idx > -1) {
+                                this.dynamicParticles.splice(idx, 1);
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Failed to create saturn burst particles:', error);
             }
-        });
+        }
         
         this.showPopup(`SATURN ${this.gameState.saturnHitCount}/3!`, this.saturn.x, this.saturn.y - 50, 24);
         
@@ -2108,11 +2254,22 @@ class GameScene extends Phaser.Scene {
     }
     
     resetBall() {
+        // Ensure ball exists
+        if (!this.ball) {
+            console.error('Ball does not exist - cannot reset');
+            return;
+        }
+
         // Ensure ball is visible and physics enabled
         this.ball.setVisible(true);
         this.ball.setActive(true);
         this.ball.setPosition(CONFIG.width - 70, CONFIG.height - 220);
-        this.ball.setTexture('eyeball');
+
+        // Safely set texture
+        if (this.textures.exists('eyeball')) {
+            this.ball.setTexture('eyeball');
+        }
+
         this.ball.setScale(0.8);
         this.ball.setAlpha(1);
 
@@ -2129,7 +2286,10 @@ class GameScene extends Phaser.Scene {
         this.gameState.canLaunch = true;
         this.gameState.plungerCharging = false;
         this.gameState.plungerPower = 0;
-        this.collisionCooldowns.clear();
+
+        if (this.collisionCooldowns) {
+            this.collisionCooldowns.clear();
+        }
 
         // Reset input tracking to ensure clean state for next launch
         this.previousSpaceDown = false;
@@ -2350,6 +2510,17 @@ class GameOverScene extends Phaser.Scene {
     restartGame() {
         if (this.launchTimer) this.launchTimer.remove();
         this.scene.start('GameScene');
+    }
+
+    shutdown() {
+        // Clean up launch timer
+        if (this.launchTimer) {
+            this.launchTimer.remove();
+            this.launchTimer = null;
+        }
+
+        // Remove all input listeners
+        this.input.keyboard.removeAllListeners();
     }
 }
 
