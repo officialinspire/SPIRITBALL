@@ -90,7 +90,7 @@ canvas {
 
 /* Left Flipper Button */
 .flipper-btn.left {
-    bottom: 100px;
+    bottom: 10px;
     left: 20px;
     width: 130px;
     height: 110px;
@@ -102,7 +102,7 @@ canvas {
 
 /* Right Flipper Button */
 .flipper-btn.right {
-    bottom: 100px;
+    bottom: 10px;
     right: 20px;
     width: 130px;
     height: 110px;
@@ -114,7 +114,7 @@ canvas {
 
 /* Launch Button */
 .launch-btn {
-    bottom: 20px;
+    bottom: 130px;
     left: 50%;
     transform: translateX(-50%);
     width: 150px;
@@ -156,21 +156,22 @@ canvas {
     .flipper-btn {
         width: 110px;
         height: 90px;
-        bottom: 90px;
+        bottom: 10px;
     }
-    
+
     .flipper-btn.left {
         left: 10px;
     }
-    
+
     .flipper-btn.right {
         right: 10px;
     }
-    
+
     .launch-btn {
         width: 130px;
         height: 60px;
         font-size: 16px;
+        bottom: 110px;
     }
 }
 
