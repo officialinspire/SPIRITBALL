@@ -1123,7 +1123,9 @@ class GameScene extends Phaser.Scene {
                 // Ensure ball bounces with proper physics
                 if (ball.body && ball.body.touching) {
                     // Add subtle visual feedback when ball hits wall
-                    this.cameras.main.shake(40, 0.003);
+                    if (this.cameras && this.cameras.main) {
+                        this.cameras.main.shake(40, 0.003);
+                    }
 
                     // Ensure minimum bounce velocity so ball doesn't get stuck
                     const minVelocity = 100;
@@ -1501,7 +1503,9 @@ class GameScene extends Phaser.Scene {
             );
 
             // Intense visual feedback for satisfying feel
-            this.cameras.main.shake(150, 0.008);
+            if (this.cameras && this.cameras.main) {
+                this.cameras.main.shake(150, 0.008);
+            }
 
             // Minimal cooldown for maximum responsiveness - real pinball feel
             this.time.delayedCall(25, () => {
@@ -1553,7 +1557,9 @@ class GameScene extends Phaser.Scene {
             );
 
             // Intense visual feedback for satisfying feel
-            this.cameras.main.shake(150, 0.008);
+            if (this.cameras && this.cameras.main) {
+                this.cameras.main.shake(150, 0.008);
+            }
 
             // Minimal cooldown for maximum responsiveness - real pinball feel
             this.time.delayedCall(25, () => {
@@ -1734,7 +1740,9 @@ class GameScene extends Phaser.Scene {
 
         if (textureName === 'cosmic-crystal') {
             // Crystal gives bonus points and intense bounce
-            this.cameras.main.shake(100, 0.004);
+            if (this.cameras && this.cameras.main) {
+                this.cameras.main.shake(100, 0.004);
+            }
             this.addScore(CONFIG.scores.bumper * 2);
             this.incrementCombo();
 
@@ -1764,7 +1772,9 @@ class GameScene extends Phaser.Scene {
 
         } else if (textureName === 'asteroid') {
             // Asteroid gives medium points and solid bounce
-            this.cameras.main.shake(80, 0.003);
+            if (this.cameras && this.cameras.main) {
+                this.cameras.main.shake(80, 0.003);
+            }
             this.addScore(CONFIG.scores.bumper);
             this.incrementCombo();
 
@@ -1784,7 +1794,9 @@ class GameScene extends Phaser.Scene {
 
         } else if (textureName === 'energy-vortex') {
             // Energy vortex gives teleport/speed boost
-            this.cameras.main.shake(120, 0.005);
+            if (this.cameras && this.cameras.main) {
+                this.cameras.main.shake(120, 0.005);
+            }
             this.addScore(CONFIG.scores.bumper * 3);
             this.incrementCombo();
 
@@ -1802,13 +1814,17 @@ class GameScene extends Phaser.Scene {
             }
 
             // Flash effect
-            this.cameras.main.flash(200, 138, 43, 226, false, 0.3);
+            if (this.cameras && this.cameras.main) {
+                this.cameras.main.flash(200, 138, 43, 226, false, 0.3);
+            }
 
             this.showPopup('VORTEX BOOST!', obstacle.x, obstacle.y - 40, 22);
 
         } else if (textureName === 'comet') {
             // Comet gives high points and directional boost
-            this.cameras.main.shake(90, 0.004);
+            if (this.cameras && this.cameras.main) {
+                this.cameras.main.shake(90, 0.004);
+            }
             this.addScore(CONFIG.scores.bumper * 2.5);
             this.incrementCombo();
 
@@ -1863,7 +1879,9 @@ class GameScene extends Phaser.Scene {
     }
     
     hitChakra(index) {
-        this.cameras.main.shake(80, 0.002);
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.shake(80, 0.002);
+        }
         this.addScore(CONFIG.scores.chakra);
         this.incrementCombo();
         
@@ -1943,10 +1961,12 @@ class GameScene extends Phaser.Scene {
             this.ballTrail.particleScaleY = { start: 0.9, end: 0 };
             this.ballTrail.particleAlpha = { start: 1, end: 0 };
         }
-        
+
         // Intense screen shake
-        this.cameras.main.shake(500, 0.01);
-        
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.shake(500, 0.01);
+        }
+
         // Visual celebration
         this.showPopup('ENLIGHTENMENT!', CONFIG.width / 2, CONFIG.height / 2, 42);
         
@@ -1989,7 +2009,9 @@ class GameScene extends Phaser.Scene {
     }
     
     hitSaturn() {
-        this.cameras.main.shake(100, 0.003);
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.shake(100, 0.003);
+        }
         this.addScore(CONFIG.scores.saturn);
         this.incrementCombo();
         
@@ -2137,10 +2159,12 @@ class GameScene extends Phaser.Scene {
                 
                 this.ball.setPosition(newX, newY);
                 this.ball.setScale(0.8);
-                
+
                 // Flash effect
-                this.cameras.main.flash(300, 138, 43, 226);
-                
+                if (this.cameras && this.cameras.main) {
+                    this.cameras.main.flash(300, 138, 43, 226);
+                }
+
                 this.gameState.ballInPlay = true;
                 this.gameState.statistics.saturnVortexEscapes++;
                 
@@ -2156,7 +2180,9 @@ class GameScene extends Phaser.Scene {
             if (this.gameState.powerups.secondChance.available) {
                 this.gameState.powerups.secondChance.available = false;
                 this.showPopup('REBIRTH!', CONFIG.width / 2, CONFIG.height / 2, 44);
-                this.cameras.main.flash(600, 255, 255, 255);
+                if (this.cameras && this.cameras.main) {
+                    this.cameras.main.flash(600, 255, 255, 255);
+                }
                 this.resetBall();
                 return;
             }
@@ -2234,10 +2260,12 @@ class GameScene extends Phaser.Scene {
                 });
             }
         });
-        
+
         // Screen effect
-        this.cameras.main.shake(400, 0.008);
-        this.cameras.main.flash(200, 255, 0, 0, true);
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.shake(400, 0.008);
+            this.cameras.main.flash(200, 255, 0, 0, true);
+        }
     }
     
     hideGrimReaper() {
@@ -2308,6 +2336,14 @@ class GameScene extends Phaser.Scene {
     }
     
     launchBall() {
+        // Safety check: ensure ball exists before launching
+        if (!this.ball || !this.ball.body) {
+            console.error('Cannot launch: ball or ball.body is undefined');
+            this.gameState.canLaunch = false;
+            this.gameState.ballInPlay = false;
+            return;
+        }
+
         this.gameState.ballInPlay = true;
         this.gameState.canLaunch = false;
 
@@ -2318,9 +2354,11 @@ class GameScene extends Phaser.Scene {
 
         this.ball.body.setVelocity(velocityX, velocityY);
 
-        // Shake intensity based on power
-        const shakeIntensity = 0.002 + (power / CONFIG.plungerMaxPower) * 0.005;
-        this.cameras.main.shake(150, shakeIntensity);
+        // Shake intensity based on power - with safety check
+        if (this.cameras && this.cameras.main) {
+            const shakeIntensity = 0.002 + (power / CONFIG.plungerMaxPower) * 0.005;
+            this.cameras.main.shake(150, shakeIntensity);
+        }
 
         // Visual feedback
         this.showPopup('LAUNCH!', this.ball.x, this.ball.y - 40, 20);
