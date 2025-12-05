@@ -83,38 +83,73 @@ class InputManager {
     }
 
     setupMobileControls() {
+        // Prevent haptic vibration on all controls
+        const preventVibration = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // Cancel any ongoing vibration
+            if (navigator.vibrate) {
+                navigator.vibrate(0);
+            }
+        };
+
         const leftBtn = document.getElementById('left-flipper-btn');
         if (leftBtn) {
-            leftBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.state.leftFlipper = true; }, { passive: false });
-            leftBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.state.leftFlipper = false; }, { passive: false });
+            leftBtn.addEventListener('touchstart', (e) => {
+                preventVibration(e);
+                this.state.leftFlipper = true;
+            }, { passive: false });
+            leftBtn.addEventListener('touchend', (e) => {
+                preventVibration(e);
+                this.state.leftFlipper = false;
+            }, { passive: false });
+            leftBtn.addEventListener('touchcancel', (e) => {
+                preventVibration(e);
+                this.state.leftFlipper = false;
+            }, { passive: false });
         }
 
         const rightBtn = document.getElementById('right-flipper-btn');
         if (rightBtn) {
-            rightBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.state.rightFlipper = true; }, { passive: false });
-            rightBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.state.rightFlipper = false; }, { passive: false });
+            rightBtn.addEventListener('touchstart', (e) => {
+                preventVibration(e);
+                this.state.rightFlipper = true;
+            }, { passive: false });
+            rightBtn.addEventListener('touchend', (e) => {
+                preventVibration(e);
+                this.state.rightFlipper = false;
+            }, { passive: false });
+            rightBtn.addEventListener('touchcancel', (e) => {
+                preventVibration(e);
+                this.state.rightFlipper = false;
+            }, { passive: false });
         }
 
         const launchBtn = document.getElementById('launch-btn');
         if (launchBtn) {
             launchBtn.addEventListener('touchstart', (e) => {
-                e.preventDefault();
+                preventVibration(e);
                 this.state.launchHeld = true;
                 this.state.launchPressed = true;
             }, { passive: false });
 
             launchBtn.addEventListener('touchend', (e) => {
-                e.preventDefault();
+                preventVibration(e);
                 this.state.launchHeld = false;
                 this.state.launchReleased = true;
                 setTimeout(() => this.state.launchReleased = false, 50);
+            }, { passive: false });
+
+            launchBtn.addEventListener('touchcancel', (e) => {
+                preventVibration(e);
+                this.state.launchHeld = false;
             }, { passive: false });
         }
 
         const pauseBtn = document.getElementById('pause-btn');
         if (pauseBtn) {
             pauseBtn.addEventListener('touchstart', (e) => {
-                e.preventDefault();
+                preventVibration(e);
                 this.state.pause = true;
                 setTimeout(() => this.state.pause = false, 150);
             }, { passive: false });
@@ -1657,12 +1692,14 @@ class GameScene extends Phaser.Scene {
     
     updatePowerups() {
         const now = Date.now();
-        
+
         if (this.gameState.powerups.spiritAnimal.active && now > this.gameState.powerups.spiritAnimal.endTime) {
             this.gameState.powerups.spiritAnimal.active = false;
-            this.ballTrail.particleTint = CONFIG.colors.eyeball;
+            if (this.ballTrail && this.ballTrail.active) {
+                this.ballTrail.particleTint = CONFIG.colors.eyeball;
+            }
         }
-        
+
         if (this.gameState.powerups.ancestorGuide.active && now > this.gameState.powerups.ancestorGuide.endTime) {
             this.gameState.powerups.ancestorGuide.active = false;
         }
@@ -1675,7 +1712,12 @@ class GameScene extends Phaser.Scene {
     }
     
     updateSaturnVortex() {
-        if (this.gameState.saturnVortexActive && this.saturnHexagon.visible) {
+        // Safety check - ensure ball exists
+        if (!this.ball || !this.ball.body) {
+            return;
+        }
+
+        if (this.gameState.saturnVortexActive && this.saturnHexagon && this.saturnHexagon.visible) {
             // Pull ball toward vortex
             if (this.ball.body && this.gameState.ballInPlay) {
                 const dx = this.saturnHexagon.x - this.ball.x;
@@ -1698,17 +1740,19 @@ class GameScene extends Phaser.Scene {
         }
 
         // Check chakra collisions
-        this.chakras.forEach((chakra, index) => {
-            if (this.physics.overlap(this.ball, chakra)) {
-                if (!this.isOnCooldown(chakra)) {
-                    this.hitChakra(index);
-                    this.setCooldown(chakra, 500);
+        if (this.chakras && Array.isArray(this.chakras)) {
+            this.chakras.forEach((chakra, index) => {
+                if (chakra && this.physics.overlap(this.ball, chakra)) {
+                    if (!this.isOnCooldown(chakra)) {
+                        this.hitChakra(index);
+                        this.setCooldown(chakra, 500);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         // Check Saturn collision
-        if (this.physics.overlap(this.ball, this.saturn)) {
+        if (this.saturn && this.physics.overlap(this.ball, this.saturn)) {
             if (!this.isOnCooldown(this.saturn)) {
                 this.hitSaturn();
                 this.setCooldown(this.saturn, 500);
@@ -1716,9 +1760,9 @@ class GameScene extends Phaser.Scene {
         }
 
         // Check obstacle collisions
-        if (this.obstacles) {
+        if (this.obstacles && Array.isArray(this.obstacles)) {
             this.obstacles.forEach((obstacle, index) => {
-                if (this.physics.overlap(this.ball, obstacle)) {
+                if (obstacle && this.physics.overlap(this.ball, obstacle)) {
                     if (!this.isOnCooldown(obstacle)) {
                         this.hitObstacle(obstacle, index);
                         this.setCooldown(obstacle, 400);
@@ -2152,6 +2196,11 @@ class GameScene extends Phaser.Scene {
     }
     
     checkDrain() {
+        // Safety check - ensure ball and drainZone exist
+        if (!this.ball || !this.ball.body || !this.drainZone) {
+            return;
+        }
+
         if (this.gameState.ballInPlay && this.physics.overlap(this.ball, this.drainZone)) {
             if (this.gameState.powerups.secondChance.available) {
                 this.gameState.powerups.secondChance.available = false;
@@ -2160,32 +2209,36 @@ class GameScene extends Phaser.Scene {
                 this.resetBall();
                 return;
             }
-            
+
             // Show Grim Reaper
-            this.showGrimReaper();
-            
+            if (this.grimReaper) {
+                this.showGrimReaper();
+            }
+
             this.gameState.lives--;
             this.gameState.ballInPlay = false;
             this.gameState.comboCount = 0;
             this.gameState.comboMultiplier = 1;
-            
+
             // Deactivate enlightenment if active
             if (this.gameState.enlightenmentActive) {
                 this.deactivateEnlightenment();
             }
-            
+
             // Deactivate Saturn vortex if active
             if (this.gameState.saturnVortexActive) {
                 this.deactivateSaturnVortex();
             }
-            
+
             this.updateHUD();
-            
+
             if (this.gameState.lives <= 0) {
                 this.time.delayedCall(2000, () => this.gameOver());
             } else {
                 this.time.delayedCall(2000, () => {
-                    this.hideGrimReaper();
+                    if (this.grimReaper) {
+                        this.hideGrimReaper();
+                    }
                     this.resetBall();
                 });
             }
@@ -2308,6 +2361,12 @@ class GameScene extends Phaser.Scene {
     }
     
     launchBall() {
+        // Critical safety checks to prevent crash
+        if (!this.ball || !this.ball.body) {
+            console.error('Cannot launch ball - ball or ball.body does not exist');
+            return;
+        }
+
         this.gameState.ballInPlay = true;
         this.gameState.canLaunch = false;
 
@@ -2316,14 +2375,21 @@ class GameScene extends Phaser.Scene {
         const velocityY = -power;
         const velocityX = -250;
 
-        this.ball.body.setVelocity(velocityX, velocityY);
+        try {
+            this.ball.body.setVelocity(velocityX, velocityY);
 
-        // Shake intensity based on power
-        const shakeIntensity = 0.002 + (power / CONFIG.plungerMaxPower) * 0.005;
-        this.cameras.main.shake(150, shakeIntensity);
+            // Shake intensity based on power
+            const shakeIntensity = 0.002 + (power / CONFIG.plungerMaxPower) * 0.005;
+            this.cameras.main.shake(150, shakeIntensity);
 
-        // Visual feedback
-        this.showPopup('LAUNCH!', this.ball.x, this.ball.y - 40, 20);
+            // Visual feedback
+            this.showPopup('LAUNCH!', this.ball.x, this.ball.y - 40, 20);
+        } catch (error) {
+            console.error('Error launching ball:', error);
+            // Reset state if launch fails
+            this.gameState.ballInPlay = false;
+            this.gameState.canLaunch = true;
+        }
     }
     
     addScore(points) {
