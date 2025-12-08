@@ -216,13 +216,13 @@ class InputManager {
     }
 
     updateMobileControlsVisibility() {
-        const mobileControls = document.getElementById('mobile-controls');
-        if (mobileControls) {
+        const controlsContainer = document.getElementById('controls-container');
+        if (controlsContainer) {
             // Show controls if mobile device OR portrait orientation OR small screen
             const shouldShow = this.isMobile ||
                               window.innerHeight > window.innerWidth ||
                               window.innerWidth <= 767;
-            mobileControls.style.display = shouldShow ? 'block' : 'none';
+            controlsContainer.style.display = shouldShow ? 'flex' : 'none';
         }
     }
 

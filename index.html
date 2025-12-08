@@ -17,24 +17,29 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div id="game-container"></div>
-    
-    <!-- Mobile Touch Controls Overlay -->
-    <div id="mobile-controls">
-        <button id="left-flipper-btn" class="flipper-btn left" aria-label="Left Flipper">
-            <span>◀</span>
-        </button>
-        <button id="right-flipper-btn" class="flipper-btn right" aria-label="Right Flipper">
-            <span>▶</span>
-        </button>
-        <button id="launch-btn" class="launch-btn" aria-label="Launch Ball">
-            <span>⚡</span>
-        </button>
-        <button id="pause-btn" class="pause-btn" aria-label="Pause Game">
-            <span>⏸</span>
-        </button>
+    <div id="app-container">
+        <div id="game-wrapper">
+            <div id="game-container"></div>
+            <!-- Pause Button (stays in game area) -->
+            <button id="pause-btn" class="pause-btn" aria-label="Pause Game">
+                <span>⏸</span>
+            </button>
+        </div>
+
+        <!-- Mobile Touch Controls Container -->
+        <div id="controls-container">
+            <button id="left-flipper-btn" class="flipper-btn left" aria-label="Left Flipper">
+                <span>◀</span>
+            </button>
+            <button id="launch-btn" class="launch-btn" aria-label="Launch Ball">
+                <span>⚡</span>
+            </button>
+            <button id="right-flipper-btn" class="flipper-btn right" aria-label="Right Flipper">
+                <span>▶</span>
+            </button>
+        </div>
     </div>
-    
+
     <!-- Game Script -->
     <script src="index.js"></script>
 </body>
