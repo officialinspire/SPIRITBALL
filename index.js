@@ -1910,109 +1910,125 @@ class GameScene extends Phaser.Scene {
 
         this.hud = {
             // Top Row: Score, High Score, Lives
-            scoreLabel: this.add.text(20, 10, 'SCORE', {
-                fontSize: '14px',
-                fontFamily: 'Impact, Arial',
-                color: '#9400D3',
-                stroke: '#000000',
-                strokeThickness: 2
+            scoreLabel: this.add.text(25, 12, 'SCORE', {
+                fontSize: '16px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#00d4ff',
+                stroke: '#001a33',
+                strokeThickness: 3
             }).setDepth(1001),
 
-            scoreText: this.add.text(20, 28, '0', {
-                fontSize: '24px',
-                fontFamily: 'Impact, Arial',
+            scoreText: this.add.text(25, 32, '0', {
+                fontSize: '32px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
                 color: '#00ffff',
-                stroke: '#000000',
-                strokeThickness: 3
+                stroke: '#003366',
+                strokeThickness: 4,
+                shadow: { offsetX: 2, offsetY: 2, color: '#000000', blur: 4, fill: true }
             }).setDepth(1001),
 
-            highScoreLabel: this.add.text(CONFIG.width / 2, 10, 'HIGH', {
-                fontSize: '14px',
-                fontFamily: 'Impact, Arial',
-                color: '#9400D3',
-                stroke: '#000000',
-                strokeThickness: 2
-            }).setOrigin(0.5, 0).setDepth(1001),
-
-            highScoreText: this.add.text(CONFIG.width / 2, 28, `${this.gameState.highScore}`, {
-                fontSize: '24px',
-                fontFamily: 'Impact, Arial',
-                color: '#ffff00',
-                stroke: '#000000',
+            highScoreLabel: this.add.text(CONFIG.width / 2, 12, 'HIGH SCORE', {
+                fontSize: '16px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#ffd700',
+                stroke: '#332200',
                 strokeThickness: 3
             }).setOrigin(0.5, 0).setDepth(1001),
 
-            livesLabel: this.add.text(CONFIG.width - 20, 10, 'BALLS', {
-                fontSize: '14px',
-                fontFamily: 'Impact, Arial',
-                color: '#9400D3',
-                stroke: '#000000',
-                strokeThickness: 2
+            highScoreText: this.add.text(CONFIG.width / 2, 32, `${this.gameState.highScore}`, {
+                fontSize: '32px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#ffff00',
+                stroke: '#666600',
+                strokeThickness: 4,
+                shadow: { offsetX: 2, offsetY: 2, color: '#000000', blur: 4, fill: true }
+            }).setOrigin(0.5, 0).setDepth(1001),
+
+            livesLabel: this.add.text(CONFIG.width - 25, 12, 'BALLS', {
+                fontSize: '16px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#ff66cc',
+                stroke: '#330033',
+                strokeThickness: 3
             }).setOrigin(1, 0).setDepth(1001),
 
-            livesText: this.add.text(CONFIG.width - 20, 28, `${this.gameState.lives}`, {
-                fontSize: '24px',
-                fontFamily: 'Impact, Arial',
+            livesText: this.add.text(CONFIG.width - 25, 32, `${this.gameState.lives}`, {
+                fontSize: '32px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
                 color: '#ff0099',
-                stroke: '#000000',
-                strokeThickness: 3
+                stroke: '#660033',
+                strokeThickness: 4,
+                shadow: { offsetX: 2, offsetY: 2, color: '#000000', blur: 4, fill: true }
             }).setOrigin(1, 0).setDepth(1001),
 
             // Second Row: Rank, Mission, Multiplier
-            rankLabel: this.add.text(20, 60, 'RANK', {
-                fontSize: '12px',
-                fontFamily: 'Arial',
-                color: '#00ffff',
-                stroke: '#000000',
+            rankLabel: this.add.text(25, 68, 'RANK', {
+                fontSize: '14px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#00ffcc',
+                stroke: '#003333',
                 strokeThickness: 2
             }).setDepth(1001),
 
-            rankText: this.add.text(20, 75, CONFIG.ranks[0], {
+            rankText: this.add.text(25, 85, CONFIG.ranks[0], {
+                fontSize: '20px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#00ff88',
+                stroke: '#004400',
+                strokeThickness: 3
+            }).setDepth(1001),
+
+            missionLabel: this.add.text(CONFIG.width / 2, 68, 'MISSION', {
+                fontSize: '14px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#00ffcc',
+                stroke: '#003333',
+                strokeThickness: 2
+            }).setOrigin(0.5, 0).setDepth(1001),
+
+            missionText: this.add.text(CONFIG.width / 2, 85, 'Select Mission', {
                 fontSize: '18px',
-                fontFamily: 'Impact, Arial',
-                color: '#00ff00',
-                stroke: '#000000',
-                strokeThickness: 2
-            }).setDepth(1001),
-
-            missionLabel: this.add.text(CONFIG.width / 2, 60, 'MISSION', {
-                fontSize: '12px',
-                fontFamily: 'Arial',
-                color: '#00ffff',
-                stroke: '#000000',
-                strokeThickness: 2
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#ffcc00',
+                stroke: '#444400',
+                strokeThickness: 3
             }).setOrigin(0.5, 0).setDepth(1001),
 
-            missionText: this.add.text(CONFIG.width / 2, 75, 'Select Mission', {
-                fontSize: '16px',
-                fontFamily: 'Arial',
-                color: '#ffff00',
-                stroke: '#000000',
-                strokeThickness: 2
-            }).setOrigin(0.5, 0).setDepth(1001),
-
-            multiplierLabel: this.add.text(CONFIG.width - 20, 60, 'MULT', {
-                fontSize: '12px',
-                fontFamily: 'Arial',
-                color: '#00ffff',
-                stroke: '#000000',
+            multiplierLabel: this.add.text(CONFIG.width - 25, 68, 'MULT', {
+                fontSize: '14px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#00ffcc',
+                stroke: '#003333',
                 strokeThickness: 2
             }).setOrigin(1, 0).setDepth(1001),
 
-            multiplierText: this.add.text(CONFIG.width - 20, 75, '1x', {
-                fontSize: '20px',
-                fontFamily: 'Impact, Arial',
+            multiplierText: this.add.text(CONFIG.width - 25, 85, '1x', {
+                fontSize: '24px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
                 color: '#ff00ff',
-                stroke: '#000000',
-                strokeThickness: 2
+                stroke: '#440044',
+                strokeThickness: 3
             }).setOrigin(1, 0).setDepth(1001),
 
             // Third Row: Fuel indicator
-            fuelLabel: this.add.text(20, 100, 'FUEL', {
-                fontSize: '12px',
-                fontFamily: 'Arial',
-                color: '#00ffff',
-                stroke: '#000000',
+            fuelLabel: this.add.text(25, 112, 'FUEL', {
+                fontSize: '14px',
+                fontFamily: 'Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#00ffcc',
+                stroke: '#003333',
                 strokeThickness: 2
             }).setDepth(1001),
 
@@ -3196,30 +3212,303 @@ class GameScene extends Phaser.Scene {
     pauseGame() {
         this.gameState.isPaused = true;
         this.physics.pause();
-        
-        const bg = this.add.rectangle(CONFIG.width / 2, CONFIG.height / 2, CONFIG.width, CONFIG.height, 0x000000, 0.85).setDepth(2000);
-        const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.4, 'PAUSED', {
-            fontSize: '56px', fontFamily: 'Arial', color: '#00ffff', stroke: '#000000', strokeThickness: 7
+
+        // Background overlay
+        const bg = this.add.rectangle(CONFIG.width / 2, CONFIG.height / 2, CONFIG.width, CONFIG.height, 0x000000, 0.9).setDepth(2000);
+
+        // Title
+        const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.25, 'GAME PAUSED', {
+            fontSize: '48px',
+            fontFamily: 'Arial, sans-serif',
+            fontStyle: 'bold',
+            color: '#00ffff',
+            stroke: '#003366',
+            strokeThickness: 6,
+            shadow: { offsetX: 3, offsetY: 3, color: '#000000', blur: 6, fill: true }
         }).setOrigin(0.5).setDepth(2001);
-        
-        const resumeText = this.add.text(CONFIG.width / 2, CONFIG.height * 0.55, 'TAP TO RESUME', {
-            fontSize: '24px', fontFamily: 'Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 4
+
+        // Menu buttons
+        const buttonStyle = {
+            fontSize: '28px',
+            fontFamily: 'Arial, sans-serif',
+            fontStyle: 'bold',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 4,
+            backgroundColor: '#1a1a3e',
+            padding: { left: 30, right: 30, top: 15, bottom: 15 }
+        };
+
+        const buttonHoverStyle = {
+            color: '#00ffff',
+            backgroundColor: '#2a2a5e'
+        };
+
+        // Resume button
+        const resumeButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.45, '▶ RESUME GAME', buttonStyle)
+            .setOrigin(0.5)
+            .setDepth(2001)
+            .setInteractive({ useHandCursor: true });
+
+        const resumeBg = this.add.rectangle(CONFIG.width / 2, CONFIG.height * 0.45, resumeButton.width + 40, resumeButton.height + 20, 0x1a1a3e)
+            .setDepth(2000)
+            .setStrokeStyle(3, 0x00ffff);
+
+        resumeButton.on('pointerover', () => {
+            resumeButton.setColor('#00ffff');
+            resumeBg.setFillStyle(0x2a2a5e);
+        });
+
+        resumeButton.on('pointerout', () => {
+            resumeButton.setColor('#ffffff');
+            resumeBg.setFillStyle(0x1a1a3e);
+        });
+
+        resumeButton.on('pointerdown', () => {
+            this.resumeGame();
+        });
+
+        // New Game button
+        const newGameButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.58, '🔄 NEW GAME', buttonStyle)
+            .setOrigin(0.5)
+            .setDepth(2001)
+            .setInteractive({ useHandCursor: true });
+
+        const newGameBg = this.add.rectangle(CONFIG.width / 2, CONFIG.height * 0.58, newGameButton.width + 40, newGameButton.height + 20, 0x1a1a3e)
+            .setDepth(2000)
+            .setStrokeStyle(3, 0x00ff00);
+
+        newGameButton.on('pointerover', () => {
+            newGameButton.setColor('#00ff00');
+            newGameBg.setFillStyle(0x2a2a5e);
+        });
+
+        newGameButton.on('pointerout', () => {
+            newGameButton.setColor('#ffffff');
+            newGameBg.setFillStyle(0x1a1a3e);
+        });
+
+        newGameButton.on('pointerdown', () => {
+            this.cleanupPauseMenu();
+            this.scene.restart();
+        });
+
+        // Settings button
+        const settingsButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.71, '⚙ SETTINGS', buttonStyle)
+            .setOrigin(0.5)
+            .setDepth(2001)
+            .setInteractive({ useHandCursor: true });
+
+        const settingsBg = this.add.rectangle(CONFIG.width / 2, CONFIG.height * 0.71, settingsButton.width + 40, settingsButton.height + 20, 0x1a1a3e)
+            .setDepth(2000)
+            .setStrokeStyle(3, 0xffff00);
+
+        settingsButton.on('pointerover', () => {
+            settingsButton.setColor('#ffff00');
+            settingsBg.setFillStyle(0x2a2a5e);
+        });
+
+        settingsButton.on('pointerout', () => {
+            settingsButton.setColor('#ffffff');
+            settingsBg.setFillStyle(0x1a1a3e);
+        });
+
+        settingsButton.on('pointerdown', () => {
+            this.showSettingsMenu();
+        });
+
+        // Instructions
+        const instructions = this.add.text(CONFIG.width / 2, CONFIG.height * 0.85, 'ESC or TAP RESUME to continue', {
+            fontSize: '16px',
+            fontFamily: 'Arial, sans-serif',
+            color: '#888888',
+            stroke: '#000000',
+            strokeThickness: 2
         }).setOrigin(0.5).setDepth(2001);
-        
-        this.pauseOverlay = [bg, title, resumeText];
-        
-        this.input.keyboard.once('keydown-SPACE', () => this.resumeGame());
+
+        this.pauseOverlay = [bg, title, resumeButton, resumeBg, newGameButton, newGameBg, settingsButton, settingsBg, instructions];
+
+        // Keyboard controls
         this.input.keyboard.once('keydown-ESC', () => this.resumeGame());
-        this.input.once('pointerdown', () => this.resumeGame());
+        this.input.keyboard.once('keydown-SPACE', () => this.resumeGame());
     }
-    
+
     resumeGame() {
         this.gameState.isPaused = false;
         this.physics.resume();
+        this.cleanupPauseMenu();
+    }
+
+    cleanupPauseMenu() {
         if (this.pauseOverlay) {
-            this.pauseOverlay.forEach(obj => obj.destroy());
+            this.pauseOverlay.forEach(obj => {
+                if (obj && obj.destroy) {
+                    obj.destroy();
+                }
+            });
             this.pauseOverlay = null;
         }
+        if (this.settingsOverlay) {
+            this.settingsOverlay.forEach(obj => {
+                if (obj && obj.destroy) {
+                    obj.destroy();
+                }
+            });
+            this.settingsOverlay = null;
+        }
+    }
+
+    showSettingsMenu() {
+        // Clean up pause menu
+        if (this.pauseOverlay) {
+            this.pauseOverlay.forEach(obj => {
+                if (obj && obj.destroy) {
+                    obj.destroy();
+                }
+            });
+            this.pauseOverlay = null;
+        }
+
+        // Background overlay
+        const bg = this.add.rectangle(CONFIG.width / 2, CONFIG.height / 2, CONFIG.width, CONFIG.height, 0x000000, 0.9).setDepth(2000);
+
+        // Title
+        const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.2, 'SETTINGS', {
+            fontSize: '48px',
+            fontFamily: 'Arial, sans-serif',
+            fontStyle: 'bold',
+            color: '#ffff00',
+            stroke: '#666600',
+            strokeThickness: 6,
+            shadow: { offsetX: 3, offsetY: 3, color: '#000000', blur: 6, fill: true }
+        }).setOrigin(0.5).setDepth(2001);
+
+        // Get current settings from localStorage
+        const soundEnabled = localStorage.getItem('spiritball-sound') !== 'false';
+        const musicEnabled = localStorage.getItem('spiritball-music') !== 'false';
+
+        // Sound toggle
+        const soundLabel = this.add.text(CONFIG.width / 2 - 100, CONFIG.height * 0.35, 'SOUND:', {
+            fontSize: '24px',
+            fontFamily: 'Arial, sans-serif',
+            fontStyle: 'bold',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 3
+        }).setOrigin(0, 0.5).setDepth(2001);
+
+        const soundToggle = this.add.text(CONFIG.width / 2 + 50, CONFIG.height * 0.35, soundEnabled ? 'ON' : 'OFF', {
+            fontSize: '24px',
+            fontFamily: 'Arial, sans-serif',
+            fontStyle: 'bold',
+            color: soundEnabled ? '#00ff00' : '#ff0000',
+            stroke: '#000000',
+            strokeThickness: 3,
+            backgroundColor: '#1a1a3e',
+            padding: { left: 20, right: 20, top: 10, bottom: 10 }
+        }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+
+        const soundToggleBg = this.add.rectangle(CONFIG.width / 2 + 50, CONFIG.height * 0.35, 100, 50, 0x1a1a3e)
+            .setDepth(2000)
+            .setStrokeStyle(3, soundEnabled ? 0x00ff00 : 0xff0000);
+
+        soundToggle.on('pointerdown', () => {
+            const newState = !soundEnabled;
+            localStorage.setItem('spiritball-sound', newState);
+            soundToggle.setText(newState ? 'ON' : 'OFF');
+            soundToggle.setColor(newState ? '#00ff00' : '#ff0000');
+            soundToggleBg.setStrokeStyle(3, newState ? 0x00ff00 : 0xff0000);
+            // Refresh settings menu to update state
+            this.showSettingsMenu();
+        });
+
+        // Music toggle
+        const musicLabel = this.add.text(CONFIG.width / 2 - 100, CONFIG.height * 0.45, 'MUSIC:', {
+            fontSize: '24px',
+            fontFamily: 'Arial, sans-serif',
+            fontStyle: 'bold',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 3
+        }).setOrigin(0, 0.5).setDepth(2001);
+
+        const musicToggle = this.add.text(CONFIG.width / 2 + 50, CONFIG.height * 0.45, musicEnabled ? 'ON' : 'OFF', {
+            fontSize: '24px',
+            fontFamily: 'Arial, sans-serif',
+            fontStyle: 'bold',
+            color: musicEnabled ? '#00ff00' : '#ff0000',
+            stroke: '#000000',
+            strokeThickness: 3,
+            backgroundColor: '#1a1a3e',
+            padding: { left: 20, right: 20, top: 10, bottom: 10 }
+        }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+
+        const musicToggleBg = this.add.rectangle(CONFIG.width / 2 + 50, CONFIG.height * 0.45, 100, 50, 0x1a1a3e)
+            .setDepth(2000)
+            .setStrokeStyle(3, musicEnabled ? 0x00ff00 : 0xff0000);
+
+        musicToggle.on('pointerdown', () => {
+            const newState = !musicEnabled;
+            localStorage.setItem('spiritball-music', newState);
+            musicToggle.setText(newState ? 'ON' : 'OFF');
+            musicToggle.setColor(newState ? '#00ff00' : '#ff0000');
+            musicToggleBg.setStrokeStyle(3, newState ? 0x00ff00 : 0xff0000);
+            // Refresh settings menu to update state
+            this.showSettingsMenu();
+        });
+
+        // Back button
+        const backButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.70, '◄ BACK', {
+            fontSize: '28px',
+            fontFamily: 'Arial, sans-serif',
+            fontStyle: 'bold',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 4,
+            backgroundColor: '#1a1a3e',
+            padding: { left: 30, right: 30, top: 15, bottom: 15 }
+        }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+
+        const backBg = this.add.rectangle(CONFIG.width / 2, CONFIG.height * 0.70, backButton.width + 40, backButton.height + 20, 0x1a1a3e)
+            .setDepth(2000)
+            .setStrokeStyle(3, 0x00ffff);
+
+        backButton.on('pointerover', () => {
+            backButton.setColor('#00ffff');
+            backBg.setFillStyle(0x2a2a5e);
+        });
+
+        backButton.on('pointerout', () => {
+            backButton.setColor('#ffffff');
+            backBg.setFillStyle(0x1a1a3e);
+        });
+
+        backButton.on('pointerdown', () => {
+            if (this.settingsOverlay) {
+                this.settingsOverlay.forEach(obj => {
+                    if (obj && obj.destroy) {
+                        obj.destroy();
+                    }
+                });
+                this.settingsOverlay = null;
+            }
+            this.pauseGame();
+        });
+
+        this.settingsOverlay = [bg, title, soundLabel, soundToggle, soundToggleBg, musicLabel, musicToggle, musicToggleBg, backButton, backBg];
+
+        // Keyboard control
+        this.input.keyboard.once('keydown-ESC', () => {
+            if (this.settingsOverlay) {
+                this.settingsOverlay.forEach(obj => {
+                    if (obj && obj.destroy) {
+                        obj.destroy();
+                    }
+                });
+                this.settingsOverlay = null;
+            }
+            this.pauseGame();
+        });
     }
     
     gameOver() {
