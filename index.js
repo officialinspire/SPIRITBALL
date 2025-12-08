@@ -926,6 +926,8 @@ class GameScene extends Phaser.Scene {
         this.setupObstacles(); // Attack bumpers + other obstacles
         this.setupReentryLanes(); // Re-entry lanes, launch ramp, bonus lane
         this.setupFlippers();
+        this.setupSlingshots(); // Slingshot bumpers
+        this.setupInlanesOutlanes(); // Inlanes and outlanes
         this.setupPlunger();
         this.setupDrainZone();
         this.setupCollisions();
@@ -956,33 +958,59 @@ class GameScene extends Phaser.Scene {
     }
     
     setupTable() {
-        // Solid left wall - wider for reliable collision
-        const leftWall = this.add.rectangle(15, CONFIG.height / 2, 30, CONFIG.height, CONFIG.colors.wall);
-        this.physics.add.existing(leftWall, true);
-        leftWall.body.immovable = true;
+        this.walls = [];
 
-        // Solid right wall - wider for reliable collision
-        const rightWall = this.add.rectangle(CONFIG.width - 15, CONFIG.height / 2, 30, CONFIG.height, CONFIG.colors.wall);
-        this.physics.add.existing(rightWall, true);
-        rightWall.body.immovable = true;
-
-        // Solid top wall - thicker for reliable collision
+        // Top wall
         const topWall = this.add.rectangle(CONFIG.width / 2, 15, CONFIG.width, 30, CONFIG.colors.wall);
         this.physics.add.existing(topWall, true);
         topWall.body.immovable = true;
+        this.walls.push(topWall);
 
-        // Angled walls for pinball feel - thicker for better collision
-        const leftAngle = this.add.rectangle(80, CONFIG.height - 150, 150, 25, CONFIG.colors.wall);
-        leftAngle.setRotation(-0.3);
-        this.physics.add.existing(leftAngle, true);
-        leftAngle.body.immovable = true;
+        // Left wall - full height
+        const leftWall = this.add.rectangle(15, CONFIG.height / 2, 30, CONFIG.height, CONFIG.colors.wall);
+        this.physics.add.existing(leftWall, true);
+        leftWall.body.immovable = true;
+        this.walls.push(leftWall);
 
-        const rightAngle = this.add.rectangle(CONFIG.width - 80, CONFIG.height - 150, 150, 25, CONFIG.colors.wall);
-        rightAngle.setRotation(0.3);
-        this.physics.add.existing(rightAngle, true);
-        rightAngle.body.immovable = true;
+        // Right wall - full height
+        const rightWall = this.add.rectangle(CONFIG.width - 15, CONFIG.height / 2, 30, CONFIG.height, CONFIG.colors.wall);
+        this.physics.add.existing(rightWall, true);
+        rightWall.body.immovable = true;
+        this.walls.push(rightWall);
 
-        this.walls = [leftWall, rightWall, topWall, leftAngle, rightAngle];
+        // Left slant - guides ball toward center (classic pinball shape)
+        const leftSlant = this.add.rectangle(90, CONFIG.height - 200, 180, 20, CONFIG.colors.wall);
+        leftSlant.setRotation(-0.5); // Angled inward
+        this.physics.add.existing(leftSlant, true);
+        leftSlant.body.immovable = true;
+        this.walls.push(leftSlant);
+
+        // Right slant - guides ball toward center
+        const rightSlant = this.add.rectangle(CONFIG.width - 90, CONFIG.height - 200, 180, 20, CONFIG.colors.wall);
+        rightSlant.setRotation(0.5); // Angled inward
+        this.physics.add.existing(rightSlant, true);
+        rightSlant.body.immovable = true;
+        this.walls.push(rightSlant);
+
+        // Left guide rail - upper playfield
+        const leftGuide = this.add.rectangle(100, 450, 200, 15, CONFIG.colors.wall);
+        leftGuide.setRotation(1.2);
+        this.physics.add.existing(leftGuide, true);
+        leftGuide.body.immovable = true;
+        this.walls.push(leftGuide);
+
+        // Right guide rail - upper playfield
+        const rightGuide = this.add.rectangle(CONFIG.width - 100, 450, 200, 15, CONFIG.colors.wall);
+        rightGuide.setRotation(-1.2);
+        this.physics.add.existing(rightGuide, true);
+        rightGuide.body.immovable = true;
+        this.walls.push(rightGuide);
+
+        // Center divider post (between flippers)
+        const centerPost = this.add.circle(CONFIG.width / 2, CONFIG.height - 60, 8, CONFIG.colors.wall);
+        this.physics.add.existing(centerPost, true);
+        centerPost.body.immovable = true;
+        this.walls.push(centerPost);
     }
     
     setupBall() {
@@ -1140,40 +1168,41 @@ class GameScene extends Phaser.Scene {
         this.obstacles = [];
         this.attackBumpers = [];
 
-        // XP Pinball: Attack Bumpers (4 bumpers at top) - using cosmic crystals and asteroids
-        const bumperY = 240;
-        const bumperSpacing = 120;
-        const bumperStartX = 120;
+        // XP Pinball: Attack Bumpers in triangular formation (classic pinball style)
+        const centerX = CONFIG.width / 2;
+        const upperY = 320;
+        const lowerY = 400;
+        const horizontalSpacing = 100;
 
-        // Attack Bumper 1
-        const bumper1 = this.add.sprite(bumperStartX, bumperY, 'cosmic-crystal');
-        bumper1.setScale(0.9);
+        // Top bumper (apex of triangle)
+        const bumper1 = this.add.sprite(centerX, upperY, 'cosmic-crystal');
+        bumper1.setScale(1.0);
         bumper1.setDepth(50);
         bumper1.setTint(CONFIG.colors.bumper1);
         this.physics.add.existing(bumper1, true);
-        bumper1.body.setCircle(22);
+        bumper1.body.setCircle(25);
         bumper1.isAttackBumper = true;
 
-        // Attack Bumper 2
-        const bumper2 = this.add.sprite(bumperStartX + bumperSpacing, bumperY, 'asteroid');
-        bumper2.setScale(0.9);
+        // Bottom left bumper
+        const bumper2 = this.add.sprite(centerX - horizontalSpacing, lowerY, 'asteroid');
+        bumper2.setScale(1.0);
         bumper2.setDepth(50);
         bumper2.setTint(CONFIG.colors.bumper2);
         this.physics.add.existing(bumper2, true);
-        bumper2.body.setCircle(22);
+        bumper2.body.setCircle(25);
         bumper2.isAttackBumper = true;
 
-        // Attack Bumper 3
-        const bumper3 = this.add.sprite(bumperStartX + bumperSpacing * 2, bumperY, 'cosmic-crystal');
-        bumper3.setScale(0.9);
+        // Bottom right bumper
+        const bumper3 = this.add.sprite(centerX + horizontalSpacing, lowerY, 'cosmic-crystal');
+        bumper3.setScale(1.0);
         bumper3.setDepth(50);
         bumper3.setTint(CONFIG.colors.bumper3);
         this.physics.add.existing(bumper3, true);
-        bumper3.body.setCircle(22);
+        bumper3.body.setCircle(25);
         bumper3.isAttackBumper = true;
 
-        // Attack Bumper 4
-        const bumper4 = this.add.sprite(bumperStartX + bumperSpacing * 3, bumperY, 'asteroid');
+        // Center bumper (4th bumper in middle)
+        const bumper4 = this.add.sprite(centerX, lowerY - 40, 'asteroid');
         bumper4.setScale(0.9);
         bumper4.setDepth(50);
         bumper4.setTint(CONFIG.colors.bumper4);
@@ -1186,7 +1215,7 @@ class GameScene extends Phaser.Scene {
         // Pulsing animation for attack bumpers
         this.tweens.add({
             targets: this.attackBumpers,
-            scale: 1.0,
+            scale: { from: 0.95, to: 1.05 },
             alpha: 0.95,
             duration: 800,
             yoyo: true,
@@ -1194,14 +1223,14 @@ class GameScene extends Phaser.Scene {
             ease: 'Sine.easeInOut'
         });
 
-        // Other obstacles (not attack bumpers) - positioned elsewhere
-        const vortex1 = this.add.sprite(180, 450, 'energy-vortex');
+        // Other obstacles (not attack bumpers) - positioned for gameplay variety
+        const vortex1 = this.add.sprite(120, 550, 'energy-vortex');
         vortex1.setScale(0.7);
         vortex1.setDepth(50);
         this.physics.add.existing(vortex1, true);
         vortex1.body.setCircle(14);
 
-        const vortex2 = this.add.sprite(CONFIG.width - 180, 520, 'energy-vortex');
+        const vortex2 = this.add.sprite(CONFIG.width - 120, 550, 'energy-vortex');
         vortex2.setScale(0.7);
         vortex2.setDepth(50);
         this.physics.add.existing(vortex2, true);
@@ -1227,15 +1256,15 @@ class GameScene extends Phaser.Scene {
             ease: 'Sine.easeInOut'
         });
 
-        // Comets - shooting star obstacles
-        const comet1 = this.add.sprite(250, 600, 'comet');
+        // Comets - shooting star obstacles positioned near midfield
+        const comet1 = this.add.sprite(200, 650, 'comet');
         comet1.setScale(0.6);
         comet1.setDepth(50);
         comet1.setAngle(45);
         this.physics.add.existing(comet1, true);
         comet1.body.setCircle(10);
 
-        const comet2 = this.add.sprite(CONFIG.width - 250, 680, 'comet');
+        const comet2 = this.add.sprite(CONFIG.width - 200, 650, 'comet');
         comet2.setScale(0.6);
         comet2.setDepth(50);
         comet2.setAngle(-45);
@@ -1261,47 +1290,108 @@ class GameScene extends Phaser.Scene {
     }
 
     setupReentryLanes() {
-        // XP Pinball: Re-entry lanes at top (3 lanes)
+        // XP Pinball: Re-entry lanes at top (3 lanes) with guide rails
         this.reentryLaneZones = [];
+        this.rampGuides = [];
+
         const laneWidth = 60;
-        const laneHeight = 40;
-        const laneY = 50;
-        const laneSpacing = (CONFIG.width - 100) / 3;
+        const laneHeight = 50;
+        const laneY = 45;
+        const laneSpacing = (CONFIG.width - 140) / 3;
 
         for (let i = 0; i < CONFIG.reentryLaneCount; i++) {
-            const laneX = 50 + (i * laneSpacing) + (laneSpacing / 2);
-            const laneZone = this.add.rectangle(laneX, laneY, laneWidth, laneHeight, 0x00FF00, 0.3);
+            const laneX = 70 + (i * laneSpacing) + (laneSpacing / 2);
+            const laneZone = this.add.rectangle(laneX, laneY, laneWidth, laneHeight, 0x00FF00, 0.4);
             laneZone.setDepth(40);
             this.physics.add.existing(laneZone, true);
             laneZone.laneIndex = i;
             laneZone.isReentryLane = true;
             this.reentryLaneZones.push(laneZone);
+
+            // Add visual separators between lanes
+            if (i < CONFIG.reentryLaneCount - 1) {
+                const separator = this.add.rectangle(
+                    laneX + laneWidth / 2 + 5,
+                    laneY,
+                    10,
+                    laneHeight,
+                    CONFIG.colors.wall
+                );
+                separator.setDepth(40);
+                this.physics.add.existing(separator, true);
+                separator.body.immovable = true;
+                this.walls.push(separator);
+            }
         }
 
-        // Launch ramp zone (right side, going up)
-        this.launchRampZone = this.add.rectangle(CONFIG.width - 70, 300, 80, 200, 0xFFFF00, 0.2);
+        // Launch ramp with guide rails (right side, going up)
+        this.launchRampZone = this.add.rectangle(CONFIG.width - 70, 300, 60, 250, 0xFFFF00, 0.3);
         this.launchRampZone.setDepth(40);
         this.physics.add.existing(this.launchRampZone, true);
         this.launchRampZone.isLaunchRamp = true;
 
-        // Bonus lane (left side)
-        this.bonusLaneZone = this.add.rectangle(50, CONFIG.height - 200, 60, 100, 0xFF00FF, 0.2);
+        // Left guide for launch ramp
+        const launchGuideLeft = this.add.rectangle(CONFIG.width - 100, 300, 10, 280, CONFIG.colors.wall);
+        launchGuideLeft.setDepth(40);
+        this.physics.add.existing(launchGuideLeft, true);
+        launchGuideLeft.body.immovable = true;
+        this.walls.push(launchGuideLeft);
+        this.rampGuides.push(launchGuideLeft);
+
+        // Bonus lane (left side) with chute
+        this.bonusLaneZone = this.add.rectangle(60, 600, 50, 150, 0xFF00FF, 0.3);
         this.bonusLaneZone.setDepth(40);
         this.physics.add.existing(this.bonusLaneZone, true);
         this.bonusLaneZone.isBonusLane = true;
+
+        // Left chute guide (guides ball down the left side)
+        const leftChute = this.add.rectangle(45, 500, 12, 250, CONFIG.colors.wall);
+        leftChute.setDepth(40);
+        leftChute.setRotation(0.15);
+        this.physics.add.existing(leftChute, true);
+        leftChute.body.immovable = true;
+        this.walls.push(leftChute);
+        this.rampGuides.push(leftChute);
+
+        // Right chute guide (guides ball down right side to launch area)
+        const rightChute = this.add.rectangle(CONFIG.width - 45, 500, 12, 250, CONFIG.colors.wall);
+        rightChute.setDepth(40);
+        rightChute.setRotation(-0.15);
+        this.physics.add.existing(rightChute, true);
+        rightChute.body.immovable = true;
+        this.walls.push(rightChute);
+        this.rampGuides.push(rightChute);
+
+        // Center ramp/chute (creates a funnel effect toward center)
+        const centerRampLeft = this.add.rectangle(CONFIG.width / 2 - 60, 250, 100, 12, CONFIG.colors.wall);
+        centerRampLeft.setDepth(40);
+        centerRampLeft.setRotation(0.4);
+        this.physics.add.existing(centerRampLeft, true);
+        centerRampLeft.body.immovable = true;
+        this.walls.push(centerRampLeft);
+        this.rampGuides.push(centerRampLeft);
+
+        const centerRampRight = this.add.rectangle(CONFIG.width / 2 + 60, 250, 100, 12, CONFIG.colors.wall);
+        centerRampRight.setDepth(40);
+        centerRampRight.setRotation(-0.4);
+        this.physics.add.existing(centerRampRight, true);
+        centerRampRight.body.immovable = true;
+        this.walls.push(centerRampRight);
+        this.rampGuides.push(centerRampRight);
     }
 
     setupFlippers() {
-        const flipperWidth = 110; // Increased from 80 for longer flippers
+        const flipperWidth = 120;
         const flipperHeight = 16;
-        const flipperY = CONFIG.height - 100;
+        const flipperY = CONFIG.height - 80; // Moved to very bottom
+        const flipperGap = 80; // Gap between flippers
 
-        // Left cosmic energy wing flipper - closer to center and angled down at 45 degrees
-        this.leftFlipper = this.add.sprite(140, flipperY, 'flipper-left');
+        // Left cosmic energy wing flipper - at bottom left
+        this.leftFlipper = this.add.sprite(CONFIG.width / 2 - flipperGap, flipperY, 'flipper-left');
         this.physics.add.existing(this.leftFlipper, true);
         this.leftFlipper.body.setSize(flipperWidth, flipperHeight);
         this.leftFlipper.setDepth(99);
-        this.leftFlipper.setAngle(45); // Resting position at 45 degrees facing down
+        this.leftFlipper.setAngle(20); // Resting position angled upward
 
         // Add glow effect to left flipper
         this.tweens.add({
@@ -1313,12 +1403,12 @@ class GameScene extends Phaser.Scene {
             ease: 'Sine.easeInOut'
         });
 
-        // Right cosmic energy wing flipper - closer to center and angled down at 45 degrees
-        this.rightFlipper = this.add.sprite(CONFIG.width - 140, flipperY, 'flipper-right');
+        // Right cosmic energy wing flipper - at bottom right
+        this.rightFlipper = this.add.sprite(CONFIG.width / 2 + flipperGap, flipperY, 'flipper-right');
         this.physics.add.existing(this.rightFlipper, true);
         this.rightFlipper.body.setSize(flipperWidth, flipperHeight);
         this.rightFlipper.setDepth(99);
-        this.rightFlipper.setAngle(-45); // Resting position at -45 degrees facing down
+        this.rightFlipper.setAngle(-20); // Resting position angled upward
 
         // Add glow effect to right flipper
         this.tweens.add({
@@ -1329,6 +1419,73 @@ class GameScene extends Phaser.Scene {
             repeat: -1,
             ease: 'Sine.easeInOut'
         });
+    }
+
+    setupSlingshots() {
+        // Slingshots - triangular bumpers near flippers that accelerate the ball
+        this.slingshots = [];
+
+        // Left slingshot
+        const leftSlingshotX = CONFIG.width / 2 - 140;
+        const leftSlingshotY = CONFIG.height - 130;
+        const leftSlingshot = this.add.triangle(leftSlingshotX, leftSlingshotY, 0, 0, 40, -30, 40, 30, 0xff00ff);
+        leftSlingshot.setAlpha(0.7);
+        this.physics.add.existing(leftSlingshot, true);
+        leftSlingshot.body.setSize(40, 60);
+        leftSlingshot.setDepth(50);
+        leftSlingshot.isSlingshot = true;
+        leftSlingshot.side = 'left';
+        this.slingshots.push(leftSlingshot);
+
+        // Right slingshot
+        const rightSlingshotX = CONFIG.width / 2 + 140;
+        const rightSlingshotY = CONFIG.height - 130;
+        const rightSlingshot = this.add.triangle(rightSlingshotX, rightSlingshotY, 0, 0, -40, -30, -40, 30, 0xff00ff);
+        rightSlingshot.setAlpha(0.7);
+        this.physics.add.existing(rightSlingshot, true);
+        rightSlingshot.body.setSize(40, 60);
+        rightSlingshot.setDepth(50);
+        rightSlingshot.isSlingshot = true;
+        rightSlingshot.side = 'right';
+        this.slingshots.push(rightSlingshot);
+    }
+
+    setupInlanesOutlanes() {
+        // Inlanes and outlanes for ball return/drain mechanics
+        this.inlanes = [];
+        this.outlanes = [];
+
+        // Left outlane (drain zone)
+        const leftOutlane = this.add.rectangle(50, CONFIG.height - 120, 40, 100, 0xff0000, 0.3);
+        leftOutlane.setDepth(40);
+        this.physics.add.existing(leftOutlane, true);
+        leftOutlane.isOutlane = true;
+        leftOutlane.side = 'left';
+        this.outlanes.push(leftOutlane);
+
+        // Left inlane (safe return)
+        const leftInlane = this.add.rectangle(100, CONFIG.height - 120, 40, 100, 0x00ff00, 0.3);
+        leftInlane.setDepth(40);
+        this.physics.add.existing(leftInlane, true);
+        leftInlane.isInlane = true;
+        leftInlane.side = 'left';
+        this.inlanes.push(leftInlane);
+
+        // Right inlane (safe return)
+        const rightInlane = this.add.rectangle(CONFIG.width - 100, CONFIG.height - 120, 40, 100, 0x00ff00, 0.3);
+        rightInlane.setDepth(40);
+        this.physics.add.existing(rightInlane, true);
+        rightInlane.isInlane = true;
+        rightInlane.side = 'right';
+        this.inlanes.push(rightInlane);
+
+        // Right outlane (drain zone)
+        const rightOutlane = this.add.rectangle(CONFIG.width - 50, CONFIG.height - 120, 40, 100, 0xff0000, 0.3);
+        rightOutlane.setDepth(40);
+        this.physics.add.existing(rightOutlane, true);
+        rightOutlane.isOutlane = true;
+        rightOutlane.side = 'right';
+        this.outlanes.push(rightOutlane);
     }
 
     setupPlunger() {
@@ -1463,6 +1620,36 @@ class GameScene extends Phaser.Scene {
                 this.setCooldown(this.saturn, 400);
             }
         }, null, this);
+
+        // Slingshots
+        this.slingshots.forEach((slingshot) => {
+            this.physics.add.collider(this.ball, slingshot, () => {
+                if (!this.isOnCooldown(slingshot)) {
+                    this.hitSlingshot(slingshot);
+                    this.setCooldown(slingshot, 200);
+                }
+            }, null, this);
+        });
+
+        // Inlanes
+        this.inlanes.forEach((inlane) => {
+            this.physics.add.overlap(this.ball, inlane, () => {
+                if (!this.isOnCooldown(inlane)) {
+                    this.hitInlane(inlane);
+                    this.setCooldown(inlane, 1000);
+                }
+            }, null, this);
+        });
+
+        // Outlanes
+        this.outlanes.forEach((outlane) => {
+            this.physics.add.overlap(this.ball, outlane, () => {
+                if (!this.isOnCooldown(outlane)) {
+                    this.hitOutlane(outlane);
+                    this.setCooldown(outlane, 1000);
+                }
+            }, null, this);
+        });
 
         // XP Pinball: Re-entry Lanes
         this.reentryLaneZones.forEach((lane) => {
@@ -1864,7 +2051,7 @@ class GameScene extends Phaser.Scene {
             this.leftFlipperActive = true;
             this.tweens.add({
                 targets: this.leftFlipper,
-                angle: -20, // Swing up from 45 degree resting position
+                angle: -50, // Swing up from 20 degree resting position
                 duration: 8, // Lightning-fast response - instant feel
                 ease: 'Cubic.easeOut' // Snappier easing for instant response
             });
@@ -1907,7 +2094,7 @@ class GameScene extends Phaser.Scene {
         this.leftFlipperActive = false;
         this.tweens.add({
             targets: this.leftFlipper,
-            angle: 45, // Return to 45 degree resting position
+            angle: 20, // Return to 20 degree resting position
             duration: 35, // Instant snap-back like real pinball
             ease: 'Cubic.easeIn'
         });
@@ -1918,7 +2105,7 @@ class GameScene extends Phaser.Scene {
             this.rightFlipperActive = true;
             this.tweens.add({
                 targets: this.rightFlipper,
-                angle: 20, // Swing up from -45 degree resting position
+                angle: 50, // Swing up from -20 degree resting position
                 duration: 8, // Lightning-fast response - instant feel
                 ease: 'Cubic.easeOut' // Snappier easing for instant response
             });
@@ -1961,7 +2148,7 @@ class GameScene extends Phaser.Scene {
         this.rightFlipperActive = false;
         this.tweens.add({
             targets: this.rightFlipper,
-            angle: -45, // Return to -45 degree resting position
+            angle: -20, // Return to -20 degree resting position
             duration: 35, // Instant snap-back like real pinball
             ease: 'Cubic.easeIn'
         });
@@ -2085,7 +2272,7 @@ class GameScene extends Phaser.Scene {
     }
 
     hitAttackBumper(bumper) {
-        // XP Pinball attack bumper behavior
+        // XP Pinball attack bumper behavior - classic pinball style with powerful kicks
         const baseScore = this.gameState.bumpersUpgraded ?
             CONFIG.scores.attackBumperUpgraded :
             CONFIG.scores.attackBumper;
@@ -2102,24 +2289,37 @@ class GameScene extends Phaser.Scene {
             }
         }
 
-        // Bounce ball away
+        // POWERFUL bounce like classic pinball - bumpers actively push the ball
         if (this.ball.body) {
             const angle = Math.atan2(
                 this.ball.y - bumper.y,
                 this.ball.x - bumper.x
             );
+
+            // Strong, consistent bumper force (classic pinball feel)
+            const bumperPower = this.gameState.bumpersUpgraded ? 1000 : 850;
+
             this.ball.body.setVelocity(
-                Math.cos(angle) * 700,
-                Math.sin(angle) * 700
+                Math.cos(angle) * bumperPower,
+                Math.sin(angle) * bumperPower
             );
         }
 
-        this.cameras.main.shake(100, 0.004);
+        // Strong visual/audio feedback
+        this.cameras.main.shake(120, 0.006);
         this.tweens.add({
             targets: bumper,
-            scale: 1.1,
-            duration: 80,
-            yoyo: true
+            scale: 1.15,
+            duration: 60,
+            yoyo: true,
+            ease: 'Quad.easeOut'
+        });
+
+        // Flash effect
+        const originalTint = bumper.tintTopLeft;
+        bumper.setTint(0xffffff);
+        this.time.delayedCall(80, () => {
+            bumper.setTint(originalTint);
         });
 
         this.showPopup(`+${baseScore}`, bumper.x, bumper.y - 40, 20);
@@ -2267,6 +2467,68 @@ class GameScene extends Phaser.Scene {
 
         this.addScore(points);
         this.cameras.main.shake(60, 0.002);
+    }
+
+    hitSlingshot(slingshot) {
+        // Slingshot behavior - accelerate ball away with force
+        this.addScore(100);
+
+        if (this.ball.body) {
+            const angle = Math.atan2(
+                this.ball.y - slingshot.y,
+                this.ball.x - slingshot.x
+            );
+
+            // Strong kick from slingshot
+            const slingshotPower = 1100;
+            this.ball.body.setVelocity(
+                Math.cos(angle) * slingshotPower,
+                Math.sin(angle) * slingshotPower
+            );
+        }
+
+        // Visual feedback
+        this.cameras.main.shake(120, 0.005);
+        this.tweens.add({
+            targets: slingshot,
+            alpha: 1,
+            duration: 50,
+            yoyo: true
+        });
+
+        this.showPopup('+100', slingshot.x, slingshot.y - 30, 16);
+    }
+
+    hitInlane(inlane) {
+        // Inlane - safe return to flippers with bonus points
+        this.addScore(500);
+        this.cameras.main.shake(80, 0.003);
+
+        inlane.setFillStyle(0x00ff00, 0.8);
+        this.tweens.add({
+            targets: inlane,
+            alpha: 0.3,
+            duration: 300
+        });
+
+        this.showPopup('INLANE +500', inlane.x, inlane.y - 40, 16);
+        this.updateHUD();
+    }
+
+    hitOutlane(outlane) {
+        // Outlane - dangerous area that drains the ball
+        this.addScore(200);
+        this.cameras.main.shake(100, 0.004);
+
+        outlane.setFillStyle(0xff0000, 0.8);
+        this.tweens.add({
+            targets: outlane,
+            alpha: 0.3,
+            duration: 300
+        });
+
+        this.showPopup('OUTLANE!', outlane.x, outlane.y - 40, 16);
+        this.updateHUD();
     }
     
     // ===================================
