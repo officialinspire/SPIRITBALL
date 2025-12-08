@@ -265,39 +265,79 @@ class InputManager {
     setupMobileControls() {
         const leftBtn = document.getElementById('left-flipper-btn');
         if (leftBtn) {
-            leftBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.state.leftFlipper = true; }, { passive: false });
-            leftBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.state.leftFlipper = false; }, { passive: false });
+            const leftFlipperStart = (e) => {
+                e.preventDefault();
+                this.state.leftFlipper = true;
+            };
+            const leftFlipperEnd = (e) => {
+                e.preventDefault();
+                this.state.leftFlipper = false;
+            };
+
+            leftBtn.addEventListener('touchstart', leftFlipperStart, { passive: false });
+            leftBtn.addEventListener('touchend', leftFlipperEnd, { passive: false });
+            leftBtn.addEventListener('touchcancel', leftFlipperEnd, { passive: false });
+
+            // Add mouse support for desktop testing
+            leftBtn.addEventListener('mousedown', leftFlipperStart);
+            leftBtn.addEventListener('mouseup', leftFlipperEnd);
+            leftBtn.addEventListener('mouseleave', leftFlipperEnd);
         }
 
         const rightBtn = document.getElementById('right-flipper-btn');
         if (rightBtn) {
-            rightBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.state.rightFlipper = true; }, { passive: false });
-            rightBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.state.rightFlipper = false; }, { passive: false });
+            const rightFlipperStart = (e) => {
+                e.preventDefault();
+                this.state.rightFlipper = true;
+            };
+            const rightFlipperEnd = (e) => {
+                e.preventDefault();
+                this.state.rightFlipper = false;
+            };
+
+            rightBtn.addEventListener('touchstart', rightFlipperStart, { passive: false });
+            rightBtn.addEventListener('touchend', rightFlipperEnd, { passive: false });
+            rightBtn.addEventListener('touchcancel', rightFlipperEnd, { passive: false });
+
+            // Add mouse support for desktop testing
+            rightBtn.addEventListener('mousedown', rightFlipperStart);
+            rightBtn.addEventListener('mouseup', rightFlipperEnd);
+            rightBtn.addEventListener('mouseleave', rightFlipperEnd);
         }
 
         const launchBtn = document.getElementById('launch-btn');
         if (launchBtn) {
-            launchBtn.addEventListener('touchstart', (e) => {
+            const launchStart = (e) => {
                 e.preventDefault();
                 this.state.launchHeld = true;
                 this.state.launchPressed = true;
-            }, { passive: false });
-
-            launchBtn.addEventListener('touchend', (e) => {
+            };
+            const launchEnd = (e) => {
                 e.preventDefault();
                 this.state.launchHeld = false;
                 this.state.launchReleased = true;
                 setTimeout(() => this.state.launchReleased = false, 50);
-            }, { passive: false });
+            };
+
+            launchBtn.addEventListener('touchstart', launchStart, { passive: false });
+            launchBtn.addEventListener('touchend', launchEnd, { passive: false });
+            launchBtn.addEventListener('touchcancel', launchEnd, { passive: false });
+
+            // Add mouse support for desktop testing
+            launchBtn.addEventListener('mousedown', launchStart);
+            launchBtn.addEventListener('mouseup', launchEnd);
         }
 
         const pauseBtn = document.getElementById('pause-btn');
         if (pauseBtn) {
-            pauseBtn.addEventListener('touchstart', (e) => {
+            const pauseHandler = (e) => {
                 e.preventDefault();
                 this.state.pause = true;
                 setTimeout(() => this.state.pause = false, 150);
-            }, { passive: false });
+            };
+
+            pauseBtn.addEventListener('touchstart', pauseHandler, { passive: false });
+            pauseBtn.addEventListener('click', pauseHandler);
         }
     }
 }
@@ -1053,6 +1093,7 @@ class GameScene extends Phaser.Scene {
     
     setupPhysics() {
         this.physics.world.setBounds(0, 0, CONFIG.width, CONFIG.height);
+        this.physics.world.gravity.y = 800; // Add gravity to pull ball down naturally
     }
     
     setupTable() {
@@ -1146,6 +1187,11 @@ class GameScene extends Phaser.Scene {
         this.ball.body.setBounce(CONFIG.ballBounce);
         this.ball.body.setCollideWorldBounds(true); // Keep ball within bounds as safety net
         this.ball.body.setMaxVelocity(1800, 1800); // Prevent extreme speeds that cause tunneling
+
+        // Add air resistance to prevent ball from getting stuck
+        this.ball.body.setDamping(true);
+        this.ball.body.setDrag(0.995); // Very light air resistance
+
         this.ball.setDepth(100);
 
         // Add subtle rotation to eyeball
@@ -2057,6 +2103,7 @@ class GameScene extends Phaser.Scene {
         this.updateInput();
         this.updatePlunger();
         this.checkDrain();
+        this.checkBallStuck();
 
         // XP Pinball: Update mission fuel depletion
         if (this.gameState.missionActive) {
@@ -2065,6 +2112,20 @@ class GameScene extends Phaser.Scene {
             // Check time-based missions
             if (this.gameState.activeMission && this.gameState.activeMission.type === 'time') {
                 this.checkMissionComplete();
+            }
+        }
+    }
+
+    checkBallStuck() {
+        // Anti-stuck mechanism: if ball is moving very slowly and in play, give it a gentle nudge
+        if (this.ball && this.ball.body && this.gameState.ballInPlay) {
+            const velocity = this.ball.body.velocity;
+            const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+
+            // If ball is nearly stationary (stuck), give it a nudge
+            if (speed < 50) {
+                // Gentle downward nudge to help it fall naturally
+                this.ball.body.setVelocityY(this.ball.body.velocity.y + 100);
             }
         }
     }
@@ -2114,18 +2175,35 @@ class GameScene extends Phaser.Scene {
     }
     
     updateInput() {
+        // Initialize previous states if needed
+        if (this.previousLeftFlipperState === undefined) {
+            this.previousLeftFlipperState = false;
+        }
+        if (this.previousRightFlipperState === undefined) {
+            this.previousRightFlipperState = false;
+        }
+
         // Handle mobile input
         if (window.gameInputManager) {
-            if (window.gameInputManager.state.leftFlipper) {
-                this.activateLeftFlipper();
-            } else {
-                this.deactivateLeftFlipper();
+            // Only call activate/deactivate when state CHANGES to prevent animation spam
+            const leftFlipperNow = window.gameInputManager.state.leftFlipper;
+            if (leftFlipperNow !== this.previousLeftFlipperState) {
+                if (leftFlipperNow) {
+                    this.activateLeftFlipper();
+                } else {
+                    this.deactivateLeftFlipper();
+                }
+                this.previousLeftFlipperState = leftFlipperNow;
             }
 
-            if (window.gameInputManager.state.rightFlipper) {
-                this.activateRightFlipper();
-            } else {
-                this.deactivateRightFlipper();
+            const rightFlipperNow = window.gameInputManager.state.rightFlipper;
+            if (rightFlipperNow !== this.previousRightFlipperState) {
+                if (rightFlipperNow) {
+                    this.activateRightFlipper();
+                } else {
+                    this.deactivateRightFlipper();
+                }
+                this.previousRightFlipperState = rightFlipperNow;
             }
 
             // Handle plunger press
@@ -2215,8 +2293,8 @@ class GameScene extends Phaser.Scene {
             this.tweens.add({
                 targets: this.leftFlipper,
                 angle: -50, // Swing up from 20 degree resting position
-                duration: 8, // Lightning-fast response - instant feel
-                ease: 'Cubic.easeOut' // Snappier easing for instant response
+                duration: 50, // Fast but controlled response
+                ease: 'Quad.easeOut' // Snappier easing for responsive feel
             });
         }
 
@@ -2258,8 +2336,8 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({
             targets: this.leftFlipper,
             angle: 20, // Return to 20 degree resting position
-            duration: 35, // Instant snap-back like real pinball
-            ease: 'Cubic.easeIn'
+            duration: 80, // Controlled snap-back like real pinball
+            ease: 'Quad.easeIn'
         });
     }
 
@@ -2269,8 +2347,8 @@ class GameScene extends Phaser.Scene {
             this.tweens.add({
                 targets: this.rightFlipper,
                 angle: 50, // Swing up from -20 degree resting position
-                duration: 8, // Lightning-fast response - instant feel
-                ease: 'Cubic.easeOut' // Snappier easing for instant response
+                duration: 50, // Fast but controlled response
+                ease: 'Quad.easeOut' // Snappier easing for responsive feel
             });
         }
 
@@ -2312,8 +2390,8 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({
             targets: this.rightFlipper,
             angle: -20, // Return to -20 degree resting position
-            duration: 35, // Instant snap-back like real pinball
-            ease: 'Cubic.easeIn'
+            duration: 80, // Controlled snap-back like real pinball
+            ease: 'Quad.easeIn'
         });
     }
 

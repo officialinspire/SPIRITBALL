@@ -110,9 +110,9 @@ canvas {
 .flipper-btn,
 .launch-btn,
 .pause-btn {
-    background: rgba(138, 43, 226, 0.3);
-    border: 3px solid rgba(0, 255, 255, 0.6);
-    border-radius: 15px;
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.4), rgba(75, 0, 130, 0.5));
+    border: 3px solid rgba(0, 255, 255, 0.7);
+    border-radius: 18px;
     color: #00ffff;
     font-size: 28px;
     font-weight: bold;
@@ -120,23 +120,52 @@ canvas {
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
-    transition: all 0.1s ease;
-    backdrop-filter: blur(10px);
+    transition: all 0.15s ease-out;
+    backdrop-filter: blur(12px);
     display: flex;
     justify-content: center;
     align-items: center;
-    text-shadow: 0 0 10px #00ffff, 0 0 20px #ff00ff;
-    box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+    text-shadow: 0 0 12px #00ffff, 0 0 24px #ff00ff, 0 2px 4px rgba(0, 0, 0, 0.5);
+    box-shadow:
+        0 0 25px rgba(0, 255, 255, 0.5),
+        0 4px 15px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
     flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+}
+
+.flipper-btn::before,
+.launch-btn::before,
+.pause-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.5s;
+}
+
+.flipper-btn:hover::before,
+.launch-btn:hover::before,
+.pause-btn:hover::before {
+    left: 100%;
 }
 
 .flipper-btn:active,
 .launch-btn:active,
 .pause-btn:active {
-    background: rgba(138, 43, 226, 0.6);
-    transform: scale(0.92);
-    border-color: rgba(0, 255, 255, 0.9);
-    box-shadow: 0 0 30px rgba(0, 255, 255, 0.7), inset 0 0 20px rgba(255, 0, 255, 0.4);
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.7), rgba(75, 0, 130, 0.8));
+    transform: scale(0.94);
+    border-color: rgba(0, 255, 255, 1);
+    box-shadow:
+        0 0 40px rgba(0, 255, 255, 0.9),
+        0 0 60px rgba(255, 0, 255, 0.6),
+        inset 0 0 25px rgba(255, 0, 255, 0.5),
+        inset 0 2px 8px rgba(0, 0, 0, 0.4);
+    text-shadow: 0 0 15px #00ffff, 0 0 30px #ff00ff, 0 0 45px #ff00ff;
 }
 
 /* Flipper Buttons in controls container */
@@ -155,7 +184,24 @@ canvas {
     max-width: 180px;
     height: 110px;
     font-size: 18px;
-    letter-spacing: 2px;
+    letter-spacing: 3px;
+    font-weight: 900;
+    background: linear-gradient(135deg, rgba(255, 100, 0, 0.4), rgba(255, 165, 0, 0.5));
+    border-color: rgba(255, 165, 0, 0.8);
+    box-shadow:
+        0 0 30px rgba(255, 165, 0, 0.5),
+        0 4px 15px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.launch-btn:active {
+    background: linear-gradient(135deg, rgba(255, 100, 0, 0.7), rgba(255, 165, 0, 0.9));
+    border-color: rgba(255, 200, 0, 1);
+    box-shadow:
+        0 0 50px rgba(255, 165, 0, 0.9),
+        0 0 80px rgba(255, 100, 0, 0.6),
+        inset 0 0 30px rgba(255, 100, 0, 0.6),
+        inset 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 /* Pause Button - stays in game area */
