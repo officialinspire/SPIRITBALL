@@ -204,7 +204,7 @@ canvas {
         inset 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
-/* Pause Button - stays in game area */
+/* Pause Button - stays in game area - visible on both desktop and mobile */
 .pause-btn {
     position: absolute;
     top: 20px;
@@ -214,7 +214,30 @@ canvas {
     border-radius: 50%;
     font-size: 24px;
     z-index: 100;
-    display: none;
+    display: flex;
+    box-shadow:
+        0 0 20px rgba(0, 255, 255, 0.6),
+        0 4px 12px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Desktop specific pause button styling */
+@media (min-width: 768px) and (orientation: landscape) {
+    .pause-btn {
+        width: 60px;
+        height: 60px;
+        font-size: 26px;
+        top: 25px;
+        right: 25px;
+    }
+
+    .pause-btn:hover {
+        transform: scale(1.05);
+        box-shadow:
+            0 0 30px rgba(0, 255, 255, 0.8),
+            0 4px 15px rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    }
 }
 
 /* Show controls container on mobile */
@@ -222,19 +245,11 @@ canvas {
     #controls-container {
         display: flex !important;
     }
-
-    .pause-btn {
-        display: flex !important;
-    }
 }
 
 /* Desktop - Keep controls hidden */
 @media (min-width: 768px) and (orientation: landscape) {
     #controls-container {
-        display: none !important;
-    }
-
-    .pause-btn {
         display: none !important;
     }
 }
