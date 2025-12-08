@@ -664,8 +664,18 @@ class BootScene extends Phaser.Scene {
         graphics.generateTexture('flipper-right', 80, 28);
         graphics.clear();
 
-        // Create cosmic crystal bumper texture (triangular crystal)
-        graphics.fillStyle(0x00ffff, 0.9);
+        // Create cosmic crystal bumper texture (enhanced multi-layered crystal)
+        // Outer glow aura
+        graphics.fillStyle(0x00ffff, 0.2);
+        graphics.beginPath();
+        graphics.moveTo(25, 2);
+        graphics.lineTo(48, 42);
+        graphics.lineTo(2, 42);
+        graphics.closePath();
+        graphics.fillPath();
+
+        // Main crystal body with gradient effect
+        graphics.fillGradientStyle(0x00ffff, 0x00ffff, 0x00aaff, 0x0088ff, 1, 0.9, 0.8, 0.7);
         graphics.beginPath();
         graphics.moveTo(25, 5);
         graphics.lineTo(45, 40);
@@ -673,92 +683,180 @@ class BootScene extends Phaser.Scene {
         graphics.closePath();
         graphics.fillPath();
 
-        // Crystal facets
-        graphics.lineStyle(2, 0xffffff, 0.8);
+        // Crystal facets and internal structure
+        graphics.lineStyle(2, 0xffffff, 0.9);
         graphics.lineBetween(25, 5, 25, 40);
         graphics.lineBetween(15, 22, 35, 22);
+        graphics.lineBetween(10, 30, 40, 30);
 
-        // Outer glow
-        graphics.lineStyle(3, 0x00ffff, 0.6);
+        // Outer crystal edges with multi-layer glow
+        graphics.lineStyle(4, 0x00ffff, 0.4);
+        graphics.strokePath();
+        graphics.lineStyle(3, 0x00ffff, 0.7);
+        graphics.strokePath();
+        graphics.lineStyle(2, 0xffffff, 0.9);
         graphics.strokePath();
 
-        // Inner glow
-        graphics.fillStyle(0xffffff, 0.6);
-        graphics.fillCircle(25, 20, 5);
+        // Inner energy core - pulsing center
+        graphics.fillStyle(0xffffff, 0.9);
+        graphics.fillCircle(25, 20, 6);
+        graphics.fillStyle(0x00ffff, 0.7);
+        graphics.fillCircle(25, 20, 4);
+        graphics.fillStyle(0xffffff, 1);
+        graphics.fillCircle(25, 20, 2);
+
+        // Energy sparkles
+        graphics.fillStyle(0xffffff, 0.8);
+        graphics.fillCircle(15, 15, 1.5);
+        graphics.fillCircle(35, 15, 1.5);
+        graphics.fillCircle(25, 32, 1.5);
 
         graphics.generateTexture('cosmic-crystal', 50, 45);
         graphics.clear();
 
-        // Create asteroid texture (rocky space object)
-        graphics.fillStyle(0x8B4513, 1);
+        // Create asteroid texture (enhanced 3D rocky space object)
+        // Shadow base for depth
+        graphics.fillStyle(0x3a1f0a, 0.8);
+        graphics.fillCircle(22, 22, 18);
+
+        // Main body with gradient for 3D effect
+        graphics.fillGradientStyle(0xA0522D, 0xA0522D, 0x8B4513, 0x654321, 1, 0.95, 0.85, 0.7);
         graphics.fillCircle(20, 20, 18);
 
-        // Crater details
-        graphics.fillStyle(0x654321, 0.7);
+        // Large crater with depth
+        graphics.fillStyle(0x4a2f1a, 0.8);
+        graphics.fillCircle(18, 28, 6);
+        graphics.fillStyle(0x3a1f0a, 0.6);
+        graphics.fillCircle(18, 28, 4);
+
+        // Medium craters
+        graphics.fillStyle(0x654321, 0.8);
         graphics.fillCircle(14, 12, 4);
         graphics.fillCircle(28, 18, 3);
-        graphics.fillCircle(18, 28, 5);
 
-        // Rocky texture
-        graphics.fillStyle(0x4a2f1a, 0.5);
+        // Small crater details
+        graphics.fillStyle(0x4a2f1a, 0.7);
         graphics.fillCircle(10, 20, 2);
         graphics.fillCircle(26, 26, 2);
         graphics.fillCircle(15, 30, 2);
+        graphics.fillCircle(27, 12, 1.5);
 
-        // Highlight
-        graphics.fillStyle(0xD2691E, 0.6);
-        graphics.fillCircle(16, 14, 3);
+        // Rock texture bumps
+        graphics.fillStyle(0x5a3520, 0.6);
+        graphics.fillCircle(12, 16, 2);
+        graphics.fillCircle(24, 22, 2);
+        graphics.fillCircle(16, 24, 1.5);
 
-        // Outline
-        graphics.lineStyle(2, 0x654321, 0.8);
+        // Highlight for 3D lighting effect
+        graphics.fillStyle(0xD2691E, 0.8);
+        graphics.fillCircle(16, 14, 4);
+        graphics.fillStyle(0xCD853F, 0.6);
+        graphics.fillCircle(15, 13, 3);
+        graphics.fillStyle(0xF4A460, 0.5);
+        graphics.fillCircle(14, 12, 2);
+
+        // Rough outline with varied thickness
+        graphics.lineStyle(3, 0x3a1f0a, 0.6);
         graphics.strokeCircle(20, 20, 18);
+        graphics.lineStyle(2, 0x654321, 0.9);
+        graphics.strokeCircle(20, 20, 17.5);
 
         graphics.generateTexture('asteroid', 40, 40);
         graphics.clear();
 
-        // Create energy vortex portal texture (small portal)
-        // Outer ring
+        // Create energy vortex portal texture (enhanced swirling portal)
+        // Outer energy rings with pulsing effect
+        graphics.lineStyle(5, 0xff00ff, 0.3);
+        graphics.strokeCircle(20, 20, 18);
         graphics.lineStyle(4, 0xff00ff, 0.9);
         graphics.strokeCircle(20, 20, 16);
         graphics.lineStyle(3, 0x00ffff, 0.8);
         graphics.strokeCircle(20, 20, 14);
+        graphics.lineStyle(2, 0x8B00FF, 0.7);
+        graphics.strokeCircle(20, 20, 12);
 
-        // Inner swirl
-        graphics.fillStyle(0x4B0082, 0.7);
-        graphics.fillCircle(20, 20, 12);
+        // Swirling vortex layers
+        graphics.fillStyle(0x4B0082, 0.8);
+        graphics.fillCircle(20, 20, 11);
+        graphics.fillStyle(0x6A0DAD, 0.7);
+        graphics.fillCircle(20, 20, 9);
+        graphics.fillStyle(0x8B00FF, 0.6);
+        graphics.fillCircle(20, 20, 7);
 
-        // Energy particles
-        graphics.fillStyle(0xff00ff, 0.9);
-        graphics.fillCircle(20, 8, 2);
-        graphics.fillCircle(32, 20, 2);
-        graphics.fillCircle(20, 32, 2);
-        graphics.fillCircle(8, 20, 2);
+        // Spiral energy particles in vortex pattern
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const radius = 13 - (i % 3) * 2;
+            graphics.fillStyle(0xff00ff, 0.9);
+            graphics.fillCircle(
+                20 + Math.cos(angle) * radius,
+                20 + Math.sin(angle) * radius,
+                2
+            );
+        }
 
-        // Center glow
-        graphics.fillStyle(0xffffff, 0.8);
-        graphics.fillCircle(20, 20, 4);
+        // Inner spiral detail
+        graphics.lineStyle(1, 0x00ffff, 0.6);
+        for (let i = 0; i < 6; i++) {
+            const angle = (i / 6) * Math.PI * 2;
+            graphics.lineBetween(
+                20 + Math.cos(angle) * 10,
+                20 + Math.sin(angle) * 10,
+                20 + Math.cos(angle + 0.5) * 5,
+                20 + Math.sin(angle + 0.5) * 5
+            );
+        }
+
+        // Center vortex core with intense glow
+        graphics.fillStyle(0xffffff, 0.9);
+        graphics.fillCircle(20, 20, 5);
+        graphics.fillStyle(0x00ffff, 0.8);
+        graphics.fillCircle(20, 20, 3);
+        graphics.fillStyle(0xffffff, 1);
+        graphics.fillCircle(20, 20, 1.5);
 
         graphics.generateTexture('energy-vortex', 40, 40);
         graphics.clear();
 
-        // Create comet/shooting star obstacle
-        // Comet head
-        graphics.fillGradientStyle(0xffffff, 0xffffff, 0xffff00, 0xff8800, 1, 1, 0.9, 0.7);
+        // Create comet/shooting star obstacle (enhanced with dynamic tail)
+        // Extended tail with multiple gradient layers
+        graphics.fillGradientStyle(0xff8800, 0xff4400, 0xff0000, 0x000000, 0.6, 0.4, 0.2, 0);
+        graphics.fillTriangle(35, 15, 2, 2, 2, 28);
+
+        // Inner tail glow
+        graphics.fillGradientStyle(0xffaa00, 0xff6600, 0xff3300, 0x000000, 0.8, 0.6, 0.3, 0);
+        graphics.fillTriangle(35, 15, 8, 6, 8, 24);
+
+        // Bright inner tail
+        graphics.fillGradientStyle(0xffff00, 0xffaa00, 0xff6600, 0xff0000, 0.9, 0.7, 0.5, 0.2);
+        graphics.fillTriangle(35, 15, 15, 9, 15, 21);
+
+        // Comet head outer glow
+        graphics.fillStyle(0xffff00, 0.3);
+        graphics.fillCircle(35, 15, 15);
+
+        // Comet head with bright gradient
+        graphics.fillGradientStyle(0xffffff, 0xffffff, 0xffff00, 0xff8800, 1, 1, 0.95, 0.8);
         graphics.fillCircle(35, 15, 12);
 
-        // Comet tail
-        graphics.fillGradientStyle(0xff8800, 0xff4400, 0xff0000, 0x000000, 0.8, 0.6, 0.4, 0);
-        graphics.fillTriangle(35, 15, 5, 5, 5, 25);
+        // Core glow
+        graphics.fillStyle(0xffffff, 0.9);
+        graphics.fillCircle(35, 15, 7);
+        graphics.fillStyle(0xffffcc, 1);
+        graphics.fillCircle(35, 15, 4);
 
-        // Glow effect
-        graphics.fillStyle(0xffffff, 0.6);
-        graphics.fillCircle(35, 15, 6);
-
-        // Sparkles
-        graphics.fillStyle(0xffff00, 0.8);
-        graphics.fillCircle(25, 10, 2);
-        graphics.fillCircle(28, 18, 2);
-        graphics.fillCircle(20, 15, 2);
+        // Sparkle trail particles
+        graphics.fillStyle(0xffff00, 0.9);
+        graphics.fillCircle(28, 10, 2.5);
+        graphics.fillCircle(30, 18, 2.5);
+        graphics.fillCircle(22, 15, 2);
+        graphics.fillStyle(0xffffff, 0.8);
+        graphics.fillCircle(25, 12, 1.5);
+        graphics.fillCircle(26, 17, 1.5);
+        graphics.fillCircle(18, 14, 1.5);
+        graphics.fillStyle(0xff8800, 0.7);
+        graphics.fillCircle(15, 11, 1.5);
+        graphics.fillCircle(16, 19, 1.5);
 
         graphics.generateTexture('comet', 50, 30);
         graphics.clear();
@@ -992,19 +1090,39 @@ class GameScene extends Phaser.Scene {
         rightSlant.body.immovable = true;
         this.walls.push(rightSlant);
 
-        // Left guide rail - upper playfield
+        // Left guide rail - upper playfield (enhanced with glow)
+        // Outer glow layer
+        const leftGuideGlow = this.add.rectangle(100, 450, 210, 22, CONFIG.colors.wall, 0.3);
+        leftGuideGlow.setRotation(1.2);
+        leftGuideGlow.setDepth(30);
+        // Main guide rail
         const leftGuide = this.add.rectangle(100, 450, 200, 15, CONFIG.colors.wall);
         leftGuide.setRotation(1.2);
         this.physics.add.existing(leftGuide, true);
         leftGuide.body.immovable = true;
+        leftGuide.setDepth(31);
         this.walls.push(leftGuide);
+        // Inner highlight
+        const leftGuideHighlight = this.add.rectangle(100, 450, 190, 8, 0xffffff, 0.4);
+        leftGuideHighlight.setRotation(1.2);
+        leftGuideHighlight.setDepth(32);
 
-        // Right guide rail - upper playfield
+        // Right guide rail - upper playfield (enhanced with glow)
+        // Outer glow layer
+        const rightGuideGlow = this.add.rectangle(CONFIG.width - 100, 450, 210, 22, CONFIG.colors.wall, 0.3);
+        rightGuideGlow.setRotation(-1.2);
+        rightGuideGlow.setDepth(30);
+        // Main guide rail
         const rightGuide = this.add.rectangle(CONFIG.width - 100, 450, 200, 15, CONFIG.colors.wall);
         rightGuide.setRotation(-1.2);
         this.physics.add.existing(rightGuide, true);
         rightGuide.body.immovable = true;
+        rightGuide.setDepth(31);
         this.walls.push(rightGuide);
+        // Inner highlight
+        const rightGuideHighlight = this.add.rectangle(CONFIG.width - 100, 450, 190, 8, 0xffffff, 0.4);
+        rightGuideHighlight.setRotation(-1.2);
+        rightGuideHighlight.setDepth(32);
 
         // Center divider post (between flippers)
         const centerPost = this.add.circle(CONFIG.width / 2, CONFIG.height - 60, 8, CONFIG.colors.wall);
@@ -1330,13 +1448,20 @@ class GameScene extends Phaser.Scene {
         this.physics.add.existing(this.launchRampZone, true);
         this.launchRampZone.isLaunchRamp = true;
 
-        // Left guide for launch ramp
+        // Left guide for launch ramp (enhanced with glow)
+        // Outer glow
+        const launchGuideGlow = this.add.rectangle(CONFIG.width - 100, 300, 16, 290, CONFIG.colors.wall, 0.3);
+        launchGuideGlow.setDepth(39);
+        // Main guide
         const launchGuideLeft = this.add.rectangle(CONFIG.width - 100, 300, 10, 280, CONFIG.colors.wall);
         launchGuideLeft.setDepth(40);
         this.physics.add.existing(launchGuideLeft, true);
         launchGuideLeft.body.immovable = true;
         this.walls.push(launchGuideLeft);
         this.rampGuides.push(launchGuideLeft);
+        // Inner highlight
+        const launchGuideHighlight = this.add.rectangle(CONFIG.width - 100, 300, 6, 275, 0xffffff, 0.3);
+        launchGuideHighlight.setDepth(41);
 
         // Bonus lane (left side) with chute
         this.bonusLaneZone = this.add.rectangle(60, 600, 50, 150, 0xFF00FF, 0.3);
@@ -1344,7 +1469,12 @@ class GameScene extends Phaser.Scene {
         this.physics.add.existing(this.bonusLaneZone, true);
         this.bonusLaneZone.isBonusLane = true;
 
-        // Left chute guide (guides ball down the left side)
+        // Left chute guide (guides ball down the left side) - enhanced with glow
+        // Outer glow
+        const leftChuteGlow = this.add.rectangle(45, 500, 18, 260, CONFIG.colors.wall, 0.3);
+        leftChuteGlow.setDepth(39);
+        leftChuteGlow.setRotation(0.15);
+        // Main chute
         const leftChute = this.add.rectangle(45, 500, 12, 250, CONFIG.colors.wall);
         leftChute.setDepth(40);
         leftChute.setRotation(0.15);
@@ -1352,8 +1482,17 @@ class GameScene extends Phaser.Scene {
         leftChute.body.immovable = true;
         this.walls.push(leftChute);
         this.rampGuides.push(leftChute);
+        // Inner highlight
+        const leftChuteHighlight = this.add.rectangle(45, 500, 8, 245, 0xffffff, 0.3);
+        leftChuteHighlight.setDepth(41);
+        leftChuteHighlight.setRotation(0.15);
 
-        // Right chute guide (guides ball down right side to launch area)
+        // Right chute guide (guides ball down right side to launch area) - enhanced with glow
+        // Outer glow
+        const rightChuteGlow = this.add.rectangle(CONFIG.width - 45, 500, 18, 260, CONFIG.colors.wall, 0.3);
+        rightChuteGlow.setDepth(39);
+        rightChuteGlow.setRotation(-0.15);
+        // Main chute
         const rightChute = this.add.rectangle(CONFIG.width - 45, 500, 12, 250, CONFIG.colors.wall);
         rightChute.setDepth(40);
         rightChute.setRotation(-0.15);
@@ -1361,8 +1500,18 @@ class GameScene extends Phaser.Scene {
         rightChute.body.immovable = true;
         this.walls.push(rightChute);
         this.rampGuides.push(rightChute);
+        // Inner highlight
+        const rightChuteHighlight = this.add.rectangle(CONFIG.width - 45, 500, 8, 245, 0xffffff, 0.3);
+        rightChuteHighlight.setDepth(41);
+        rightChuteHighlight.setRotation(-0.15);
 
-        // Center ramp/chute (creates a funnel effect toward center)
+        // Center ramp/chute (creates a funnel effect toward center) - enhanced with glow
+        // Left funnel ramp
+        // Outer glow
+        const centerRampLeftGlow = this.add.rectangle(CONFIG.width / 2 - 60, 250, 105, 18, CONFIG.colors.wall, 0.3);
+        centerRampLeftGlow.setDepth(39);
+        centerRampLeftGlow.setRotation(0.4);
+        // Main ramp
         const centerRampLeft = this.add.rectangle(CONFIG.width / 2 - 60, 250, 100, 12, CONFIG.colors.wall);
         centerRampLeft.setDepth(40);
         centerRampLeft.setRotation(0.4);
@@ -1370,7 +1519,17 @@ class GameScene extends Phaser.Scene {
         centerRampLeft.body.immovable = true;
         this.walls.push(centerRampLeft);
         this.rampGuides.push(centerRampLeft);
+        // Inner highlight
+        const centerRampLeftHighlight = this.add.rectangle(CONFIG.width / 2 - 60, 250, 95, 7, 0xffffff, 0.3);
+        centerRampLeftHighlight.setDepth(41);
+        centerRampLeftHighlight.setRotation(0.4);
 
+        // Right funnel ramp
+        // Outer glow
+        const centerRampRightGlow = this.add.rectangle(CONFIG.width / 2 + 60, 250, 105, 18, CONFIG.colors.wall, 0.3);
+        centerRampRightGlow.setDepth(39);
+        centerRampRightGlow.setRotation(-0.4);
+        // Main ramp
         const centerRampRight = this.add.rectangle(CONFIG.width / 2 + 60, 250, 100, 12, CONFIG.colors.wall);
         centerRampRight.setDepth(40);
         centerRampRight.setRotation(-0.4);
@@ -1378,6 +1537,10 @@ class GameScene extends Phaser.Scene {
         centerRampRight.body.immovable = true;
         this.walls.push(centerRampRight);
         this.rampGuides.push(centerRampRight);
+        // Inner highlight
+        const centerRampRightHighlight = this.add.rectangle(CONFIG.width / 2 + 60, 250, 95, 7, 0xffffff, 0.3);
+        centerRampRightHighlight.setDepth(41);
+        centerRampRightHighlight.setRotation(-0.4);
     }
 
     setupFlippers() {
@@ -2296,8 +2459,8 @@ class GameScene extends Phaser.Scene {
                 this.ball.x - bumper.x
             );
 
-            // Strong, consistent bumper force (classic pinball feel)
-            const bumperPower = this.gameState.bumpersUpgraded ? 1000 : 850;
+            // Moderate bumper force - allows ball to fall through gaps
+            const bumperPower = this.gameState.bumpersUpgraded ? 550 : 400;
 
             this.ball.body.setVelocity(
                 Math.cos(angle) * bumperPower,
