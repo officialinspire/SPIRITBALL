@@ -1175,15 +1175,16 @@ class GameScene extends Phaser.Scene {
     }
 
     setupFlippers() {
-        const flipperWidth = 80;
+        const flipperWidth = 110; // Increased from 80 for longer flippers
         const flipperHeight = 16;
         const flipperY = CONFIG.height - 100;
 
-        // Left cosmic energy wing flipper - moved closer to center (130px from edge instead of 150px)
-        this.leftFlipper = this.add.sprite(130, flipperY, 'flipper-left');
+        // Left cosmic energy wing flipper - closer to center and angled down at 45 degrees
+        this.leftFlipper = this.add.sprite(100, flipperY, 'flipper-left');
         this.physics.add.existing(this.leftFlipper, true);
         this.leftFlipper.body.setSize(flipperWidth, flipperHeight);
         this.leftFlipper.setDepth(99);
+        this.leftFlipper.setAngle(45); // Resting position at 45 degrees facing down
 
         // Add glow effect to left flipper
         this.tweens.add({
@@ -1195,11 +1196,12 @@ class GameScene extends Phaser.Scene {
             ease: 'Sine.easeInOut'
         });
 
-        // Right cosmic energy wing flipper - moved closer to center (130px from edge instead of 150px)
-        this.rightFlipper = this.add.sprite(CONFIG.width - 130, flipperY, 'flipper-right');
+        // Right cosmic energy wing flipper - closer to center and angled down at 45 degrees
+        this.rightFlipper = this.add.sprite(CONFIG.width - 100, flipperY, 'flipper-right');
         this.physics.add.existing(this.rightFlipper, true);
         this.rightFlipper.body.setSize(flipperWidth, flipperHeight);
         this.rightFlipper.setDepth(99);
+        this.rightFlipper.setAngle(-45); // Resting position at -45 degrees facing down
 
         // Add glow effect to right flipper
         this.tweens.add({
@@ -1745,7 +1747,7 @@ class GameScene extends Phaser.Scene {
             this.leftFlipperActive = true;
             this.tweens.add({
                 targets: this.leftFlipper,
-                angle: -58, // Maximum aggressive angle for powerful hitting
+                angle: -20, // Swing up from 45 degree resting position
                 duration: 8, // Lightning-fast response - instant feel
                 ease: 'Cubic.easeOut' // Snappier easing for instant response
             });
@@ -1788,7 +1790,7 @@ class GameScene extends Phaser.Scene {
         this.leftFlipperActive = false;
         this.tweens.add({
             targets: this.leftFlipper,
-            angle: 0,
+            angle: 45, // Return to 45 degree resting position
             duration: 35, // Instant snap-back like real pinball
             ease: 'Cubic.easeIn'
         });
@@ -1799,7 +1801,7 @@ class GameScene extends Phaser.Scene {
             this.rightFlipperActive = true;
             this.tweens.add({
                 targets: this.rightFlipper,
-                angle: 58, // Maximum aggressive angle for powerful hitting
+                angle: 20, // Swing up from -45 degree resting position
                 duration: 8, // Lightning-fast response - instant feel
                 ease: 'Cubic.easeOut' // Snappier easing for instant response
             });
@@ -1842,7 +1844,7 @@ class GameScene extends Phaser.Scene {
         this.rightFlipperActive = false;
         this.tweens.add({
             targets: this.rightFlipper,
-            angle: 0,
+            angle: -45, // Return to -45 degree resting position
             duration: 35, // Instant snap-back like real pinball
             ease: 'Cubic.easeIn'
         });
