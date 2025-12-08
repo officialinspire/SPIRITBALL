@@ -347,7 +347,7 @@ class BootScene extends Phaser.Scene {
     
     preload() {
         this.add.text(CONFIG.width / 2, CONFIG.height / 2, 'SPIRITBALL\nLOADING...', {
-            fontSize: '36px', fontFamily: 'Arial', color: '#00ffff',
+            fontSize: '36px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#00ffff',
             stroke: '#ff00ff', strokeThickness: 5, align: 'center'
         }).setOrigin(0.5);
 
@@ -916,7 +916,7 @@ class MenuScene extends Phaser.Scene {
         this.cameras.main.setBackgroundColor(CONFIG.colors.background);
 
         const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.25, 'SPIRITBALL', {
-            fontSize: '72px', fontFamily: 'Arial', color: '#00ffff',
+            fontSize: '72px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#00ffff',
             stroke: '#ff00ff', strokeThickness: 8
         }).setOrigin(0.5);
 
@@ -926,12 +926,12 @@ class MenuScene extends Phaser.Scene {
         });
 
         this.add.text(CONFIG.width / 2, CONFIG.height * 0.35, 'DMT Vision Quest Pinball', {
-            fontSize: '22px', fontFamily: 'Arial', color: '#ffffff', alpha: 0.9
+            fontSize: '22px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#ffffff', alpha: 0.9
         }).setOrigin(0.5);
 
         const highScore = localStorage.getItem('spiritball-highscore') || 0;
         this.add.text(CONFIG.width / 2, CONFIG.height * 0.48, `HIGH SCORE: ${highScore}`, {
-            fontSize: '28px', fontFamily: 'Arial', color: '#ffff00',
+            fontSize: '28px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#ffff00',
             stroke: '#000000', strokeThickness: 4
         }).setOrigin(0.5);
 
@@ -939,7 +939,7 @@ class MenuScene extends Phaser.Scene {
         const startText = isMobile ? 'TAP ⚡ TO START' : 'PRESS SPACE TO START';
 
         const startInstructions = this.add.text(CONFIG.width / 2, CONFIG.height * 0.65, startText, {
-            fontSize: '36px', fontFamily: 'Arial', color: '#00ff99',
+            fontSize: '36px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#00ff99',
             stroke: '#000000', strokeThickness: 4
         }).setOrigin(0.5);
 
@@ -1722,7 +1722,7 @@ class GameScene extends Phaser.Scene {
         // Charge text
         this.chargeText = this.add.text(CONFIG.width - 45, CONFIG.height - 520, '', {
             fontSize: '16px',
-            fontFamily: 'Arial',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             color: '#00ffff',
             stroke: '#000000',
             strokeThickness: 3
@@ -1912,7 +1912,7 @@ class GameScene extends Phaser.Scene {
             // Top Row: Score, High Score, Lives
             scoreLabel: this.add.text(25, 12, 'SCORE', {
                 fontSize: '16px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#00d4ff',
                 stroke: '#001a33',
@@ -1921,7 +1921,7 @@ class GameScene extends Phaser.Scene {
 
             scoreText: this.add.text(25, 32, '0', {
                 fontSize: '32px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#00ffff',
                 stroke: '#003366',
@@ -1931,7 +1931,7 @@ class GameScene extends Phaser.Scene {
 
             highScoreLabel: this.add.text(CONFIG.width / 2, 12, 'HIGH SCORE', {
                 fontSize: '16px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#ffd700',
                 stroke: '#332200',
@@ -1940,7 +1940,7 @@ class GameScene extends Phaser.Scene {
 
             highScoreText: this.add.text(CONFIG.width / 2, 32, `${this.gameState.highScore}`, {
                 fontSize: '32px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#ffff00',
                 stroke: '#666600',
@@ -1950,7 +1950,7 @@ class GameScene extends Phaser.Scene {
 
             livesLabel: this.add.text(CONFIG.width - 25, 12, 'BALLS', {
                 fontSize: '16px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#ff66cc',
                 stroke: '#330033',
@@ -1959,7 +1959,7 @@ class GameScene extends Phaser.Scene {
 
             livesText: this.add.text(CONFIG.width - 25, 32, `${this.gameState.lives}`, {
                 fontSize: '32px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#ff0099',
                 stroke: '#660033',
@@ -1970,7 +1970,7 @@ class GameScene extends Phaser.Scene {
             // Second Row: Rank, Mission, Multiplier
             rankLabel: this.add.text(25, 68, 'RANK', {
                 fontSize: '14px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#00ffcc',
                 stroke: '#003333',
@@ -1979,7 +1979,7 @@ class GameScene extends Phaser.Scene {
 
             rankText: this.add.text(25, 85, CONFIG.ranks[0], {
                 fontSize: '20px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#00ff88',
                 stroke: '#004400',
@@ -1988,7 +1988,7 @@ class GameScene extends Phaser.Scene {
 
             missionLabel: this.add.text(CONFIG.width / 2, 68, 'MISSION', {
                 fontSize: '14px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#00ffcc',
                 stroke: '#003333',
@@ -1997,7 +1997,7 @@ class GameScene extends Phaser.Scene {
 
             missionText: this.add.text(CONFIG.width / 2, 85, 'Select Mission', {
                 fontSize: '18px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#ffcc00',
                 stroke: '#444400',
@@ -2006,7 +2006,7 @@ class GameScene extends Phaser.Scene {
 
             multiplierLabel: this.add.text(CONFIG.width - 25, 68, 'MULT', {
                 fontSize: '14px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#00ffcc',
                 stroke: '#003333',
@@ -2015,7 +2015,7 @@ class GameScene extends Phaser.Scene {
 
             multiplierText: this.add.text(CONFIG.width - 25, 85, '1x', {
                 fontSize: '24px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#ff00ff',
                 stroke: '#440044',
@@ -2025,7 +2025,7 @@ class GameScene extends Phaser.Scene {
             // Third Row: Fuel indicator
             fuelLabel: this.add.text(25, 112, 'FUEL', {
                 fontSize: '14px',
-                fontFamily: 'Arial, sans-serif',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 fontStyle: 'bold',
                 color: '#00ffcc',
                 stroke: '#003333',
@@ -2035,7 +2035,7 @@ class GameScene extends Phaser.Scene {
             // Popup messages
             comboText: this.add.text(CONFIG.width / 2, 130, '', {
                 fontSize: '20px',
-                fontFamily: 'Impact, Arial',
+                fontFamily: 'Orbitron, Arial, sans-serif',
                 color: '#ffffff',
                 stroke: '#ff00ff',
                 strokeThickness: 4,
@@ -2987,7 +2987,7 @@ class GameScene extends Phaser.Scene {
         // YOU DIED text
         const youDiedText = this.add.text(CONFIG.width / 2, CONFIG.height / 2, 'YOU DIED', {
             fontSize: '72px',
-            fontFamily: 'Arial',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             color: '#ff0000',
             stroke: '#000000',
             strokeThickness: 8
@@ -3188,7 +3188,7 @@ class GameScene extends Phaser.Scene {
     
     showPopup(text, x, y, fontSize = 26) {
         const popup = this.add.text(x, y, text, {
-            fontSize: `${fontSize}px`, fontFamily: 'Arial', color: '#ffffff',
+            fontSize: `${fontSize}px`, fontFamily: 'Orbitron, Arial, sans-serif', color: '#ffffff',
             stroke: '#000000', strokeThickness: 5, align: 'center'
         }).setOrigin(0.5).setDepth(1001);
         
@@ -3219,7 +3219,7 @@ class GameScene extends Phaser.Scene {
         // Title
         const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.25, 'GAME PAUSED', {
             fontSize: '48px',
-            fontFamily: 'Arial, sans-serif',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
             color: '#00ffff',
             stroke: '#003366',
@@ -3230,7 +3230,7 @@ class GameScene extends Phaser.Scene {
         // Menu buttons
         const buttonStyle = {
             fontSize: '28px',
-            fontFamily: 'Arial, sans-serif',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
             color: '#ffffff',
             stroke: '#000000',
@@ -3320,7 +3320,7 @@ class GameScene extends Phaser.Scene {
         // Instructions
         const instructions = this.add.text(CONFIG.width / 2, CONFIG.height * 0.85, 'ESC or TAP RESUME to continue', {
             fontSize: '16px',
-            fontFamily: 'Arial, sans-serif',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             color: '#888888',
             stroke: '#000000',
             strokeThickness: 2
@@ -3375,7 +3375,7 @@ class GameScene extends Phaser.Scene {
         // Title
         const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.2, 'SETTINGS', {
             fontSize: '48px',
-            fontFamily: 'Arial, sans-serif',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
             color: '#ffff00',
             stroke: '#666600',
@@ -3390,7 +3390,7 @@ class GameScene extends Phaser.Scene {
         // Sound toggle
         const soundLabel = this.add.text(CONFIG.width / 2 - 100, CONFIG.height * 0.35, 'SOUND:', {
             fontSize: '24px',
-            fontFamily: 'Arial, sans-serif',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
             color: '#ffffff',
             stroke: '#000000',
@@ -3399,7 +3399,7 @@ class GameScene extends Phaser.Scene {
 
         const soundToggle = this.add.text(CONFIG.width / 2 + 50, CONFIG.height * 0.35, soundEnabled ? 'ON' : 'OFF', {
             fontSize: '24px',
-            fontFamily: 'Arial, sans-serif',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
             color: soundEnabled ? '#00ff00' : '#ff0000',
             stroke: '#000000',
@@ -3425,7 +3425,7 @@ class GameScene extends Phaser.Scene {
         // Music toggle
         const musicLabel = this.add.text(CONFIG.width / 2 - 100, CONFIG.height * 0.45, 'MUSIC:', {
             fontSize: '24px',
-            fontFamily: 'Arial, sans-serif',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
             color: '#ffffff',
             stroke: '#000000',
@@ -3434,7 +3434,7 @@ class GameScene extends Phaser.Scene {
 
         const musicToggle = this.add.text(CONFIG.width / 2 + 50, CONFIG.height * 0.45, musicEnabled ? 'ON' : 'OFF', {
             fontSize: '24px',
-            fontFamily: 'Arial, sans-serif',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
             color: musicEnabled ? '#00ff00' : '#ff0000',
             stroke: '#000000',
@@ -3460,7 +3460,7 @@ class GameScene extends Phaser.Scene {
         // Back button
         const backButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.70, '◄ BACK', {
             fontSize: '28px',
-            fontFamily: 'Arial, sans-serif',
+            fontFamily: 'Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
             color: '#ffffff',
             stroke: '#000000',
@@ -3533,51 +3533,51 @@ class GameOverScene extends Phaser.Scene {
         this.cameras.main.setBackgroundColor(CONFIG.colors.background);
         
         this.add.text(CONFIG.width / 2, 120, 'GAME OVER', {
-            fontSize: '64px', fontFamily: 'Arial', color: '#ff0099',
+            fontSize: '64px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#ff0099',
             stroke: '#000000', strokeThickness: 7
         }).setOrigin(0.5);
-        
+
         this.add.text(CONFIG.width / 2, 230, 'FINAL SCORE', {
-            fontSize: '26px', fontFamily: 'Arial', color: '#ffffff'
+            fontSize: '26px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#ffffff'
         }).setOrigin(0.5);
-        
+
         this.add.text(CONFIG.width / 2, 280, `${this.finalScore}`, {
-            fontSize: '54px', fontFamily: 'Arial', color: '#00ffff',
+            fontSize: '54px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#00ffff',
             stroke: '#000000', strokeThickness: 5
         }).setOrigin(0.5);
-        
+
         if (this.finalScore >= this.highScore) {
             const newHigh = this.add.text(CONFIG.width / 2, 360, 'NEW HIGH SCORE!', {
-                fontSize: '36px', fontFamily: 'Arial', color: '#ffff00',
+                fontSize: '36px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#ffff00',
                 stroke: '#000000', strokeThickness: 5
             }).setOrigin(0.5);
             this.tweens.add({ targets: newHigh, scale: 1.12, duration: 600, yoyo: true, repeat: -1 });
         } else {
             this.add.text(CONFIG.width / 2, 360, `HIGH SCORE: ${this.highScore}`, {
-                fontSize: '26px', fontFamily: 'Arial', color: '#ffff00'
+                fontSize: '26px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#ffff00'
             }).setOrigin(0.5);
         }
-        
+
         // Show statistics
         let statsY = 450;
         if (this.statistics.enlightenmentCount > 0) {
             this.add.text(CONFIG.width / 2, statsY, `Enlightenments: ${this.statistics.enlightenmentCount}`, {
-                fontSize: '20px', fontFamily: 'Arial', color: '#ffffff'
+                fontSize: '20px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#ffffff'
             }).setOrigin(0.5);
             statsY += 30;
         }
-        
+
         if (this.statistics.saturnVortexEscapes > 0) {
             this.add.text(CONFIG.width / 2, statsY, `Vortex Escapes: ${this.statistics.saturnVortexEscapes}`, {
-                fontSize: '20px', fontFamily: 'Arial', color: '#ffffff'
+                fontSize: '20px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#ffffff'
             }).setOrigin(0.5);
         }
-        
+
         const isMobile = window.gameInputManager && window.gameInputManager.isMobile;
         const playAgainText = isMobile ? 'TAP ⚡ TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
 
         const playAgain = this.add.text(CONFIG.width / 2, CONFIG.height - 120, playAgainText, {
-            fontSize: '28px', fontFamily: 'Arial', color: '#00ffff',
+            fontSize: '28px', fontFamily: 'Orbitron, Arial, sans-serif', color: '#00ffff',
             stroke: '#000000', strokeThickness: 4
         }).setOrigin(0.5);
 
