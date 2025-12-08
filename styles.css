@@ -38,6 +38,9 @@ canvas {
         0 0 30px #00ffff,
         inset 0 0 10px rgba(0, 255, 255, 0.2);
     border-radius: 3px;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
 }
 
 /* ===================================
@@ -181,6 +184,34 @@ canvas {
         width: 120px;
         height: 100px;
     }
+}
+
+/* Tablets */
+@media (min-width: 481px) and (max-width: 767px) {
+    .flipper-btn {
+        width: 140px;
+        height: 120px;
+    }
+
+    .launch-btn {
+        width: 160px;
+        height: 75px;
+        bottom: 145px;
+    }
+}
+
+/* Large desktops - ensure game doesn't get too large */
+@media (min-width: 1920px) {
+    #game-container {
+        max-width: 1080px;
+        max-height: 1920px;
+        margin: 0 auto;
+    }
+}
+
+/* Smooth transitions for orientation changes */
+#game-container, canvas {
+    transition: width 0.3s ease, height 0.3s ease;
 }
 
 /* ===================================

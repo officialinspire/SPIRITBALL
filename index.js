@@ -131,6 +131,63 @@ const CONFIG = {
     }
 };
 
+class PerformanceManager {
+    constructor() {
+        this.deviceTier = this.detectPerformance();
+    }
+
+    detectPerformance() {
+        // Check for performance indicators
+        const checks = {
+            // Hardware concurrency (CPU cores)
+            cores: navigator.hardwareConcurrency || 2,
+            // Device memory (in GB)
+            memory: navigator.deviceMemory || 2,
+            // Connection type
+            connection: navigator.connection?.effectiveType || '4g',
+            // User agent indicators
+            isLowEnd: /Android\s[1-6]\.|iPhone\s[1-7]\.|iPad\s[1-5]\./i.test(navigator.userAgent)
+        };
+
+        // Calculate performance tier
+        let score = 0;
+
+        if (checks.cores >= 8) score += 3;
+        else if (checks.cores >= 4) score += 2;
+        else if (checks.cores >= 2) score += 1;
+
+        if (checks.memory >= 8) score += 3;
+        else if (checks.memory >= 4) score += 2;
+        else if (checks.memory >= 2) score += 1;
+
+        if (checks.connection === '4g' || checks.connection === '5g') score += 1;
+
+        if (checks.isLowEnd) score -= 2;
+
+        // Return tier: 'high', 'medium', 'low'
+        if (score >= 6) return 'high';
+        if (score >= 3) return 'medium';
+        return 'low';
+    }
+
+    shouldReduceEffects() {
+        return this.deviceTier === 'low';
+    }
+
+    shouldReduceParticles() {
+        return this.deviceTier === 'low' || this.deviceTier === 'medium';
+    }
+
+    getParticleMultiplier() {
+        switch(this.deviceTier) {
+            case 'high': return 1.0;
+            case 'medium': return 0.6;
+            case 'low': return 0.3;
+            default: return 0.5;
+        }
+    }
+}
+
 class InputManager {
     constructor() {
         this.state = {
@@ -141,8 +198,68 @@ class InputManager {
             launchReleased: false,
             pause: false
         };
-        this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
+        this.detectMobile();
         this.setupMobileControls();
+        this.setupResizeHandlers();
+    }
+
+    detectMobile() {
+        const userAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const smallScreen = window.innerWidth <= 768;
+        const portrait = window.innerHeight > window.innerWidth;
+
+        // Consider mobile if: user agent matches OR (small screen AND portrait)
+        this.isMobile = userAgent || (smallScreen && portrait);
+
+        // Update mobile controls visibility
+        this.updateMobileControlsVisibility();
+    }
+
+    updateMobileControlsVisibility() {
+        const mobileControls = document.getElementById('mobile-controls');
+        if (mobileControls) {
+            // Show controls if mobile device OR portrait orientation OR small screen
+            const shouldShow = this.isMobile ||
+                              window.innerHeight > window.innerWidth ||
+                              window.innerWidth <= 767;
+            mobileControls.style.display = shouldShow ? 'block' : 'none';
+        }
+    }
+
+    setupResizeHandlers() {
+        let resizeTimeout;
+
+        // Handle window resize with debouncing
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                this.detectMobile();
+                this.handleResize();
+            }, 250);
+        });
+
+        // Handle orientation change
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => {
+                this.detectMobile();
+                this.handleResize();
+            }, 100);
+        });
+
+        // Handle visibility change (when app comes back to foreground)
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                this.detectMobile();
+                this.handleResize();
+            }
+        });
+    }
+
+    handleResize() {
+        // Let Phaser handle the canvas scaling
+        if (window.game && window.game.scale) {
+            window.game.scale.refresh();
+        }
     }
 
     setupMobileControls() {
@@ -2724,14 +2841,32 @@ const gameConfig = {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
         width: CONFIG.width,
-        height: CONFIG.height
+        height: CONFIG.height,
+        min: {
+            width: 270,
+            height: 480
+        },
+        max: {
+            width: 1080,
+            height: 1920
+        },
+        autoRound: true
     },
-    scene: [BootScene, MenuScene, GameScene, GameOverScene]
+    scene: [BootScene, MenuScene, GameScene, GameOverScene],
+    render: {
+        antialias: true,
+        pixelArt: false,
+        roundPixels: true
+    }
 };
 
+window.performanceManager = new PerformanceManager();
 window.gameInputManager = new InputManager();
 
 window.addEventListener('load', () => {
-    new Phaser.Game(gameConfig);
+    window.game = new Phaser.Game(gameConfig);
     document.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Log performance tier for debugging
+    console.log(`Performance tier: ${window.performanceManager.deviceTier}`);
 });
