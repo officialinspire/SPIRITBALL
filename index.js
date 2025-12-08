@@ -1297,7 +1297,7 @@ class GameScene extends Phaser.Scene {
         const flipperY = CONFIG.height - 100;
 
         // Left cosmic energy wing flipper - closer to center and angled down at 45 degrees
-        this.leftFlipper = this.add.sprite(100, flipperY, 'flipper-left');
+        this.leftFlipper = this.add.sprite(140, flipperY, 'flipper-left');
         this.physics.add.existing(this.leftFlipper, true);
         this.leftFlipper.body.setSize(flipperWidth, flipperHeight);
         this.leftFlipper.setDepth(99);
@@ -1314,7 +1314,7 @@ class GameScene extends Phaser.Scene {
         });
 
         // Right cosmic energy wing flipper - closer to center and angled down at 45 degrees
-        this.rightFlipper = this.add.sprite(CONFIG.width - 100, flipperY, 'flipper-right');
+        this.rightFlipper = this.add.sprite(CONFIG.width - 140, flipperY, 'flipper-right');
         this.physics.add.existing(this.rightFlipper, true);
         this.rightFlipper.body.setSize(flipperWidth, flipperHeight);
         this.rightFlipper.setDepth(99);
