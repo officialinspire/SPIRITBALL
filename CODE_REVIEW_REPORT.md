@@ -1,3 +1,9 @@
+> **Superseded — 2026-08-08.** This report reviewed an older chakra/combo-based build of the
+> game and concluded there were no blocking bugs. The game has since been rewritten around a
+> mission/rank/fuel system, and a fresh review of the current code found several real, verified
+> bugs affecting both desktop and mobile play. See `KNOWN_ISSUES.md` and `release-prompts/` for
+> the current, authoritative issue list and fixes. This file is kept for historical reference only.
+
 # SPIRITBALL - Comprehensive Code Review & Debug Report
 **Date:** December 5, 2025
 **Reviewer:** Claude Code
