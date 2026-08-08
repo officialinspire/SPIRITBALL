@@ -56,3 +56,16 @@ low-risk fix for a stable release):
   deliberate, specific play to complete — not just "keep scoring points doing anything."
 - `checkMissionComplete()`'s `'flags'` case (or its replacement) works correctly and doesn't
   throw if the object/state it depends on doesn't exist yet at low ranks.
+
+---
+
+## Implementation note (2026-08-08)
+Went with **Option B**. All five "Cosmic Plague" mission entries (ranks 4–8, mission id 12) were
+changed from `type: 'flags'` to `type: 'ramp'`, with descriptions/requirements rewritten to
+"Pass the Launch Ramp N times" (N = 10/12/15/18/22 across the five ranks) — `'ramp'` missions
+were already fully implemented via `hitLaunchRamp()` incrementing `missionProgress`, so this
+required no new game object or rebalancing infrastructure, just consistent, achievable numbers
+scaled with the existing per-rank difficulty curve. Removed the now-dead `flagRotations` state
+field, its unconditional increment in every `addScore()` call, and the `case 'flags':` branch in
+`checkMissionComplete()`. Confirmed via grep that no other code references `flagRotations` or the
+`'flags'` mission type. `node --check index.js` passes.

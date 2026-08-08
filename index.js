@@ -65,27 +65,27 @@ const CONFIG = {
             { id: 11, name: 'Maelstrom', description: 'Hit all targets rapidly', requirement: 10, type: 'rapidtarget' }
         ],
         4: [ // LT Commander
-            { id: 12, name: 'Cosmic Plague', description: 'Achieve 75 flag rotations', requirement: 75, type: 'flags' },
+            { id: 12, name: 'Cosmic Plague', description: 'Pass the Launch Ramp 10 times', requirement: 10, type: 'ramp' },
             { id: 13, name: 'Black Hole', description: 'Hit Satellite 5 times', requirement: 5, type: 'satellite' },
             { id: 14, name: 'Space Radiation', description: 'Survive 30 seconds', requirement: 30, type: 'time' }
         ],
         5: [ // Commander - uses higher rank missions
-            { id: 12, name: 'Cosmic Plague', description: 'Achieve 100 flag rotations', requirement: 100, type: 'flags' },
+            { id: 12, name: 'Cosmic Plague', description: 'Pass the Launch Ramp 12 times', requirement: 12, type: 'ramp' },
             { id: 13, name: 'Black Hole', description: 'Hit Satellite 7 times', requirement: 7, type: 'satellite' },
             { id: 15, name: 'Bug Hunt', description: 'Hit all bumpers 30 times', requirement: 30, type: 'bumper' }
         ],
         6: [ // Commodore
-            { id: 12, name: 'Cosmic Plague', description: 'Achieve 150 flag rotations', requirement: 150, type: 'flags' },
+            { id: 12, name: 'Cosmic Plague', description: 'Pass the Launch Ramp 15 times', requirement: 15, type: 'ramp' },
             { id: 16, name: 'Stray Comet', description: 'Score 500,000 points', requirement: 500000, type: 'score' },
             { id: 13, name: 'Black Hole', description: 'Hit Satellite 10 times', requirement: 10, type: 'satellite' }
         ],
         7: [ // Admiral
-            { id: 12, name: 'Cosmic Plague', description: 'Achieve 200 flag rotations', requirement: 200, type: 'flags' },
+            { id: 12, name: 'Cosmic Plague', description: 'Pass the Launch Ramp 18 times', requirement: 18, type: 'ramp' },
             { id: 16, name: 'Stray Comet', description: 'Score 1,000,000 points', requirement: 1000000, type: 'score' },
             { id: 13, name: 'Black Hole', description: 'Hit Satellite 15 times', requirement: 15, type: 'satellite' }
         ],
         8: [ // Fleet Admiral
-            { id: 12, name: 'Cosmic Plague', description: 'Achieve 300 flag rotations', requirement: 300, type: 'flags' },
+            { id: 12, name: 'Cosmic Plague', description: 'Pass the Launch Ramp 22 times', requirement: 22, type: 'ramp' },
             { id: 16, name: 'Stray Comet', description: 'Score 2,000,000 points', requirement: 2000000, type: 'score' },
             { id: 13, name: 'Black Hole', description: 'Hit Satellite 20 times', requirement: 20, type: 'satellite' }
         ]
@@ -217,8 +217,25 @@ class InputManager {
 
     updateMobileControlsVisibility() {
         const controlsContainer = document.getElementById('controls-container');
+        const rotateOverlay = document.getElementById('rotate-overlay');
+        const isLandscape = window.innerWidth > window.innerHeight;
+
+        // The playfield is portrait-only. A real mobile device held in landscape has nowhere
+        // to put the touch controls (and previously a CSS !important rule could hide them
+        // outright with no explanation) - show a rotate prompt instead of stranding the
+        // player with an unplayable, control-less screen. See release-prompts/02-*.md.
+        if (this.isMobile && isLandscape) {
+            if (rotateOverlay) rotateOverlay.style.display = 'flex';
+            if (controlsContainer) controlsContainer.style.display = 'none';
+            return;
+        }
+
+        if (rotateOverlay) rotateOverlay.style.display = 'none';
+
         if (controlsContainer) {
-            // Show controls if mobile device OR portrait orientation OR small screen
+            // Show controls if mobile device OR portrait orientation OR small screen.
+            // This is the sole authority on visibility now - styles.css no longer has a
+            // conflicting !important rule for #controls-container.
             const shouldShow = this.isMobile ||
                               window.innerHeight > window.innerWidth ||
                               window.innerWidth <= 767;
@@ -1038,9 +1055,6 @@ class GameScene extends Phaser.Scene {
             // XP Pinball: Satellite (Saturn)
             satelliteHits: 0,
 
-            // XP Pinball: Flags (for flag rotation missions)
-            flagRotations: 0,
-
             // XP Pinball: Mission Start Time (for timed missions)
             missionStartTime: 0,
 
@@ -1630,15 +1644,25 @@ class GameScene extends Phaser.Scene {
     }
 
     setupFlippers() {
-        const flipperWidth = 120;
-        const flipperHeight = 16;
         const flipperY = CONFIG.height - 80; // Moved to very bottom
         const flipperGap = 80; // Gap between flippers
+
+        // Flipper hit detection: Arcade Physics bodies are always axis-aligned and never
+        // rotate with the sprite, so a rectangular hitbox sized to the flipper's resting
+        // angle badly mismatches the sprite once it swings up. Instead we use a single
+        // circular collider centered on the flipper's pivot, sized to cover the full swept
+        // arc (rest angle to fully-up angle) so the ball reliably touches "the flipper" for
+        // its whole swing, not just its resting pose. See release-prompts/01-*.md.
+        this.flipperColliderRadius = 62;
 
         // Left cosmic energy wing flipper - at bottom left
         this.leftFlipper = this.add.sprite(CONFIG.width / 2 - flipperGap, flipperY, 'flipper-left');
         this.physics.add.existing(this.leftFlipper, true);
-        this.leftFlipper.body.setSize(flipperWidth, flipperHeight);
+        this.leftFlipper.body.setCircle(
+            this.flipperColliderRadius,
+            this.leftFlipper.width / 2 - this.flipperColliderRadius,
+            this.leftFlipper.height / 2 - this.flipperColliderRadius
+        );
         this.leftFlipper.setDepth(99);
         this.leftFlipper.setAngle(20); // Resting position angled upward
 
@@ -1655,7 +1679,11 @@ class GameScene extends Phaser.Scene {
         // Right cosmic energy wing flipper - at bottom right
         this.rightFlipper = this.add.sprite(CONFIG.width / 2 + flipperGap, flipperY, 'flipper-right');
         this.physics.add.existing(this.rightFlipper, true);
-        this.rightFlipper.body.setSize(flipperWidth, flipperHeight);
+        this.rightFlipper.body.setCircle(
+            this.flipperColliderRadius,
+            this.rightFlipper.width / 2 - this.flipperColliderRadius,
+            this.rightFlipper.height / 2 - this.flipperColliderRadius
+        );
         this.rightFlipper.setDepth(99);
         this.rightFlipper.setAngle(-20); // Resting position angled upward
 
@@ -2166,6 +2194,7 @@ class GameScene extends Phaser.Scene {
 
         this.updateInput();
         this.updatePlunger();
+        this.updateFlipperPower();
         this.checkDrain();
         this.checkBallStuck();
 
@@ -2361,38 +2390,8 @@ class GameScene extends Phaser.Scene {
                 ease: 'Quad.easeOut' // Snappier easing for responsive feel
             });
         }
-
-        // ENHANCED ball collision with professional pinball physics
-        if (this.physics.overlap(this.ball, this.leftFlipper) && this.ball.body && !this.leftFlipperCooldown) {
-            this.leftFlipperCooldown = true;
-
-            const ballSpeed = Math.sqrt(
-                this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
-            );
-            const flipperPower = Math.max(1500, ballSpeed * 2.4); // Professional pinball power
-
-            // Calculate angle based on where ball hits flipper - more precision
-            const hitPosition = (this.ball.x - this.leftFlipper.x) / 40;
-            const angleAdjust = hitPosition * 35; // Maximum angle variation for expert control
-
-            const launchAngle = -68 - angleAdjust; // Optimal steep angle for powerful upward shots
-            const radians = (launchAngle * Math.PI) / 180;
-
-            this.ball.body.setVelocity(
-                Math.cos(radians) * flipperPower,
-                Math.sin(radians) * flipperPower
-            );
-
-            // Intense visual feedback for satisfying feel
-            if (this.cameras && this.cameras.main) {
-                this.cameras.main.shake(150, 0.008);
-            }
-
-            // Minimal cooldown for maximum responsiveness - real pinball feel
-            this.time.delayedCall(25, () => {
-                this.leftFlipperCooldown = false;
-            });
-        }
+        // Power transfer to the ball is handled every frame in updateFlipperPower() while
+        // the flipper is active, not just on this press edge - see release-prompts/01-*.md.
     }
 
     deactivateLeftFlipper() {
@@ -2415,9 +2414,61 @@ class GameScene extends Phaser.Scene {
                 ease: 'Quad.easeOut' // Snappier easing for responsive feel
             });
         }
+        // Power transfer to the ball is handled every frame in updateFlipperPower() while
+        // the flipper is active, not just on this press edge - see release-prompts/01-*.md.
+    }
 
-        // ENHANCED ball collision with professional pinball physics
-        if (this.physics.overlap(this.ball, this.rightFlipper) && this.ball.body && !this.rightFlipperCooldown) {
+    deactivateRightFlipper() {
+        this.rightFlipperActive = false;
+        this.tweens.add({
+            targets: this.rightFlipper,
+            angle: -20, // Return to -20 degree resting position
+            duration: 80, // Controlled snap-back like real pinball
+            ease: 'Quad.easeIn'
+        });
+    }
+
+    // Continuous per-frame flipper power application. Runs every update() tick (not just on
+    // the initial press) so a ball that arrives on a flipper anytime while it's held up still
+    // gets flipped, instead of only when the press and ball arrival coincide within one frame.
+    updateFlipperPower() {
+        if (!this.ball || !this.ball.body) return;
+
+        if (this.leftFlipperActive && !this.leftFlipperCooldown &&
+            this.physics.overlap(this.ball, this.leftFlipper)) {
+            this.leftFlipperCooldown = true;
+
+            const ballSpeed = Math.sqrt(
+                this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
+            );
+            const flipperPower = Math.max(1500, ballSpeed * 2.4); // Professional pinball power
+
+            // Calculate angle based on where ball hits flipper - more precision
+            const hitPosition = (this.ball.x - this.leftFlipper.x) / 40;
+            const angleAdjust = hitPosition * 35; // Maximum angle variation for expert control
+
+            const launchAngle = -68 - angleAdjust; // Optimal steep angle for powerful upward shots
+            const radians = (launchAngle * Math.PI) / 180;
+
+            this.ball.body.setVelocity(
+                Math.cos(radians) * flipperPower,
+                Math.sin(radians) * flipperPower
+            );
+
+            if (this.cameras && this.cameras.main) {
+                this.cameras.main.shake(150, 0.008);
+            }
+
+            // Cooldown here is longer than a single frame so a ball still inside the (larger)
+            // flipper collider right after being launched doesn't get re-flipped every frame
+            // before it clears the hitbox ("machine-gunning").
+            this.time.delayedCall(150, () => {
+                this.leftFlipperCooldown = false;
+            });
+        }
+
+        if (this.rightFlipperActive && !this.rightFlipperCooldown &&
+            this.physics.overlap(this.ball, this.rightFlipper)) {
             this.rightFlipperCooldown = true;
 
             const ballSpeed = Math.sqrt(
@@ -2437,26 +2488,14 @@ class GameScene extends Phaser.Scene {
                 Math.sin(radians) * flipperPower
             );
 
-            // Intense visual feedback for satisfying feel
             if (this.cameras && this.cameras.main) {
                 this.cameras.main.shake(150, 0.008);
             }
 
-            // Minimal cooldown for maximum responsiveness - real pinball feel
-            this.time.delayedCall(25, () => {
+            this.time.delayedCall(150, () => {
                 this.rightFlipperCooldown = false;
             });
         }
-    }
-
-    deactivateRightFlipper() {
-        this.rightFlipperActive = false;
-        this.tweens.add({
-            targets: this.rightFlipper,
-            angle: -20, // Return to -20 degree resting position
-            duration: 80, // Controlled snap-back like real pinball
-            ease: 'Quad.easeIn'
-        });
     }
 
     handleLaunchPress() {
@@ -2917,9 +2956,6 @@ class GameScene extends Phaser.Scene {
             case 'fuel':
                 isComplete = this.gameState.fuel >= mission.requirement;
                 break;
-            case 'flags':
-                isComplete = this.gameState.flagRotations >= mission.requirement;
-                break;
             case 'score':
                 isComplete = this.gameState.score >= mission.requirement;
                 break;
@@ -3209,9 +3245,6 @@ class GameScene extends Phaser.Scene {
         const multipliedPoints = Math.floor(points * multiplier);
         this.gameState.score += multipliedPoints;
 
-        // Track flags for flag missions
-        this.gameState.flagRotations++;
-
         if (this.gameState.score > this.gameState.highScore) {
             this.gameState.highScore = this.gameState.score;
             localStorage.setItem('spiritball-highscore', this.gameState.highScore);
@@ -3381,7 +3414,7 @@ class GameScene extends Phaser.Scene {
         });
 
         // Settings button
-        const settingsButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.71, '⚙ SETTINGS', buttonStyle)
+        const settingsButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.71, 'ℹ CONTROLS', buttonStyle)
             .setOrigin(0.5)
             .setDepth(2001)
             .setInteractive({ useHandCursor: true });
@@ -3459,8 +3492,11 @@ class GameScene extends Phaser.Scene {
         // Background overlay
         const bg = this.add.rectangle(CONFIG.width / 2, CONFIG.height / 2, CONFIG.width, CONFIG.height, 0x000000, 0.9).setDepth(2000);
 
-        // Title
-        const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.2, 'SETTINGS', {
+        // Title. This screen used to be a Sound/Music Settings menu, but the game has no
+        // audio system at all - those toggles wrote a localStorage flag nothing ever read,
+        // which is misleading. Replaced with a real, working controls reference instead.
+        // See release-prompts/04-*.md.
+        const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.2, 'CONTROLS', {
             fontSize: '48px',
             fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
@@ -3470,82 +3506,43 @@ class GameScene extends Phaser.Scene {
             shadow: { offsetX: 3, offsetY: 3, color: '#000000', blur: 6, fill: true }
         }).setOrigin(0.5).setDepth(2001);
 
-        // Get current settings from localStorage
-        const soundEnabled = localStorage.getItem('spiritball-sound') !== 'false';
-        const musicEnabled = localStorage.getItem('spiritball-music') !== 'false';
+        const isMobileControls = window.gameInputManager && window.gameInputManager.isMobile;
+        const controlRows = isMobileControls ? [
+            ['◀ / ▶ BUTTONS', 'Left / Right Flippers'],
+            ['⚡ BUTTON', 'Hold to Charge, Release to Launch'],
+            ['⏸ BUTTON', 'Pause / Resume']
+        ] : [
+            ['LEFT / RIGHT ARROWS', 'Left / Right Flippers'],
+            ['SPACE', 'Hold to Charge, Release to Launch'],
+            ['ESC', 'Pause / Resume']
+        ];
 
-        // Sound toggle
-        const soundLabel = this.add.text(CONFIG.width / 2 - 100, CONFIG.height * 0.35, 'SOUND:', {
-            fontSize: '24px',
-            fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
-            fontStyle: 'bold',
-            color: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 3
-        }).setOrigin(0, 0.5).setDepth(2001);
+        const controlRowObjects = [];
+        let controlRowY = CONFIG.height * 0.34;
+        controlRows.forEach(([key, action]) => {
+            const keyText = this.add.text(CONFIG.width / 2, controlRowY, key, {
+                fontSize: '22px',
+                fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#00ffff',
+                stroke: '#000000',
+                strokeThickness: 3
+            }).setOrigin(0.5).setDepth(2001);
 
-        const soundToggle = this.add.text(CONFIG.width / 2 + 50, CONFIG.height * 0.35, soundEnabled ? 'ON' : 'OFF', {
-            fontSize: '24px',
-            fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
-            fontStyle: 'bold',
-            color: soundEnabled ? '#00ff00' : '#ff0000',
-            stroke: '#000000',
-            strokeThickness: 3,
-            backgroundColor: '#1a1a3e',
-            padding: { left: 20, right: 20, top: 10, bottom: 10 }
-        }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+            const actionText = this.add.text(CONFIG.width / 2, controlRowY + 32, action, {
+                fontSize: '17px',
+                fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
+                color: '#ffffff',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setOrigin(0.5).setDepth(2001);
 
-        const soundToggleBg = this.add.rectangle(CONFIG.width / 2 + 50, CONFIG.height * 0.35, 100, 50, 0x1a1a3e)
-            .setDepth(2000)
-            .setStrokeStyle(3, soundEnabled ? 0x00ff00 : 0xff0000);
-
-        soundToggle.on('pointerdown', () => {
-            const newState = !soundEnabled;
-            localStorage.setItem('spiritball-sound', newState);
-            soundToggle.setText(newState ? 'ON' : 'OFF');
-            soundToggle.setColor(newState ? '#00ff00' : '#ff0000');
-            soundToggleBg.setStrokeStyle(3, newState ? 0x00ff00 : 0xff0000);
-            // Refresh settings menu to update state
-            this.showSettingsMenu();
-        });
-
-        // Music toggle
-        const musicLabel = this.add.text(CONFIG.width / 2 - 100, CONFIG.height * 0.45, 'MUSIC:', {
-            fontSize: '24px',
-            fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
-            fontStyle: 'bold',
-            color: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 3
-        }).setOrigin(0, 0.5).setDepth(2001);
-
-        const musicToggle = this.add.text(CONFIG.width / 2 + 50, CONFIG.height * 0.45, musicEnabled ? 'ON' : 'OFF', {
-            fontSize: '24px',
-            fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
-            fontStyle: 'bold',
-            color: musicEnabled ? '#00ff00' : '#ff0000',
-            stroke: '#000000',
-            strokeThickness: 3,
-            backgroundColor: '#1a1a3e',
-            padding: { left: 20, right: 20, top: 10, bottom: 10 }
-        }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
-
-        const musicToggleBg = this.add.rectangle(CONFIG.width / 2 + 50, CONFIG.height * 0.45, 100, 50, 0x1a1a3e)
-            .setDepth(2000)
-            .setStrokeStyle(3, musicEnabled ? 0x00ff00 : 0xff0000);
-
-        musicToggle.on('pointerdown', () => {
-            const newState = !musicEnabled;
-            localStorage.setItem('spiritball-music', newState);
-            musicToggle.setText(newState ? 'ON' : 'OFF');
-            musicToggle.setColor(newState ? '#00ff00' : '#ff0000');
-            musicToggleBg.setStrokeStyle(3, newState ? 0x00ff00 : 0xff0000);
-            // Refresh settings menu to update state
-            this.showSettingsMenu();
+            controlRowObjects.push(keyText, actionText);
+            controlRowY += 90;
         });
 
         // Back button
-        const backButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.70, '◄ BACK', {
+        const backButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.78, '◄ BACK', {
             fontSize: '28px',
             fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
@@ -3556,7 +3553,7 @@ class GameScene extends Phaser.Scene {
             padding: { left: 30, right: 30, top: 15, bottom: 15 }
         }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
 
-        const backBg = this.add.rectangle(CONFIG.width / 2, CONFIG.height * 0.70, backButton.width + 40, backButton.height + 20, 0x1a1a3e)
+        const backBg = this.add.rectangle(CONFIG.width / 2, CONFIG.height * 0.78, backButton.width + 40, backButton.height + 20, 0x1a1a3e)
             .setDepth(2000)
             .setStrokeStyle(3, 0x00ffff);
 
@@ -3582,7 +3579,7 @@ class GameScene extends Phaser.Scene {
             this.pauseGame();
         });
 
-        this.settingsOverlay = [bg, title, soundLabel, soundToggle, soundToggleBg, musicLabel, musicToggle, musicToggleBg, backButton, backBg];
+        this.settingsOverlay = [bg, title, ...controlRowObjects, backButton, backBg];
 
         // Keyboard control
         this.input.keyboard.once('keydown-ESC', () => {

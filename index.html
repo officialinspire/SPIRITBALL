@@ -23,6 +23,15 @@
 </head>
 <body>
     <div id="app-container">
+        <!-- Shown on mobile devices held in landscape, where the portrait playfield has no
+             room to render controls; see release-prompts/02-*.md -->
+        <div id="rotate-overlay" class="rotate-overlay">
+            <div class="rotate-overlay-content">
+                <span class="rotate-icon">&#8635;</span>
+                <p>Rotate your device to portrait to play SPIRITBALL</p>
+            </div>
+        </div>
+
         <div id="game-wrapper">
             <div id="game-container"></div>
             <!-- Pause Button (stays in game area) -->

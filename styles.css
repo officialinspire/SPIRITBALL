@@ -240,18 +240,53 @@ canvas {
     }
 }
 
-/* Show controls container on mobile */
-@media (max-width: 767px), (orientation: portrait) {
-    #controls-container {
-        display: flex !important;
-    }
+/* Controls-container visibility is decided entirely by JS (InputManager.
+   updateMobileControlsVisibility() in index.js), based on real mobile
+   user-agent detection rather than viewport width/orientation alone. A
+   CSS-only rule here previously used !important and silently overrode
+   that JS logic, which could hide touch controls on genuine mobile
+   devices held in landscape (many phones report a landscape width
+   >= 768px). See release-prompts/02-*.md. Do not add a conflicting
+   !important display rule for #controls-container here. */
+
+/* ===================================
+   ORIENTATION / ROTATE PROMPT
+   =================================== */
+
+.rotate-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    background: rgba(0, 0, 0, 0.95);
+    color: #00ffff;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 30px;
 }
 
-/* Desktop - Keep controls hidden */
-@media (min-width: 768px) and (orientation: landscape) {
-    #controls-container {
-        display: none !important;
-    }
+.rotate-overlay-content {
+    max-width: 320px;
+}
+
+.rotate-icon {
+    display: block;
+    font-size: 64px;
+    margin-bottom: 20px;
+    animation: rotate-hint 1.6s ease-in-out infinite;
+}
+
+.rotate-overlay p {
+    font-size: 18px;
+    line-height: 1.5;
+    text-shadow: 0 0 12px #00ffff;
+}
+
+@keyframes rotate-hint {
+    0%, 100% { transform: rotate(0deg); }
+    50% { transform: rotate(-90deg); }
 }
 
 /* ===================================

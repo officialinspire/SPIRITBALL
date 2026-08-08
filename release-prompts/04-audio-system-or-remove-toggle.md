@@ -49,3 +49,17 @@ if there's time/appetite to add real audio polish):
   (a sound plays/stops), **or** the toggle no longer exists and Settings only offers things that
   work.
 - No dead `localStorage` reads/writes left behind referencing removed features.
+
+---
+
+## Implementation note (2026-08-08)
+Went with **Option B**. Removed the Sound/Music toggle UI and their `localStorage` reads/writes
+from `showSettingsMenu()` entirely. Rather than leave the pause menu's third button pointing at
+an empty screen, repurposed it as a **Controls reference**: the button (previously "⚙ SETTINGS")
+is now "ℹ CONTROLS", and the screen it opens shows the platform-appropriate control scheme
+(desktop: arrow keys / SPACE / ESC; mobile: flipper buttons / ⚡ / ⏸), chosen at render time via
+the existing `window.gameInputManager.isMobile` flag — the same signal already used elsewhere in
+the game (menu/game-over prompts) to distinguish platforms. This is genuinely useful content
+that's true today, rather than UI that silently does nothing. Confirmed via grep that no
+`spiritball-sound`/`spiritball-music` localStorage keys are referenced anywhere else in the
+codebase. `node --check index.js` passes.

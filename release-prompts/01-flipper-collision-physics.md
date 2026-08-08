@@ -80,3 +80,22 @@ gets flipped, every time**, not just when the press and ball arrival coincide wi
 - No regression in existing collision behavior with walls/bumpers/other obstacles.
 - No console errors introduced (check for `body` being undefined if you change static→dynamic,
   since some Arcade Physics methods differ between static and dynamic bodies).
+
+---
+
+## Implementation note (2026-08-08)
+Implemented a variant of **Option B**: kept the flipper bodies static (Arcade Physics circle
+bodies don't need to be dynamic to be resized/repositioned, and static bodies are cheaper), but
+replaced the rectangular `body.setSize(120, 16)` hitbox with a single circular collider
+(`body.setCircle(62, ...)`) centered on each flipper's pivot, sized to cover the full ±rotation
+swing arc (half-diagonal of the old rect was ~60.5px). The power-application logic that used to
+live only inside `activateLeftFlipper()`/`activateRightFlipper()` (checked once, on the press
+edge) was extracted into a new `updateFlipperPower()` method called every frame from `update()`,
+gated on `leftFlipperActive`/`rightFlipperActive` plus the existing per-flipper cooldown (bumped
+from 25ms to 150ms to avoid re-triggering every frame while the ball is still inside the now-
+larger collider right after being launched). `activateLeftFlipper()`/`activateRightFlipper()` now
+only handle the visual swing tween. Verified with `node --check index.js` (syntax) and a manual
+review of the diff; could not exercise this in an actual browser in this sandbox because the
+Phaser CDN (`cdn.jsdelivr.net`) is blocked by the environment's outbound network policy — a real
+deployment target will not have that restriction, but this fix should still get a manual desktop
++ mobile playtest before shipping.

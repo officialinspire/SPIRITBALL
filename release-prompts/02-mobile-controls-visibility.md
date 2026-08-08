@@ -63,3 +63,20 @@ There is also no "please rotate to portrait" messaging for this case.
   acceptable documented tradeoff — just don't regress the "genuine mobile device gets no
   controls" case).
 - No JS console errors from the visibility/orientation logic.
+
+---
+
+## Implementation note (2026-08-08)
+Removed the two conflicting `!important` media-query rules for `#controls-container` from
+`styles.css` (kept all the non-conflicting button-sizing media queries as-is). JS
+(`InputManager.updateMobileControlsVisibility()`) is now the sole authority on show/hide via
+plain inline `style.display`, which is no longer fought by CSS. Added a
+`mobile-and-landscape` case: when `isMobile` is true and the viewport is wider than it is tall,
+a new `#rotate-overlay` full-screen prompt ("Rotate your device to portrait to play SPIRITBALL")
+is shown instead of leaving the player on a control-less screen, and the controls container is
+hidden in that state. Added the overlay markup to `index.html` and its styles (plus a subtle
+rotate-hint animation, which the existing `prefers-reduced-motion` CSS block already disables
+via its `*` selector) to `styles.css`. Verified `node --check index.js` passes; could not
+exercise the responsive behavior in an actual browser in this sandbox (Phaser's CDN is blocked
+by the environment's network policy) — recommend a manual pass with browser devtools' device
+toolbar (or a real phone) across portrait/landscape and a few widths before shipping.

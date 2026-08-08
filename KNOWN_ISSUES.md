@@ -1,6 +1,9 @@
 # SPIRITBALL — Known Issues & Release Stability Report
 
 **Date:** 2026-08-08
+**Status update (2026-08-08, same day):** Items 1–4 below have been fixed in this branch —
+see the corresponding `release-prompts/01-04-*.md` files, which now double as a record of what
+was changed and why. Items 5–12 are still open.
 **Scope:** `index.html`, `index.js`, `styles.css` (current XP-Pinball-mechanics build, v5.0)
 **Supersedes:** `CODE_REVIEW_REPORT.md` (Dec 5 2025), which reviewed an older chakra/combo-based
 build and concluded "no blocking bugs." That build no longer matches the code — the game has
@@ -14,7 +17,7 @@ are current as of this commit but will drift as fixes land.
 
 ## Critical — core gameplay (desktop + mobile)
 
-### 1. Flippers don't reliably transfer force to the ball
+### 1. Flippers don't reliably transfer force to the ball — ✅ FIXED
 `index.js` `setupFlippers()` (~L1632) creates the flipper bodies as **static** Arcade Physics
 bodies (`this.physics.add.existing(this.leftFlipper, true)`). Static bodies never move/rotate
 their collision shape — Arcade Physics only tracks axis-aligned bounding boxes, so the hitbox
@@ -33,7 +36,7 @@ This is the single most important gameplay bug — it undermines the core intera
 desktop and mobile equally.
 → **`release-prompts/01-flipper-collision-physics.md`**
 
-### 2. Mobile touch controls can vanish on landscape phones
+### 2. Mobile touch controls can vanish on landscape phones — ✅ FIXED
 `styles.css` hides/shows `#controls-container` via **two conflicting mechanisms**:
 - CSS media queries with `!important` (`(max-width:767px), (orientation:portrait)` → show;
   `(min-width:768px) and (orientation:landscape)` → hide).
@@ -52,7 +55,7 @@ game with no way to play it.
 
 ## High — gameplay balance / broken features
 
-### 3. "Flag rotation" missions are broken (no flag object exists)
+### 3. "Flag rotation" missions are broken (no flag object exists) — ✅ FIXED
 `addScore()` (~L3206) increments `this.gameState.flagRotations++` on **every single scoring
 event** (bumper, satellite, lane, fuel, anything). There is no flag/spinner game object anywhere
 in `setupObstacles()` or elsewhere. The LT Commander→Fleet Admiral rank missions ("Cosmic
@@ -61,7 +64,7 @@ they complete almost instantly during ordinary play and aren't tied to any playe
 target — the mission is meaningless.
 → **`release-prompts/03-flag-rotation-mission.md`**
 
-### 4. Settings menu Sound/Music toggles do nothing
+### 4. Settings menu Sound/Music toggles do nothing — ✅ FIXED
 `showSettingsMenu()` (~L3448) writes `spiritball-sound` / `spiritball-music` flags to
 `localStorage` and shows ON/OFF state, but there is **no audio system anywhere in the codebase**
 — no `this.sound.play()` calls, no loaded audio assets, nothing reads those flags back. The menu
