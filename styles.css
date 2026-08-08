@@ -52,19 +52,6 @@ body {
     align-items: center;
 }
 
-/* Controls Container - fixed at bottom on mobile */
-#controls-container {
-    display: none;
-    background: rgba(0, 0, 0, 0.95);
-    border-top: 2px solid rgba(0, 255, 255, 0.3);
-    padding: 15px;
-    gap: 15px;
-    justify-content: space-between;
-    align-items: center;
-    height: 140px;
-    flex-shrink: 0;
-}
-
 canvas {
     display: block;
     border: 3px solid #00ffff;
@@ -82,143 +69,184 @@ canvas {
     margin: auto;
 }
 
-/* Ensure canvas fits within game wrapper on mobile */
+/* Mobile play is full-screen: controls float on top of the canvas as an overlay (see
+   #mobile-controls below) instead of reserving a separate bottom bar that used to shrink the
+   canvas by ~140-170px. The canvas now only needs to fit the actual viewport.
+   See release-prompts/14-*.md. */
 @media (max-width: 767px), (orientation: portrait) {
     canvas {
-        max-width: calc(100vw - 20px);
-        max-height: calc(100vh - 160px);
-    }
-}
-
-@media (max-width: 360px) {
-    canvas {
-        max-height: calc(100vh - 140px);
-    }
-}
-
-@media (min-width: 481px) and (max-width: 767px) {
-    canvas {
-        max-height: calc(100vh - 170px);
+        max-width: 100vw;
+        max-height: 100vh;
+        max-height: 100dvh;
     }
 }
 
 /* ===================================
-   MOBILE TOUCH CONTROLS
+   MOBILE TOUCH CONTROLS - ARCADE STYLE
+   Full-screen overlay controls instead of a bottom bar that shrinks the canvas - see
+   release-prompts/14-*.md.
    =================================== */
 
-/* Base button styles */
-.flipper-btn,
-.launch-btn,
-.pause-btn {
-    background: linear-gradient(135deg, rgba(138, 43, 226, 0.4), rgba(75, 0, 130, 0.5));
-    border: 3px solid rgba(0, 255, 255, 0.7);
-    border-radius: 18px;
-    color: #00ffff;
-    font-size: 28px;
-    font-weight: bold;
-    cursor: pointer;
+/* Overlay layer sits on top of the full-bleed canvas. pointer-events:none by default so it
+   never blocks anything; interactive children opt back in with pointer-events:auto. */
+#mobile-controls {
+    display: none; /* toggled by InputManager.updateMobileControlsVisibility() */
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 40;
+}
+
+/* Full-height edge zones - tap ANYWHERE along the side, not just a small button, like the
+   flipper buttons on the sides of a real arcade cabinet. */
+.flipper-zone {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 32%;
+    max-width: 220px;
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-end;
+    padding-bottom: max(140px, calc(env(safe-area-inset-bottom) + 120px));
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
-    transition: all 0.15s ease-out;
-    backdrop-filter: blur(12px);
+}
+
+.flipper-zone.left {
+    left: 0;
+    justify-content: flex-start;
+    padding-left: max(14px, env(safe-area-inset-left));
+    background: linear-gradient(to right, rgba(0, 255, 255, 0.10), transparent 70%);
+    border-radius: 0 24px 24px 0;
+}
+
+.flipper-zone.right {
+    right: 0;
+    justify-content: flex-end;
+    padding-right: max(14px, env(safe-area-inset-right));
+    background: linear-gradient(to left, rgba(0, 255, 255, 0.10), transparent 70%);
+    border-radius: 24px 0 0 24px;
+}
+
+.flipper-zone.left.pressed { background: linear-gradient(to right, rgba(255, 0, 255, 0.28), transparent 70%); }
+.flipper-zone.right.pressed { background: linear-gradient(to left, rgba(255, 0, 255, 0.28), transparent 70%); }
+
+.flipper-zone-icon {
     display: flex;
-    justify-content: center;
     align-items: center;
-    text-shadow: 0 0 12px #00ffff, 0 0 24px #ff00ff, 0 2px 4px rgba(0, 0, 0, 0.5);
+    justify-content: center;
+    width: clamp(56px, 16vw, 84px);
+    height: clamp(56px, 16vw, 84px);
+    border-radius: 50%;
+    font-size: clamp(24px, 7vw, 36px);
+    color: #00ffff;
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.45), rgba(75, 0, 130, 0.55));
+    border: 3px solid rgba(0, 255, 255, 0.7);
+    text-shadow: 0 0 12px #00ffff, 0 0 24px #ff00ff;
     box-shadow:
         0 0 25px rgba(0, 255, 255, 0.5),
         0 4px 15px rgba(0, 0, 0, 0.3),
         inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    flex-shrink: 0;
-    position: relative;
-    overflow: hidden;
+    transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
 }
 
-.flipper-btn::before,
-.launch-btn::before,
-.pause-btn::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-    transition: left 0.5s;
-}
-
-.flipper-btn:hover::before,
-.launch-btn:hover::before,
-.pause-btn:hover::before {
-    left: 100%;
-}
-
-.flipper-btn:active,
-.launch-btn:active,
-.pause-btn:active {
-    background: linear-gradient(135deg, rgba(138, 43, 226, 0.7), rgba(75, 0, 130, 0.8));
-    transform: scale(0.94);
-    border-color: rgba(0, 255, 255, 1);
+.flipper-zone.pressed .flipper-zone-icon {
+    transform: scale(0.9);
+    border-color: rgba(255, 0, 255, 1);
     box-shadow:
-        0 0 40px rgba(0, 255, 255, 0.9),
-        0 0 60px rgba(255, 0, 255, 0.6),
-        inset 0 0 25px rgba(255, 0, 255, 0.5),
-        inset 0 2px 8px rgba(0, 0, 0, 0.4);
-    text-shadow: 0 0 15px #00ffff, 0 0 30px #ff00ff, 0 0 45px #ff00ff;
+        0 0 40px rgba(255, 0, 255, 0.9),
+        inset 0 0 25px rgba(255, 0, 255, 0.5);
 }
 
-/* Flipper Buttons in controls container */
-.flipper-btn {
-    width: 110px;
-    height: 110px;
-}
-
-.flipper-btn span {
-    font-size: 36px;
-}
-
-/* Launch Button in controls container */
+/* Discrete arcade launch button, bottom-center. Real arcade launch/plunger buttons are a
+   distinct button, unlike the flipper rails which span the cabinet's sides. */
 .launch-btn {
-    flex: 1;
-    max-width: 180px;
-    height: 110px;
-    font-size: 18px;
-    letter-spacing: 3px;
-    font-weight: 900;
-    background: linear-gradient(135deg, rgba(255, 100, 0, 0.4), rgba(255, 165, 0, 0.5));
-    border-color: rgba(255, 165, 0, 0.8);
+    position: absolute;
+    bottom: max(28px, calc(env(safe-area-inset-bottom) + 14px));
+    left: 50%;
+    transform: translateX(-50%);
+    pointer-events: auto;
+    width: clamp(84px, 22vw, 120px);
+    height: clamp(84px, 22vw, 120px);
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: linear-gradient(135deg, rgba(255, 100, 0, 0.45), rgba(255, 165, 0, 0.55));
+    border: 3px solid rgba(255, 165, 0, 0.8);
+    color: #fff8e0;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    text-shadow: 0 0 12px #ff9900, 0 2px 4px rgba(0, 0, 0, 0.5);
     box-shadow:
         0 0 30px rgba(255, 165, 0, 0.5),
         0 4px 15px rgba(0, 0, 0, 0.3),
         inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    transition: transform 0.1s ease-out, box-shadow 0.1s ease-out, background 0.1s ease-out;
 }
 
-.launch-btn:active {
+.launch-btn-icon { font-size: clamp(22px, 6vw, 32px); line-height: 1; }
+.launch-btn-label { font-size: clamp(10px, 2.6vw, 13px); font-weight: 900; letter-spacing: 2px; }
+
+/* Idle pulse inviting a tap, shown only when a launch is actually possible - toggled by
+   InputManager.setLaunchReady() from GameScene (resetBall()/launchBall()). */
+.launch-btn.ready {
+    animation: launch-ready-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes launch-ready-pulse {
+    0%, 100% { box-shadow: 0 0 30px rgba(255, 165, 0, 0.5), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+    50% { box-shadow: 0 0 48px rgba(255, 200, 0, 0.85), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+}
+
+.launch-btn.pressed {
+    transform: translateX(-50%) scale(0.94);
     background: linear-gradient(135deg, rgba(255, 100, 0, 0.7), rgba(255, 165, 0, 0.9));
     border-color: rgba(255, 200, 0, 1);
     box-shadow:
         0 0 50px rgba(255, 165, 0, 0.9),
         0 0 80px rgba(255, 100, 0, 0.6),
-        inset 0 0 30px rgba(255, 100, 0, 0.6),
-        inset 0 2px 8px rgba(0, 0, 0, 0.5);
+        inset 0 0 30px rgba(255, 100, 0, 0.6);
 }
 
 /* Pause Button - stays in game area - visible on both desktop and mobile */
 .pause-btn {
     position: absolute;
-    top: 20px;
-    right: 20px;
+    top: max(20px, calc(env(safe-area-inset-top) + 10px));
+    right: max(20px, calc(env(safe-area-inset-right) + 10px));
     width: 55px;
     height: 55px;
     border-radius: 50%;
     font-size: 24px;
     z-index: 100;
     display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    color: #00ffff;
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.4), rgba(75, 0, 130, 0.5));
+    border: 3px solid rgba(0, 255, 255, 0.7);
+    backdrop-filter: blur(12px);
+    text-shadow: 0 0 12px #00ffff;
+    transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
     box-shadow:
         0 0 20px rgba(0, 255, 255, 0.6),
         0 4px 12px rgba(0, 0, 0, 0.4),
         inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.pause-btn:active {
+    transform: scale(0.94);
+    border-color: rgba(0, 255, 255, 1);
 }
 
 /* Desktop specific pause button styling */
@@ -227,8 +255,6 @@ canvas {
         width: 60px;
         height: 60px;
         font-size: 26px;
-        top: 25px;
-        right: 25px;
     }
 
     .pause-btn:hover {
@@ -240,14 +266,10 @@ canvas {
     }
 }
 
-/* Controls-container visibility is decided entirely by JS (InputManager.
-   updateMobileControlsVisibility() in index.js), based on real mobile
-   user-agent detection rather than viewport width/orientation alone. A
-   CSS-only rule here previously used !important and silently overrode
-   that JS logic, which could hide touch controls on genuine mobile
-   devices held in landscape (many phones report a landscape width
-   >= 768px). See release-prompts/02-*.md. Do not add a conflicting
-   !important display rule for #controls-container here. */
+/* #mobile-controls visibility is decided entirely by JS (InputManager.
+   updateMobileControlsVisibility() in index.js), based on real mobile user-agent detection
+   rather than viewport width/orientation alone. Do not add a conflicting !important display
+   rule for #mobile-controls here. See release-prompts/02-*.md and 14-*.md. */
 
 /* ===================================
    ORIENTATION / ROTATE PROMPT
@@ -293,79 +315,19 @@ canvas {
    RESPONSIVE DESIGN
    =================================== */
 
-/* Very small phones */
+/* Flipper zones, the launch button, and their icon sizes already scale fluidly via clamp()
+   in their base rules above instead of fixed per-breakpoint sizes, so no separate small/large
+   phone or tablet override blocks are needed here anymore. On very small phones, shrink the
+   very-bottom padding on the flipper zones a bit so the icon doesn't crowd the launch button. */
 @media (max-width: 360px) {
-    #controls-container {
-        height: 120px;
-        padding: 10px;
-        gap: 10px;
-    }
-
-    .flipper-btn {
-        width: 90px;
-        height: 90px;
-    }
-
-    .flipper-btn span {
-        font-size: 28px;
-    }
-
-    .launch-btn {
-        max-width: 120px;
-        height: 90px;
-        font-size: 16px;
+    .flipper-zone {
+        padding-bottom: max(110px, calc(env(safe-area-inset-bottom) + 96px));
     }
 
     .pause-btn {
         width: 45px;
         height: 45px;
         font-size: 20px;
-        top: 10px;
-        right: 10px;
-    }
-}
-
-/* Large phones */
-@media (min-width: 361px) and (max-width: 480px) {
-    #controls-container {
-        height: 130px;
-        padding: 12px;
-    }
-
-    .flipper-btn {
-        width: 100px;
-        height: 100px;
-    }
-
-    .launch-btn {
-        max-width: 150px;
-        height: 100px;
-    }
-}
-
-/* Tablets */
-@media (min-width: 481px) and (max-width: 767px) {
-    #controls-container {
-        height: 150px;
-        padding: 15px;
-        gap: 20px;
-    }
-
-    .flipper-btn {
-        width: 130px;
-        height: 120px;
-    }
-
-    .launch-btn {
-        max-width: 200px;
-        height: 120px;
-        font-size: 20px;
-    }
-
-    .pause-btn {
-        width: 60px;
-        height: 60px;
-        font-size: 26px;
     }
 }
 

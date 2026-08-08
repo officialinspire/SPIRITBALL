@@ -25,7 +25,10 @@ context, so the agent doesn't need the rest of this conversation.
 | 10 | `10-pwa-and-cdn-resilience.md` | Deployment/production hardening. |
 | 11 | `11-center-post-drain-playtest.md` | Do **after** #1 — flipper fix changes ball behavior in this exact area. |
 | 12 | `12-accessibility-pass.md` | Final polish pass. |
+| 13 | `13-plunger-ball-mechanics-revamp.md` | Gameplay/UX revamp of the plunger and ball physics (gravity, bounce, charge model, anti-stuck logic). |
+| 14 | `14-arcade-mobile-fullscreen-controls.md` | Mobile control overhaul: full-screen portrait play, arcade-style edge-zone flippers. Pairs with #13 (shares the launch-ready DOM sync hook) but is otherwise independent. |
 
 Prompts within the same tier are independent of each other and can be done in any order, or in
-parallel by different sessions, unless a prompt explicitly says otherwise (only #11 has a hard
-dependency, on #1).
+parallel by different sessions, unless a prompt explicitly says otherwise (#11 depends on #1;
+#13 and #14 share one small integration point — `InputManager.setLaunchReady()` — but neither
+blocks the other from being read/applied first).

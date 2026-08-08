@@ -5,7 +5,10 @@
     <!-- Pinch-zoom is intentionally left enabled (user-scalable, higher maximum-scale) for
          low-vision players; touch-action: manipulation in styles.css already prevents this
          from causing double-tap-zoom on the game's own buttons. See release-prompts/12-*.md. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <!-- viewport-fit=cover lets the CSS env(safe-area-inset-*) values used by the mobile
+         overlay controls resolve to real numbers on notched/home-indicator phones instead of
+         0; see release-prompts/14-*.md. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
     <meta name="theme-color" content="#000000">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -75,23 +78,29 @@
 
         <div id="game-wrapper">
             <div id="game-container"></div>
-            <!-- Pause Button (stays in game area) -->
+
+            <!-- Pause Button - always available, desktop and mobile -->
             <button id="pause-btn" class="pause-btn" aria-label="Pause Game">
                 <span>⏸</span>
             </button>
-        </div>
 
-        <!-- Mobile Touch Controls Container -->
-        <div id="controls-container">
-            <button id="left-flipper-btn" class="flipper-btn left" aria-label="Left Flipper">
-                <span>◀</span>
-            </button>
-            <button id="launch-btn" class="launch-btn" aria-label="Launch Ball">
-                <span>⚡</span>
-            </button>
-            <button id="right-flipper-btn" class="flipper-btn right" aria-label="Right Flipper">
-                <span>▶</span>
-            </button>
+            <!-- Arcade-style mobile overlay controls: full-height edge zones for the flippers
+                 (tap anywhere along the side, like the flipper buttons on a real cabinet) plus
+                 a discrete launch button, floating on top of a full-bleed canvas rather than
+                 reserving a separate bottom bar - see release-prompts/14-*.md. Shown/hidden by
+                 InputManager based on device detection. -->
+            <div id="mobile-controls">
+                <div id="flipper-zone-left" class="flipper-zone left" role="button" aria-label="Left Flipper">
+                    <span class="flipper-zone-icon">◀</span>
+                </div>
+                <div id="flipper-zone-right" class="flipper-zone right" role="button" aria-label="Right Flipper">
+                    <span class="flipper-zone-icon">▶</span>
+                </div>
+                <button id="launch-btn" class="launch-btn" aria-label="Launch Ball: hold to charge, release to fire">
+                    <span class="launch-btn-icon">⚡</span>
+                    <span class="launch-btn-label">LAUNCH</span>
+                </button>
+            </div>
         </div>
     </div>
 

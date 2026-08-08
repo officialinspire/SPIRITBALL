@@ -19,9 +19,15 @@
 const CONFIG = {
     width: 540,
     height: 960,
-    gravity: 1400,
+    // Single source of truth for world gravity. This used to be set here AND overwritten to
+    // 800 in GameScene.setupPhysics() - the override silently won, so 1400 never actually took
+    // effect. Consolidated to one value and tuned up slightly from the effective 800 for a
+    // snappier, less floaty arcade-pinball descent. See release-prompts/13-*.md.
+    gravity: 1000,
     ballRadius: 20,
-    ballBounce: 0.75,
+    ballBounce: 0.8, // was 0.75 - a touch more energetic/lively on contact
+    ballMaxVelocity: 1800, // was inline in setupBall(); pulled out here for one-place tuning
+    ballDrag: 0.995,
     startingLives: 3,
     startingBalls: 3,
 
@@ -31,8 +37,11 @@ const CONFIG = {
     fuelLightCount: 6,
     reentryLaneCount: 3,
 
-    plungerMaxPower: 1200,
-    plungerMinPower: 400,
+    // Plunger power range was 400-1200: weak enough at minimum that an instant tap barely
+    // cleared the launch chute, and strong shots weren't very punchy. Raised so every launch
+    // (even a 0ms tap) is a meaningful, playable shot, with more ceiling on a full charge.
+    plungerMaxPower: 1600,
+    plungerMinPower: 700,
     plungerChargeTime: 2000,
 
     // XP Pinball Ranks (9 total)
@@ -198,9 +207,11 @@ class InputManager {
             launchReleased: false,
             pause: false
         };
+        this._fullscreenRequested = false;
         this.detectMobile();
         this.setupMobileControls();
         this.setupResizeHandlers();
+        this.setupFullscreenRequest();
     }
 
     detectMobile() {
@@ -216,7 +227,7 @@ class InputManager {
     }
 
     updateMobileControlsVisibility() {
-        const controlsContainer = document.getElementById('controls-container');
+        const mobileControls = document.getElementById('mobile-controls');
         const rotateOverlay = document.getElementById('rotate-overlay');
         const isLandscape = window.innerWidth > window.innerHeight;
 
@@ -226,21 +237,69 @@ class InputManager {
         // player with an unplayable, control-less screen. See release-prompts/02-*.md.
         if (this.isMobile && isLandscape) {
             if (rotateOverlay) rotateOverlay.style.display = 'flex';
-            if (controlsContainer) controlsContainer.style.display = 'none';
+            if (mobileControls) mobileControls.style.display = 'none';
             return;
         }
 
         if (rotateOverlay) rotateOverlay.style.display = 'none';
 
-        if (controlsContainer) {
+        if (mobileControls) {
             // Show controls if mobile device OR portrait orientation OR small screen.
-            // This is the sole authority on visibility now - styles.css no longer has a
-            // conflicting !important rule for #controls-container.
+            // This is the sole authority on visibility - styles.css has no conflicting
+            // !important display rule for #mobile-controls.
             const shouldShow = this.isMobile ||
                               window.innerHeight > window.innerWidth ||
                               window.innerWidth <= 767;
-            controlsContainer.style.display = shouldShow ? 'flex' : 'none';
+            mobileControls.style.display = shouldShow ? 'block' : 'none';
         }
+    }
+
+    // Mobile play is meant to be full-screen portrait (see release-prompts/14-*.md): request
+    // the Fullscreen API and, where supported, lock orientation to portrait, on the player's
+    // first touch anywhere - both require a user gesture, so this can't happen automatically
+    // on page load. Failures are silently ignored (fullscreen can be denied by the browser;
+    // orientation lock isn't supported at all on iOS Safari) - this is a nice-to-have
+    // enhancement, never a requirement to play.
+    setupFullscreenRequest() {
+        if (!this.isMobile) return;
+
+        document.addEventListener('touchstart', () => this.requestFullscreenAndLock(), { once: true, passive: true });
+    }
+
+    requestFullscreenAndLock() {
+        if (this._fullscreenRequested) return;
+        this._fullscreenRequested = true;
+
+        const el = document.documentElement;
+        const requestFs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+
+        const lockPortrait = () => {
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('portrait').catch(() => {});
+            }
+        };
+
+        if (requestFs) {
+            Promise.resolve(requestFs.call(el)).then(lockPortrait).catch(() => {});
+        } else {
+            lockPortrait();
+        }
+    }
+
+    // Short haptic pulse for launch feedback on devices that support it (mostly Android
+    // Chrome; iOS Safari has no Vibration API at all, so this silently no-ops there).
+    vibrate(ms) {
+        if (navigator.vibrate) {
+            try { navigator.vibrate(ms); } catch (e) { /* ignore */ }
+        }
+    }
+
+    // Toggles the ".ready" affordance class on the DOM launch button so it visibly invites a
+    // tap only when a launch is actually possible, kept in sync from GameScene at the moments
+    // canLaunch/ballInPlay change (resetBall(), launchBall()).
+    setLaunchReady(ready) {
+        const launchBtn = document.getElementById('launch-btn');
+        if (launchBtn) launchBtn.classList.toggle('ready', ready);
     }
 
     setupResizeHandlers() {
@@ -280,46 +339,54 @@ class InputManager {
     }
 
     setupMobileControls() {
-        const leftBtn = document.getElementById('left-flipper-btn');
-        if (leftBtn) {
+        // Arcade-style flipper zones: the whole left/right edge of the screen is the flipper
+        // control (like the flipper buttons on the sides of a real arcade cabinet), not a
+        // small button - much easier to hit reliably with a thumb resting anywhere along the
+        // edge. See release-prompts/14-*.md.
+        const leftZone = document.getElementById('flipper-zone-left');
+        if (leftZone) {
             const leftFlipperStart = (e) => {
                 e.preventDefault();
                 this.state.leftFlipper = true;
+                leftZone.classList.add('pressed');
             };
             const leftFlipperEnd = (e) => {
                 e.preventDefault();
                 this.state.leftFlipper = false;
+                leftZone.classList.remove('pressed');
             };
 
-            leftBtn.addEventListener('touchstart', leftFlipperStart, { passive: false });
-            leftBtn.addEventListener('touchend', leftFlipperEnd, { passive: false });
-            leftBtn.addEventListener('touchcancel', leftFlipperEnd, { passive: false });
+            leftZone.addEventListener('touchstart', leftFlipperStart, { passive: false });
+            leftZone.addEventListener('touchend', leftFlipperEnd, { passive: false });
+            leftZone.addEventListener('touchcancel', leftFlipperEnd, { passive: false });
 
             // Add mouse support for desktop testing
-            leftBtn.addEventListener('mousedown', leftFlipperStart);
-            leftBtn.addEventListener('mouseup', leftFlipperEnd);
-            leftBtn.addEventListener('mouseleave', leftFlipperEnd);
+            leftZone.addEventListener('mousedown', leftFlipperStart);
+            leftZone.addEventListener('mouseup', leftFlipperEnd);
+            leftZone.addEventListener('mouseleave', leftFlipperEnd);
         }
 
-        const rightBtn = document.getElementById('right-flipper-btn');
-        if (rightBtn) {
+        const rightZone = document.getElementById('flipper-zone-right');
+        if (rightZone) {
             const rightFlipperStart = (e) => {
                 e.preventDefault();
                 this.state.rightFlipper = true;
+                rightZone.classList.add('pressed');
             };
             const rightFlipperEnd = (e) => {
                 e.preventDefault();
                 this.state.rightFlipper = false;
+                rightZone.classList.remove('pressed');
             };
 
-            rightBtn.addEventListener('touchstart', rightFlipperStart, { passive: false });
-            rightBtn.addEventListener('touchend', rightFlipperEnd, { passive: false });
-            rightBtn.addEventListener('touchcancel', rightFlipperEnd, { passive: false });
+            rightZone.addEventListener('touchstart', rightFlipperStart, { passive: false });
+            rightZone.addEventListener('touchend', rightFlipperEnd, { passive: false });
+            rightZone.addEventListener('touchcancel', rightFlipperEnd, { passive: false });
 
             // Add mouse support for desktop testing
-            rightBtn.addEventListener('mousedown', rightFlipperStart);
-            rightBtn.addEventListener('mouseup', rightFlipperEnd);
-            rightBtn.addEventListener('mouseleave', rightFlipperEnd);
+            rightZone.addEventListener('mousedown', rightFlipperStart);
+            rightZone.addEventListener('mouseup', rightFlipperEnd);
+            rightZone.addEventListener('mouseleave', rightFlipperEnd);
         }
 
         const launchBtn = document.getElementById('launch-btn');
@@ -328,11 +395,13 @@ class InputManager {
                 e.preventDefault();
                 this.state.launchHeld = true;
                 this.state.launchPressed = true;
+                launchBtn.classList.add('pressed');
             };
             const launchEnd = (e) => {
                 e.preventDefault();
                 this.state.launchHeld = false;
                 this.state.launchReleased = true;
+                launchBtn.classList.remove('pressed');
                 setTimeout(() => this.state.launchReleased = false, 50);
             };
 
@@ -1017,7 +1086,11 @@ class GameScene extends Phaser.Scene {
             canLaunch: true,
             plungerCharging: false,
             plungerPower: 0,
-            plungerChargeStart: 0,
+            // Accumulated charge time in ms, built up via update() delta rather than a
+            // Date.now() timestamp. This makes charging automatically pause-safe: update()
+            // (and therefore updatePlunger()) never runs while isPaused, so no time silently
+            // accumulates while the pause menu is open. See release-prompts/13-*.md.
+            plungerChargeElapsed: 0,
 
             // XP Pinball: Rank System
             rank: 0, // Current rank index (0 = Cadet, 8 = Fleet Admiral)
@@ -1112,7 +1185,8 @@ class GameScene extends Phaser.Scene {
     
     setupPhysics() {
         this.physics.world.setBounds(0, 0, CONFIG.width, CONFIG.height);
-        this.physics.world.gravity.y = 800; // Add gravity to pull ball down naturally
+        // Gravity comes from CONFIG.gravity (set once in the Phaser game config below) - do
+        // not override it here. See release-prompts/13-*.md.
     }
     
     setupTable() {
@@ -1205,11 +1279,11 @@ class GameScene extends Phaser.Scene {
         this.ball.body.setCircle(CONFIG.ballRadius);
         this.ball.body.setBounce(CONFIG.ballBounce);
         this.ball.body.setCollideWorldBounds(true); // Keep ball within bounds as safety net
-        this.ball.body.setMaxVelocity(1800, 1800); // Prevent extreme speeds that cause tunneling
+        this.ball.body.setMaxVelocity(CONFIG.ballMaxVelocity, CONFIG.ballMaxVelocity); // Prevent extreme speeds that cause tunneling
 
         // Add air resistance to prevent ball from getting stuck
         this.ball.body.setDamping(true);
-        this.ball.body.setDrag(0.995); // Very light air resistance
+        this.ball.body.setDrag(CONFIG.ballDrag); // Very light air resistance
 
         this.ball.setDepth(100);
 
@@ -1775,6 +1849,21 @@ class GameScene extends Phaser.Scene {
         this.plunger.setScale(0.6);
         this.plunger.setDepth(95);
 
+        // Idle "ready to launch" glow so the plunger reads as interactive even before the
+        // player touches it (decorative - skipped under reduced motion).
+        this.addAmbientTween({
+            targets: this.plunger,
+            alpha: 0.75,
+            duration: 900,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+
+        if (window.gameInputManager) {
+            window.gameInputManager.setLaunchReady(true);
+        }
+
         // Power meter background
         this.powerMeterBg = this.add.rectangle(CONFIG.width - 45, CONFIG.height - 450, 20, 100, 0x333333, 0.7);
         this.powerMeterBg.setDepth(98);
@@ -2220,10 +2309,10 @@ class GameScene extends Phaser.Scene {
         if (this.gameState.isPaused) return;
 
         this.updateInput();
-        this.updatePlunger();
+        this.updatePlunger(delta);
         this.updateFlipperPower();
         this.checkDrain();
-        this.checkBallStuck();
+        this.checkBallStuck(delta);
 
         // XP Pinball: Update mission fuel depletion
         if (this.gameState.missionActive) {
@@ -2236,17 +2325,31 @@ class GameScene extends Phaser.Scene {
         }
     }
 
-    checkBallStuck() {
-        // Anti-stuck mechanism: if ball is moving very slowly and in play, give it a gentle nudge
-        if (this.ball && this.ball.body && this.gameState.ballInPlay) {
-            const velocity = this.ball.body.velocity;
-            const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+    checkBallStuck(delta) {
+        // Anti-stuck mechanism. This used to add +100 to velocityY EVERY frame the ball was
+        // below the speed threshold, which fights against legitimate slow rolling/resting and
+        // visibly jitters the ball rather than resolving anything. Now it accumulates how long
+        // the ball has been nearly stationary and, only once that's persisted for a real
+        // moment (not a single slow frame), applies one decisive, slightly randomized kick and
+        // resets - so a ball settling naturally for a few frames isn't constantly zapped, but a
+        // genuinely stuck ball actually gets dislodged. See release-prompts/13-*.md.
+        if (!this.ball || !this.ball.body || !this.gameState.ballInPlay) {
+            this.ballStuckTime = 0;
+            return;
+        }
 
-            // If ball is nearly stationary (stuck), give it a nudge
-            if (speed < 50) {
-                // Gentle downward nudge to help it fall naturally
-                this.ball.body.setVelocityY(this.ball.body.velocity.y + 100);
+        const velocity = this.ball.body.velocity;
+        const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+
+        if (speed < 40) {
+            this.ballStuckTime = (this.ballStuckTime || 0) + delta;
+            if (this.ballStuckTime >= 450) {
+                const kickX = (Math.random() - 0.5) * 400; // random-ish horizontal escape direction
+                this.ball.body.setVelocity(kickX, 380);
+                this.ballStuckTime = 0;
             }
+        } else {
+            this.ballStuckTime = 0;
         }
     }
 
@@ -2267,12 +2370,6 @@ class GameScene extends Phaser.Scene {
                 }
             });
             this.dynamicParticles = [];
-        }
-
-        // Clear all timers
-        if (this.quickTapTimer) {
-            this.quickTapTimer.remove();
-            this.quickTapTimer = null;
         }
 
         // Clear collision cooldowns
@@ -2372,21 +2469,28 @@ class GameScene extends Phaser.Scene {
         }
     }
 
-    updatePlunger() {
+    updatePlunger(delta) {
         if (this.gameState.plungerCharging) {
-            const now = Date.now();
-            const elapsed = now - this.gameState.plungerChargeStart;
-            const chargePercent = Math.min(elapsed / CONFIG.plungerChargeTime, 1);
+            this.gameState.plungerChargeElapsed += delta;
+            const chargePercent = Math.min(this.gameState.plungerChargeElapsed / CONFIG.plungerChargeTime, 1);
 
-            // Update plunger power
+            // Continuous power from hold duration - this is now the ONLY thing that decides
+            // launch power. There used to be a special-cased "quick tap = fixed 60% power" and
+            // a "not charging = fixed 65% power" fallback; both are gone. Power always equals
+            // exactly how long the plunger was held, from plungerMinPower (0ms) to
+            // plungerMaxPower (>= plungerChargeTime ms). See release-prompts/13-*.md.
             this.gameState.plungerPower = CONFIG.plungerMinPower + (CONFIG.plungerMaxPower - CONFIG.plungerMinPower) * chargePercent;
 
             // Update power meter visual
             const meterHeight = 92 * chargePercent;
             this.powerMeter.setDisplaySize(16, meterHeight);
 
+            const atMaxCharge = chargePercent >= 1;
+
             // Change color based on charge level
-            if (chargePercent < 0.33) {
+            if (atMaxCharge) {
+                this.powerMeter.setFillStyle(0x00ffff);
+            } else if (chargePercent < 0.33) {
                 this.powerMeter.setFillStyle(0xff0000);
             } else if (chargePercent < 0.66) {
                 this.powerMeter.setFillStyle(0xffff00);
@@ -2394,12 +2498,16 @@ class GameScene extends Phaser.Scene {
                 this.powerMeter.setFillStyle(0x00ff00);
             }
 
-            // Update charge text
-            this.chargeText.setText(`${Math.floor(chargePercent * 100)}%`);
+            // Update charge text - clear "MAX!" feedback instead of just sitting at "100%" so
+            // players know holding longer stops helping and it's time to let go.
+            this.chargeText.setText(atMaxCharge ? 'MAX!' : `${Math.floor(chargePercent * 100)}%`);
             this.chargeText.setAlpha(1);
+            this.chargeText.setScale(atMaxCharge ? 1.15 : 1);
 
-            // Pull plunger back visually
-            this.plunger.y = CONFIG.height - 200 + (chargePercent * 30);
+            // Pull plunger back visually, with a small spring wobble layered on top so charging
+            // reads as "held under tension" rather than a static bar filling up.
+            const wobble = atMaxCharge ? Math.sin(this.gameState.plungerChargeElapsed / 60) * 2 : 0;
+            this.plunger.y = CONFIG.height - 200 + (chargePercent * 36) + wobble;
         } else {
             // Reset visuals when not charging
             this.powerMeter.setDisplaySize(16, 0);
@@ -2526,42 +2634,34 @@ class GameScene extends Phaser.Scene {
     }
 
     handleLaunchPress() {
-        // Start charging the plunger if ball is ready to launch
+        // Start charging the plunger if ball is ready to launch. Power is now purely a
+        // function of how long this stays held - see updatePlunger(). No more quick-tap
+        // timers or special-cased power overrides. See release-prompts/13-*.md.
         if (this.gameState.canLaunch && !this.gameState.ballInPlay) {
             this.gameState.plungerCharging = true;
-            this.gameState.plungerChargeStart = Date.now();
+            this.gameState.plungerChargeElapsed = 0;
             this.gameState.plungerPower = CONFIG.plungerMinPower;
 
-            // Track that we started charging for this launch attempt
-            this.launchAttemptStarted = true;
-
-            // Auto-launch with minimum power if held less than 100ms (quick tap)
-            this.quickTapTimer = this.time.delayedCall(100, () => {
-                this.quickTapTimer = null;
-            });
+            if (window.gameInputManager) {
+                window.gameInputManager.vibrate(15); // light tick: charging started
+            }
         }
     }
 
     handleLaunchRelease() {
-        // ULTIMATE FIX: Always try to launch if ball is ready, regardless of charging state
-        // This ensures desktop space press works reliably after death
+        // Always try to launch if ball is ready, regardless of charging state - this is what
+        // makes desktop SPACE and the mobile launch button reliable immediately after a death
+        // (canLaunch/ballInPlay are reset together in resetBall(), so this check alone is
+        // enough; no separate "did we see a press" bookkeeping is needed).
         if (this.gameState.canLaunch && !this.gameState.ballInPlay) {
-
-            // If plunger was charging, use the charged power
-            if (this.gameState.plungerCharging) {
-                // Quick tap detection - launch with medium power for quick press
-                if (this.quickTapTimer) {
-                    this.quickTapTimer.remove();
-                    this.quickTapTimer = null;
-                    this.gameState.plungerPower = CONFIG.plungerMinPower + (CONFIG.plungerMaxPower - CONFIG.plungerMinPower) * 0.6;
-                }
-            } else {
-                // Fallback: if not charging but ball is ready, launch with good default power
-                // This is the critical fix for desktop launch after death
-                this.gameState.plungerPower = CONFIG.plungerMinPower + (CONFIG.plungerMaxPower - CONFIG.plungerMinPower) * 0.65;
+            // gameState.plungerPower already holds the correct, continuously-updated value
+            // from updatePlunger() if we were charging. If release fires with no charge in
+            // progress at all (shouldn't normally happen given press/release symmetry, but
+            // kept as a safe default), fall back to the minimum power rather than a magic ratio.
+            if (!this.gameState.plungerCharging) {
+                this.gameState.plungerPower = CONFIG.plungerMinPower;
             }
 
-            // Always launch the ball
             this.executeLaunch();
         }
     }
@@ -2574,13 +2674,6 @@ class GameScene extends Phaser.Scene {
 
         this.launchBall();
         this.gameState.plungerCharging = false;
-        this.launchAttemptStarted = false;
-
-        // Clear any timers
-        if (this.quickTapTimer) {
-            this.quickTapTimer.remove();
-            this.quickTapTimer = null;
-        }
 
         // Reset plunger position with satisfying animation
         this.tweens.add({
@@ -3231,6 +3324,7 @@ class GameScene extends Phaser.Scene {
         this.gameState.canLaunch = true;
         this.gameState.plungerCharging = false;
         this.gameState.plungerPower = 0;
+        this.gameState.plungerChargeElapsed = 0;
 
         if (this.collisionCooldowns) {
             this.collisionCooldowns.clear();
@@ -3238,12 +3332,9 @@ class GameScene extends Phaser.Scene {
 
         // Reset input tracking to ensure clean state for next launch
         this.previousSpaceDown = false;
-        this.launchAttemptStarted = false;
 
-        // Clear any existing quick tap timer
-        if (this.quickTapTimer) {
-            this.quickTapTimer.remove();
-            this.quickTapTimer = null;
+        if (window.gameInputManager) {
+            window.gameInputManager.setLaunchReady(true);
         }
 
         // XP Pinball: Abort mission if ball is lost
@@ -3264,17 +3355,40 @@ class GameScene extends Phaser.Scene {
         this.gameState.ballInPlay = true;
         this.gameState.canLaunch = false;
 
-        // Use plunger power to determine velocity
+        if (window.gameInputManager) {
+            window.gameInputManager.setLaunchReady(false);
+        }
+
+        // Use plunger power to determine velocity. Horizontal kick now scales mildly with
+        // power too (was a flat -250 regardless of charge) - weak taps go nearly straight up
+        // the launch chute, strong shots get a bit more english, without swinging wide enough
+        // to clip the chute's guide wall. See release-prompts/13-*.md.
         const power = this.gameState.plungerPower;
         const velocityY = -power;
-        const velocityX = -250;
+        const velocityX = -(150 + power * 0.08);
 
         this.ball.body.setVelocity(velocityX, velocityY);
 
+        // A quick scale punch on the ball itself at the moment of launch, on top of the
+        // existing continuous idle rotation tween, for extra impact feedback.
+        this.tweens.add({
+            targets: this.ball,
+            scale: { from: 0.92, to: 0.8 },
+            duration: 180,
+            ease: 'Back.easeOut'
+        });
+
+        const powerPercent = (power - CONFIG.plungerMinPower) / (CONFIG.plungerMaxPower - CONFIG.plungerMinPower);
+
         // Shake intensity based on power - with safety check
         if (this.cameras && this.cameras.main) {
-            const shakeIntensity = 0.002 + (power / CONFIG.plungerMaxPower) * 0.005;
+            const shakeIntensity = 0.002 + powerPercent * 0.005;
             this.cameraShake(150, shakeIntensity);
+        }
+
+        if (window.gameInputManager) {
+            // Stronger buzz for a stronger launch (roughly 20-60ms)
+            window.gameInputManager.vibrate(20 + Math.round(powerPercent * 40));
         }
 
         // Visual feedback
