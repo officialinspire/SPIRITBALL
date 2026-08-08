@@ -65,27 +65,27 @@ const CONFIG = {
             { id: 11, name: 'Maelstrom', description: 'Hit all targets rapidly', requirement: 10, type: 'rapidtarget' }
         ],
         4: [ // LT Commander
-            { id: 12, name: 'Cosmic Plague', description: 'Achieve 75 flag rotations', requirement: 75, type: 'flags' },
+            { id: 12, name: 'Cosmic Plague', description: 'Pass the Launch Ramp 10 times', requirement: 10, type: 'ramp' },
             { id: 13, name: 'Black Hole', description: 'Hit Satellite 5 times', requirement: 5, type: 'satellite' },
             { id: 14, name: 'Space Radiation', description: 'Survive 30 seconds', requirement: 30, type: 'time' }
         ],
         5: [ // Commander - uses higher rank missions
-            { id: 12, name: 'Cosmic Plague', description: 'Achieve 100 flag rotations', requirement: 100, type: 'flags' },
+            { id: 12, name: 'Cosmic Plague', description: 'Pass the Launch Ramp 12 times', requirement: 12, type: 'ramp' },
             { id: 13, name: 'Black Hole', description: 'Hit Satellite 7 times', requirement: 7, type: 'satellite' },
             { id: 15, name: 'Bug Hunt', description: 'Hit all bumpers 30 times', requirement: 30, type: 'bumper' }
         ],
         6: [ // Commodore
-            { id: 12, name: 'Cosmic Plague', description: 'Achieve 150 flag rotations', requirement: 150, type: 'flags' },
+            { id: 12, name: 'Cosmic Plague', description: 'Pass the Launch Ramp 15 times', requirement: 15, type: 'ramp' },
             { id: 16, name: 'Stray Comet', description: 'Score 500,000 points', requirement: 500000, type: 'score' },
             { id: 13, name: 'Black Hole', description: 'Hit Satellite 10 times', requirement: 10, type: 'satellite' }
         ],
         7: [ // Admiral
-            { id: 12, name: 'Cosmic Plague', description: 'Achieve 200 flag rotations', requirement: 200, type: 'flags' },
+            { id: 12, name: 'Cosmic Plague', description: 'Pass the Launch Ramp 18 times', requirement: 18, type: 'ramp' },
             { id: 16, name: 'Stray Comet', description: 'Score 1,000,000 points', requirement: 1000000, type: 'score' },
             { id: 13, name: 'Black Hole', description: 'Hit Satellite 15 times', requirement: 15, type: 'satellite' }
         ],
         8: [ // Fleet Admiral
-            { id: 12, name: 'Cosmic Plague', description: 'Achieve 300 flag rotations', requirement: 300, type: 'flags' },
+            { id: 12, name: 'Cosmic Plague', description: 'Pass the Launch Ramp 22 times', requirement: 22, type: 'ramp' },
             { id: 16, name: 'Stray Comet', description: 'Score 2,000,000 points', requirement: 2000000, type: 'score' },
             { id: 13, name: 'Black Hole', description: 'Hit Satellite 20 times', requirement: 20, type: 'satellite' }
         ]
@@ -217,8 +217,25 @@ class InputManager {
 
     updateMobileControlsVisibility() {
         const controlsContainer = document.getElementById('controls-container');
+        const rotateOverlay = document.getElementById('rotate-overlay');
+        const isLandscape = window.innerWidth > window.innerHeight;
+
+        // The playfield is portrait-only. A real mobile device held in landscape has nowhere
+        // to put the touch controls (and previously a CSS !important rule could hide them
+        // outright with no explanation) - show a rotate prompt instead of stranding the
+        // player with an unplayable, control-less screen. See release-prompts/02-*.md.
+        if (this.isMobile && isLandscape) {
+            if (rotateOverlay) rotateOverlay.style.display = 'flex';
+            if (controlsContainer) controlsContainer.style.display = 'none';
+            return;
+        }
+
+        if (rotateOverlay) rotateOverlay.style.display = 'none';
+
         if (controlsContainer) {
-            // Show controls if mobile device OR portrait orientation OR small screen
+            // Show controls if mobile device OR portrait orientation OR small screen.
+            // This is the sole authority on visibility now - styles.css no longer has a
+            // conflicting !important rule for #controls-container.
             const shouldShow = this.isMobile ||
                               window.innerHeight > window.innerWidth ||
                               window.innerWidth <= 767;
@@ -352,7 +369,7 @@ class BootScene extends Phaser.Scene {
         }).setOrigin(0.5);
 
         // Load background image
-        this.load.image('background', 'background.png');
+        this.load.image('background', 'background.webp');
 
         // Load new psychedelic assets
         this.load.image('saturn-psychedelic', 'saturn_example.webp');
@@ -1009,7 +1026,7 @@ class GameScene extends Phaser.Scene {
 
             // XP Pinball: Mission System
             activeMission: null, // Currently active mission object
-            selectedMission: 0, // Selected mission index (0-2)
+            selectedMission: null, // Selected mission index (0-2), null = nothing selected yet
             missionProgress: 0, // Progress towards current mission
             missionActive: false, // Is a mission currently running
             missionTargetsLit: [false, false, false], // Mission selection targets
@@ -1037,9 +1054,6 @@ class GameScene extends Phaser.Scene {
 
             // XP Pinball: Satellite (Saturn)
             satelliteHits: 0,
-
-            // XP Pinball: Flags (for flag rotation missions)
-            flagRotations: 0,
 
             // XP Pinball: Mission Start Time (for timed missions)
             missionStartTime: 0,
@@ -1227,8 +1241,8 @@ class GameScene extends Phaser.Scene {
             target.body.setCircle(25);
             target.missionIndex = i; // Store which mission this represents
 
-            // Add rotation animation
-            this.tweens.add({
+            // Add rotation animation (decorative - skipped under reduced motion)
+            this.addAmbientTween({
                 targets: target,
                 angle: 360,
                 duration: 2500 + (i * 300),
@@ -1236,8 +1250,8 @@ class GameScene extends Phaser.Scene {
                 ease: 'Linear'
             });
 
-            // Add pulsing glow
-            this.tweens.add({
+            // Add pulsing glow (decorative - skipped under reduced motion)
+            this.addAmbientTween({
                 targets: target,
                 scale: 0.75,
                 alpha: 0.7,
@@ -1264,8 +1278,8 @@ class GameScene extends Phaser.Scene {
             fuel.body.setCircle(20);
             fuel.fuelIndex = i; // Store which fuel light this represents
 
-            // Add rotation animation
-            this.tweens.add({
+            // Add rotation animation (decorative - skipped under reduced motion)
+            this.addAmbientTween({
                 targets: fuel,
                 angle: 360,
                 duration: 3000 + (i * 200),
@@ -1273,8 +1287,8 @@ class GameScene extends Phaser.Scene {
                 ease: 'Linear'
             });
 
-            // Add pulsing glow
-            this.tweens.add({
+            // Add pulsing glow (decorative - skipped under reduced motion)
+            this.addAmbientTween({
                 targets: fuel,
                 scale: 0.65,
                 alpha: 0.8,
@@ -1299,8 +1313,8 @@ class GameScene extends Phaser.Scene {
         this.physics.add.existing(this.saturn, true);
         this.saturn.body.setCircle(50);
 
-        // Rotation animation for Saturn
-        this.tweens.add({
+        // Rotation animation for Saturn (decorative - skipped under reduced motion)
+        this.addAmbientTween({
             targets: this.saturn,
             angle: 360,
             duration: 6000,
@@ -1308,8 +1322,8 @@ class GameScene extends Phaser.Scene {
             ease: 'Linear'
         });
 
-        // Pulsing effect for Saturn
-        this.tweens.add({
+        // Pulsing effect for Saturn (decorative - skipped under reduced motion)
+        this.addAmbientTween({
             targets: this.saturn,
             scale: { from: 0.35, to: 0.38 },
             duration: 2000,
@@ -1630,20 +1644,30 @@ class GameScene extends Phaser.Scene {
     }
 
     setupFlippers() {
-        const flipperWidth = 120;
-        const flipperHeight = 16;
         const flipperY = CONFIG.height - 80; // Moved to very bottom
         const flipperGap = 80; // Gap between flippers
+
+        // Flipper hit detection: Arcade Physics bodies are always axis-aligned and never
+        // rotate with the sprite, so a rectangular hitbox sized to the flipper's resting
+        // angle badly mismatches the sprite once it swings up. Instead we use a single
+        // circular collider centered on the flipper's pivot, sized to cover the full swept
+        // arc (rest angle to fully-up angle) so the ball reliably touches "the flipper" for
+        // its whole swing, not just its resting pose. See release-prompts/01-*.md.
+        this.flipperColliderRadius = 62;
 
         // Left cosmic energy wing flipper - at bottom left
         this.leftFlipper = this.add.sprite(CONFIG.width / 2 - flipperGap, flipperY, 'flipper-left');
         this.physics.add.existing(this.leftFlipper, true);
-        this.leftFlipper.body.setSize(flipperWidth, flipperHeight);
+        this.leftFlipper.body.setCircle(
+            this.flipperColliderRadius,
+            this.leftFlipper.width / 2 - this.flipperColliderRadius,
+            this.leftFlipper.height / 2 - this.flipperColliderRadius
+        );
         this.leftFlipper.setDepth(99);
         this.leftFlipper.setAngle(20); // Resting position angled upward
 
-        // Add glow effect to left flipper
-        this.tweens.add({
+        // Add glow effect to left flipper (decorative - skipped under reduced motion)
+        this.addAmbientTween({
             targets: this.leftFlipper,
             alpha: 0.85,
             duration: 800,
@@ -1655,12 +1679,16 @@ class GameScene extends Phaser.Scene {
         // Right cosmic energy wing flipper - at bottom right
         this.rightFlipper = this.add.sprite(CONFIG.width / 2 + flipperGap, flipperY, 'flipper-right');
         this.physics.add.existing(this.rightFlipper, true);
-        this.rightFlipper.body.setSize(flipperWidth, flipperHeight);
+        this.rightFlipper.body.setCircle(
+            this.flipperColliderRadius,
+            this.rightFlipper.width / 2 - this.flipperColliderRadius,
+            this.rightFlipper.height / 2 - this.flipperColliderRadius
+        );
         this.rightFlipper.setDepth(99);
         this.rightFlipper.setAngle(-20); // Resting position angled upward
 
-        // Add glow effect to right flipper
-        this.tweens.add({
+        // Add glow effect to right flipper (decorative - skipped under reduced motion)
+        this.addAmbientTween({
             targets: this.rightFlipper,
             alpha: 0.85,
             duration: 800,
@@ -1813,7 +1841,7 @@ class GameScene extends Phaser.Scene {
             this.physics.add.collider(this.ball, wall, (ball, wall) => {
                 if (ball.body && ball.body.touching) {
                     if (this.cameras && this.cameras.main) {
-                        this.cameras.main.shake(40, 0.003);
+                        this.cameraShake(40, 0.003);
                     }
                     const minVelocity = 100;
                     if (Math.abs(ball.body.velocity.x) < minVelocity && ball.body.touching.left) {
@@ -2098,9 +2126,36 @@ class GameScene extends Phaser.Scene {
         this.input.keyboard.on('keyup-LEFT', () => this.deactivateLeftFlipper());
         this.input.keyboard.on('keydown-RIGHT', () => this.activateRightFlipper());
         this.input.keyboard.on('keyup-RIGHT', () => this.deactivateRightFlipper());
-        this.input.keyboard.on('keydown-SPACE', () => this.handleLaunchPress());
         this.input.keyboard.on('keyup-SPACE', () => this.handleLaunchRelease());
-        this.input.keyboard.on('keydown-ESC', () => this.handlePause());
+
+        // SPACE has two jobs depending on pause state: charge/launch the plunger during play,
+        // or resume the game from the top-level pause menu (not from the Controls submenu,
+        // matching the original behavior). A single persistent listener here avoids the
+        // dangling once()-listener leak that used to come from re-registering a resume
+        // shortcut every time the pause menu opened - see release-prompts/07-*.md.
+        this.input.keyboard.on('keydown-SPACE', () => {
+            if (this.gameState.isPaused) {
+                if (!this.settingsOverlay) {
+                    this.resumeGame();
+                }
+                return;
+            }
+            this.handleLaunchPress();
+        });
+
+        // ESC always toggles pause, except when the Controls submenu is open, where it backs
+        // out to the pause menu instead of resuming outright.
+        this.input.keyboard.on('keydown-ESC', () => {
+            if (this.gameState.isPaused && this.settingsOverlay) {
+                this.settingsOverlay.forEach(obj => {
+                    if (obj && obj.destroy) obj.destroy();
+                });
+                this.settingsOverlay = null;
+                this.pauseGame();
+                return;
+            }
+            this.handlePause();
+        });
 
         // Create keyboard object for direct key checking (more reliable for launch)
         this.keys = {
@@ -2166,6 +2221,7 @@ class GameScene extends Phaser.Scene {
 
         this.updateInput();
         this.updatePlunger();
+        this.updateFlipperPower();
         this.checkDrain();
         this.checkBallStuck();
 
@@ -2361,38 +2417,8 @@ class GameScene extends Phaser.Scene {
                 ease: 'Quad.easeOut' // Snappier easing for responsive feel
             });
         }
-
-        // ENHANCED ball collision with professional pinball physics
-        if (this.physics.overlap(this.ball, this.leftFlipper) && this.ball.body && !this.leftFlipperCooldown) {
-            this.leftFlipperCooldown = true;
-
-            const ballSpeed = Math.sqrt(
-                this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
-            );
-            const flipperPower = Math.max(1500, ballSpeed * 2.4); // Professional pinball power
-
-            // Calculate angle based on where ball hits flipper - more precision
-            const hitPosition = (this.ball.x - this.leftFlipper.x) / 40;
-            const angleAdjust = hitPosition * 35; // Maximum angle variation for expert control
-
-            const launchAngle = -68 - angleAdjust; // Optimal steep angle for powerful upward shots
-            const radians = (launchAngle * Math.PI) / 180;
-
-            this.ball.body.setVelocity(
-                Math.cos(radians) * flipperPower,
-                Math.sin(radians) * flipperPower
-            );
-
-            // Intense visual feedback for satisfying feel
-            if (this.cameras && this.cameras.main) {
-                this.cameras.main.shake(150, 0.008);
-            }
-
-            // Minimal cooldown for maximum responsiveness - real pinball feel
-            this.time.delayedCall(25, () => {
-                this.leftFlipperCooldown = false;
-            });
-        }
+        // Power transfer to the ball is handled every frame in updateFlipperPower() while
+        // the flipper is active, not just on this press edge - see release-prompts/01-*.md.
     }
 
     deactivateLeftFlipper() {
@@ -2415,9 +2441,61 @@ class GameScene extends Phaser.Scene {
                 ease: 'Quad.easeOut' // Snappier easing for responsive feel
             });
         }
+        // Power transfer to the ball is handled every frame in updateFlipperPower() while
+        // the flipper is active, not just on this press edge - see release-prompts/01-*.md.
+    }
 
-        // ENHANCED ball collision with professional pinball physics
-        if (this.physics.overlap(this.ball, this.rightFlipper) && this.ball.body && !this.rightFlipperCooldown) {
+    deactivateRightFlipper() {
+        this.rightFlipperActive = false;
+        this.tweens.add({
+            targets: this.rightFlipper,
+            angle: -20, // Return to -20 degree resting position
+            duration: 80, // Controlled snap-back like real pinball
+            ease: 'Quad.easeIn'
+        });
+    }
+
+    // Continuous per-frame flipper power application. Runs every update() tick (not just on
+    // the initial press) so a ball that arrives on a flipper anytime while it's held up still
+    // gets flipped, instead of only when the press and ball arrival coincide within one frame.
+    updateFlipperPower() {
+        if (!this.ball || !this.ball.body) return;
+
+        if (this.leftFlipperActive && !this.leftFlipperCooldown &&
+            this.physics.overlap(this.ball, this.leftFlipper)) {
+            this.leftFlipperCooldown = true;
+
+            const ballSpeed = Math.sqrt(
+                this.ball.body.velocity.x ** 2 + this.ball.body.velocity.y ** 2
+            );
+            const flipperPower = Math.max(1500, ballSpeed * 2.4); // Professional pinball power
+
+            // Calculate angle based on where ball hits flipper - more precision
+            const hitPosition = (this.ball.x - this.leftFlipper.x) / 40;
+            const angleAdjust = hitPosition * 35; // Maximum angle variation for expert control
+
+            const launchAngle = -68 - angleAdjust; // Optimal steep angle for powerful upward shots
+            const radians = (launchAngle * Math.PI) / 180;
+
+            this.ball.body.setVelocity(
+                Math.cos(radians) * flipperPower,
+                Math.sin(radians) * flipperPower
+            );
+
+            if (this.cameras && this.cameras.main) {
+                this.cameraShake(150, 0.008);
+            }
+
+            // Cooldown here is longer than a single frame so a ball still inside the (larger)
+            // flipper collider right after being launched doesn't get re-flipped every frame
+            // before it clears the hitbox ("machine-gunning").
+            this.time.delayedCall(150, () => {
+                this.leftFlipperCooldown = false;
+            });
+        }
+
+        if (this.rightFlipperActive && !this.rightFlipperCooldown &&
+            this.physics.overlap(this.ball, this.rightFlipper)) {
             this.rightFlipperCooldown = true;
 
             const ballSpeed = Math.sqrt(
@@ -2437,26 +2515,14 @@ class GameScene extends Phaser.Scene {
                 Math.sin(radians) * flipperPower
             );
 
-            // Intense visual feedback for satisfying feel
             if (this.cameras && this.cameras.main) {
-                this.cameras.main.shake(150, 0.008);
+                this.cameraShake(150, 0.008);
             }
 
-            // Minimal cooldown for maximum responsiveness - real pinball feel
-            this.time.delayedCall(25, () => {
+            this.time.delayedCall(150, () => {
                 this.rightFlipperCooldown = false;
             });
         }
-    }
-
-    deactivateRightFlipper() {
-        this.rightFlipperActive = false;
-        this.tweens.add({
-            targets: this.rightFlipper,
-            angle: -20, // Return to -20 degree resting position
-            duration: 80, // Controlled snap-back like real pinball
-            ease: 'Quad.easeIn'
-        });
     }
 
     handleLaunchPress() {
@@ -2545,7 +2611,7 @@ class GameScene extends Phaser.Scene {
         this.gameState.missionTargetsLit[index] = true;
 
         this.addScore(CONFIG.scores.missionTarget);
-        this.cameras.main.shake(60, 0.002);
+        this.cameraShake(60, 0.002);
 
         // Visual feedback
         target.setTint(CONFIG.colors.missionActive);
@@ -2566,13 +2632,29 @@ class GameScene extends Phaser.Scene {
         if (this.gameState.fuel < CONFIG.fuelLightCount) {
             this.gameState.fuel++;
             this.gameState.fuelLights[index] = true;
-            fuel.setAlpha(1);
-            fuel.setTint(CONFIG.colors.fuelFull);
+            this.updateFuelLightVisuals();
 
             this.addScore(CONFIG.scores.fuelTarget);
-            this.cameras.main.shake(50, 0.002);
+            this.cameraShake(50, 0.002);
             this.showPopup('+FUEL', fuel.x, fuel.y - 40, 18);
             this.updateHUD();
+        }
+    }
+
+    // Keeps the 6 fuel-light sprites on the playfield in sync with the actual fuel count as a
+    // simple fixed-order countdown bar (lights 0..fuel-1 full, fuel..5 low) - rather than the
+    // previous scheme where refueling lit whichever specific target was hit while depletion
+    // dimmed by remaining-count index, which could disagree with each other. See
+    // release-prompts/08-*.md.
+    updateFuelLightVisuals() {
+        for (let i = 0; i < this.fuelLights.length; i++) {
+            if (i < this.gameState.fuel) {
+                this.fuelLights[i].setAlpha(1);
+                this.fuelLights[i].setTint(CONFIG.colors.fuelFull);
+            } else {
+                this.fuelLights[i].setAlpha(0.3);
+                this.fuelLights[i].setTint(CONFIG.colors.fuelLow);
+            }
         }
     }
 
@@ -2611,7 +2693,7 @@ class GameScene extends Phaser.Scene {
         }
 
         // Strong visual/audio feedback
-        this.cameras.main.shake(120, 0.006);
+        this.cameraShake(120, 0.006);
         this.tweens.add({
             targets: bumper,
             scale: 1.15,
@@ -2637,7 +2719,7 @@ class GameScene extends Phaser.Scene {
         this.gameState.statistics.totalSatelliteHits++;
 
         this.addScore(CONFIG.scores.satellite);
-        this.cameras.main.shake(120, 0.005);
+        this.cameraShake(120, 0.005);
 
         // Check if this advances current mission
         if (this.gameState.missionActive && this.gameState.activeMission) {
@@ -2673,7 +2755,7 @@ class GameScene extends Phaser.Scene {
     hitGrimReaperDecor() {
         // Psychedelic Grim Reaper decorative element behavior
         this.addScore(750);
-        this.cameras.main.shake(100, 0.004);
+        this.cameraShake(100, 0.004);
 
         // Bounce away with extra flair
         if (this.ball.body) {
@@ -2714,9 +2796,10 @@ class GameScene extends Phaser.Scene {
         const laneIndex = lane.laneIndex;
         this.gameState.reentryLanes[laneIndex] = true;
         this.gameState.allLaneHits++;
+        this.gameState.statistics.totalLaneHits++;
 
         this.addScore(CONFIG.scores.reentryLane);
-        this.cameras.main.shake(80, 0.003);
+        this.cameraShake(80, 0.003);
 
         // Light up the lane
         lane.setFillStyle(CONFIG.colors.missionActive, 0.5);
@@ -2752,7 +2835,7 @@ class GameScene extends Phaser.Scene {
     hitLaunchRamp() {
         // XP Pinball launch ramp - starts selected mission
         this.addScore(CONFIG.scores.launchRamp);
-        this.cameras.main.shake(90, 0.003);
+        this.cameraShake(90, 0.003);
 
         // Start mission if one is selected
         if (!this.gameState.missionActive && this.gameState.selectedMission !== null) {
@@ -2763,6 +2846,8 @@ class GameScene extends Phaser.Scene {
                 this.gameState.missionProgress++;
                 this.checkMissionComplete();
             }
+        } else if (!this.gameState.missionActive) {
+            this.showPopup('SELECT A MISSION FIRST', CONFIG.width / 2, CONFIG.height / 2, 20);
         }
 
         this.showPopup('LAUNCH RAMP!', this.launchRampZone.x, this.launchRampZone.y - 40, 20);
@@ -2772,8 +2857,8 @@ class GameScene extends Phaser.Scene {
     hitBonusLane() {
         // XP Pinball bonus lane - big points
         this.addScore(CONFIG.scores.bonusLane);
-        this.cameras.main.shake(150, 0.006);
-        this.cameras.main.flash(300);
+        this.cameraShake(150, 0.006);
+        this.cameraFlash(300);
 
         // Award multiplier progress
         if (this.gameState.multiplierIndex < CONFIG.multipliers.length - 1) {
@@ -2810,7 +2895,7 @@ class GameScene extends Phaser.Scene {
         }
 
         this.addScore(points);
-        this.cameras.main.shake(60, 0.002);
+        this.cameraShake(60, 0.002);
     }
 
     hitSlingshot(slingshot) {
@@ -2832,7 +2917,7 @@ class GameScene extends Phaser.Scene {
         }
 
         // Visual feedback
-        this.cameras.main.shake(120, 0.005);
+        this.cameraShake(120, 0.005);
         this.tweens.add({
             targets: slingshot,
             alpha: 1,
@@ -2846,7 +2931,7 @@ class GameScene extends Phaser.Scene {
     hitInlane(inlane) {
         // Inlane - safe return to flippers with bonus points
         this.addScore(500);
-        this.cameras.main.shake(80, 0.003);
+        this.cameraShake(80, 0.003);
 
         inlane.setFillStyle(0x00ff00, 0.8);
         this.tweens.add({
@@ -2862,7 +2947,7 @@ class GameScene extends Phaser.Scene {
     hitOutlane(outlane) {
         // Outlane - dangerous area that drains the ball
         this.addScore(200);
-        this.cameras.main.shake(100, 0.004);
+        this.cameraShake(100, 0.004);
 
         outlane.setFillStyle(0xff0000, 0.8);
         this.tweens.add({
@@ -2889,9 +2974,10 @@ class GameScene extends Phaser.Scene {
         this.gameState.fuelDepleting = true;
         this.gameState.lastFuelDepletion = Date.now();
         this.gameState.missionStartTime = Date.now();
+        this.updateFuelLightVisuals();
 
-        this.cameras.main.shake(150, 0.006);
-        this.cameras.main.flash(400);
+        this.cameraShake(150, 0.006);
+        this.cameraFlash(400);
         this.showPopup(`MISSION: ${mission.name}`, CONFIG.width / 2, CONFIG.height / 2 - 50, 28);
         this.showPopup(mission.description, CONFIG.width / 2, CONFIG.height / 2, 18);
 
@@ -2916,9 +3002,6 @@ class GameScene extends Phaser.Scene {
                 break;
             case 'fuel':
                 isComplete = this.gameState.fuel >= mission.requirement;
-                break;
-            case 'flags':
-                isComplete = this.gameState.flagRotations >= mission.requirement;
                 break;
             case 'score':
                 isComplete = this.gameState.score >= mission.requirement;
@@ -2950,8 +3033,8 @@ class GameScene extends Phaser.Scene {
         this.gameState.rankProgress++;
 
         // Visual celebration
-        this.cameras.main.shake(250, 0.008);
-        this.cameras.main.flash(600);
+        this.cameraShake(250, 0.008);
+        this.cameraFlash(600);
         this.showPopup('MISSION COMPLETE!', CONFIG.width / 2, CONFIG.height / 2 - 50, 36);
         this.showPopup(`+${CONFIG.scores.missionComplete}`, CONFIG.width / 2, CONFIG.height / 2 + 20, 28);
 
@@ -2982,8 +3065,8 @@ class GameScene extends Phaser.Scene {
 
             this.addScore(CONFIG.scores.rankUp);
 
-            this.cameras.main.shake(400, 0.01);
-            this.cameras.main.flash(1000);
+            this.cameraShake(400, 0.01);
+            this.cameraFlash(1000);
             this.showPopup('RANK UP!', CONFIG.width / 2, CONFIG.height / 2 - 60, 44);
             this.showPopup(CONFIG.ranks[this.gameState.rank], CONFIG.width / 2, CONFIG.height / 2, 36);
 
@@ -2998,12 +3081,7 @@ class GameScene extends Phaser.Scene {
         if (now - this.gameState.lastFuelDepletion >= this.gameState.fuelDepletionRate) {
             this.gameState.fuel--;
             this.gameState.lastFuelDepletion = now;
-
-            // Update fuel light visuals
-            if (this.gameState.fuel >= 0 && this.gameState.fuel < this.fuelLights.length) {
-                this.fuelLights[this.gameState.fuel].setAlpha(0.3);
-                this.fuelLights[this.gameState.fuel].setTint(CONFIG.colors.fuelLow);
-            }
+            this.updateFuelLightVisuals();
 
             if (this.gameState.fuel <= 0) {
                 this.abortMission();
@@ -3026,7 +3104,7 @@ class GameScene extends Phaser.Scene {
         });
 
         this.showPopup('MISSION ABORTED', CONFIG.width / 2, CONFIG.height / 2, 32);
-        this.cameras.main.shake(120, 0.004);
+        this.cameraShake(120, 0.004);
 
         this.updateHUD();
     }
@@ -3102,8 +3180,8 @@ class GameScene extends Phaser.Scene {
 
         // Screen effect
         if (this.cameras && this.cameras.main) {
-            this.cameras.main.shake(400, 0.008);
-            this.cameras.main.flash(200, 255, 0, 0, true);
+            this.cameraShake(400, 0.008);
+            this.cameraFlash(200, 255, 0, 0, true);
         }
     }
     
@@ -3196,7 +3274,7 @@ class GameScene extends Phaser.Scene {
         // Shake intensity based on power - with safety check
         if (this.cameras && this.cameras.main) {
             const shakeIntensity = 0.002 + (power / CONFIG.plungerMaxPower) * 0.005;
-            this.cameras.main.shake(150, shakeIntensity);
+            this.cameraShake(150, shakeIntensity);
         }
 
         // Visual feedback
@@ -3208,9 +3286,6 @@ class GameScene extends Phaser.Scene {
         const multiplier = CONFIG.multipliers[this.gameState.multiplierIndex];
         const multipliedPoints = Math.floor(points * multiplier);
         this.gameState.score += multipliedPoints;
-
-        // Track flags for flag missions
-        this.gameState.flagRotations++;
 
         if (this.gameState.score > this.gameState.highScore) {
             this.gameState.highScore = this.gameState.score;
@@ -3285,6 +3360,34 @@ class GameScene extends Phaser.Scene {
         });
     }
     
+    // Intensity-only feedback (screen shake/flash) skips entirely when the player has asked
+    // their OS/browser to reduce motion (window.SPIRITBALL_reducedMotion, set once at load
+    // from prefers-reduced-motion - see release-prompts/12-*.md). This does not touch
+    // essential input feedback like the flipper swing tween itself, only decorative camera
+    // punch. Every previous direct `this.cameras.main.shake(...)`/`.flash(...)` call site in
+    // this class now goes through these two helpers instead of calling the camera directly.
+    cameraShake(duration, intensity) {
+        if (window.SPIRITBALL_reducedMotion) return;
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.shake(duration, intensity);
+        }
+    }
+
+    cameraFlash(...args) {
+        if (window.SPIRITBALL_reducedMotion) return;
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.flash(...args);
+        }
+    }
+
+    // Skips purely decorative, non-essential looping animation (idle glow/pulse/rotation)
+    // under reduced motion, while essential feedback tweens (flipper swing, popups, plunger
+    // charge visuals) are left as direct this.tweens.add(...) calls elsewhere and always run.
+    addAmbientTween(config) {
+        if (window.SPIRITBALL_reducedMotion) return null;
+        return this.tweens.add(config);
+    }
+
     isOnCooldown(object) {
         return this.collisionCooldowns.has(object);
     }
@@ -3381,7 +3484,7 @@ class GameScene extends Phaser.Scene {
         });
 
         // Settings button
-        const settingsButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.71, '⚙ SETTINGS', buttonStyle)
+        const settingsButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.71, 'ℹ CONTROLS', buttonStyle)
             .setOrigin(0.5)
             .setDepth(2001)
             .setInteractive({ useHandCursor: true });
@@ -3415,9 +3518,10 @@ class GameScene extends Phaser.Scene {
 
         this.pauseOverlay = [bg, title, resumeButton, resumeBg, newGameButton, newGameBg, settingsButton, settingsBg, instructions];
 
-        // Keyboard controls
-        this.input.keyboard.once('keydown-ESC', () => this.resumeGame());
-        this.input.keyboard.once('keydown-SPACE', () => this.resumeGame());
+        // ESC/SPACE-to-resume are handled by the single persistent listener registered once
+        // in setupInput() - registering another once() listener here every time pauseGame()
+        // runs used to leak a dangling listener whenever the player resumed by clicking
+        // instead of pressing a key. See release-prompts/07-*.md.
     }
 
     resumeGame() {
@@ -3459,8 +3563,11 @@ class GameScene extends Phaser.Scene {
         // Background overlay
         const bg = this.add.rectangle(CONFIG.width / 2, CONFIG.height / 2, CONFIG.width, CONFIG.height, 0x000000, 0.9).setDepth(2000);
 
-        // Title
-        const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.2, 'SETTINGS', {
+        // Title. This screen used to be a Sound/Music Settings menu, but the game has no
+        // audio system at all - those toggles wrote a localStorage flag nothing ever read,
+        // which is misleading. Replaced with a real, working controls reference instead.
+        // See release-prompts/04-*.md.
+        const title = this.add.text(CONFIG.width / 2, CONFIG.height * 0.2, 'CONTROLS', {
             fontSize: '48px',
             fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
@@ -3470,82 +3577,43 @@ class GameScene extends Phaser.Scene {
             shadow: { offsetX: 3, offsetY: 3, color: '#000000', blur: 6, fill: true }
         }).setOrigin(0.5).setDepth(2001);
 
-        // Get current settings from localStorage
-        const soundEnabled = localStorage.getItem('spiritball-sound') !== 'false';
-        const musicEnabled = localStorage.getItem('spiritball-music') !== 'false';
+        const isMobileControls = window.gameInputManager && window.gameInputManager.isMobile;
+        const controlRows = isMobileControls ? [
+            ['◀ / ▶ BUTTONS', 'Left / Right Flippers'],
+            ['⚡ BUTTON', 'Hold to Charge, Release to Launch'],
+            ['⏸ BUTTON', 'Pause / Resume']
+        ] : [
+            ['LEFT / RIGHT ARROWS', 'Left / Right Flippers'],
+            ['SPACE', 'Hold to Charge, Release to Launch'],
+            ['ESC', 'Pause / Resume']
+        ];
 
-        // Sound toggle
-        const soundLabel = this.add.text(CONFIG.width / 2 - 100, CONFIG.height * 0.35, 'SOUND:', {
-            fontSize: '24px',
-            fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
-            fontStyle: 'bold',
-            color: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 3
-        }).setOrigin(0, 0.5).setDepth(2001);
+        const controlRowObjects = [];
+        let controlRowY = CONFIG.height * 0.34;
+        controlRows.forEach(([key, action]) => {
+            const keyText = this.add.text(CONFIG.width / 2, controlRowY, key, {
+                fontSize: '22px',
+                fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
+                fontStyle: 'bold',
+                color: '#00ffff',
+                stroke: '#000000',
+                strokeThickness: 3
+            }).setOrigin(0.5).setDepth(2001);
 
-        const soundToggle = this.add.text(CONFIG.width / 2 + 50, CONFIG.height * 0.35, soundEnabled ? 'ON' : 'OFF', {
-            fontSize: '24px',
-            fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
-            fontStyle: 'bold',
-            color: soundEnabled ? '#00ff00' : '#ff0000',
-            stroke: '#000000',
-            strokeThickness: 3,
-            backgroundColor: '#1a1a3e',
-            padding: { left: 20, right: 20, top: 10, bottom: 10 }
-        }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
+            const actionText = this.add.text(CONFIG.width / 2, controlRowY + 32, action, {
+                fontSize: '17px',
+                fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
+                color: '#ffffff',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setOrigin(0.5).setDepth(2001);
 
-        const soundToggleBg = this.add.rectangle(CONFIG.width / 2 + 50, CONFIG.height * 0.35, 100, 50, 0x1a1a3e)
-            .setDepth(2000)
-            .setStrokeStyle(3, soundEnabled ? 0x00ff00 : 0xff0000);
-
-        soundToggle.on('pointerdown', () => {
-            const newState = !soundEnabled;
-            localStorage.setItem('spiritball-sound', newState);
-            soundToggle.setText(newState ? 'ON' : 'OFF');
-            soundToggle.setColor(newState ? '#00ff00' : '#ff0000');
-            soundToggleBg.setStrokeStyle(3, newState ? 0x00ff00 : 0xff0000);
-            // Refresh settings menu to update state
-            this.showSettingsMenu();
-        });
-
-        // Music toggle
-        const musicLabel = this.add.text(CONFIG.width / 2 - 100, CONFIG.height * 0.45, 'MUSIC:', {
-            fontSize: '24px',
-            fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
-            fontStyle: 'bold',
-            color: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 3
-        }).setOrigin(0, 0.5).setDepth(2001);
-
-        const musicToggle = this.add.text(CONFIG.width / 2 + 50, CONFIG.height * 0.45, musicEnabled ? 'ON' : 'OFF', {
-            fontSize: '24px',
-            fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
-            fontStyle: 'bold',
-            color: musicEnabled ? '#00ff00' : '#ff0000',
-            stroke: '#000000',
-            strokeThickness: 3,
-            backgroundColor: '#1a1a3e',
-            padding: { left: 20, right: 20, top: 10, bottom: 10 }
-        }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
-
-        const musicToggleBg = this.add.rectangle(CONFIG.width / 2 + 50, CONFIG.height * 0.45, 100, 50, 0x1a1a3e)
-            .setDepth(2000)
-            .setStrokeStyle(3, musicEnabled ? 0x00ff00 : 0xff0000);
-
-        musicToggle.on('pointerdown', () => {
-            const newState = !musicEnabled;
-            localStorage.setItem('spiritball-music', newState);
-            musicToggle.setText(newState ? 'ON' : 'OFF');
-            musicToggle.setColor(newState ? '#00ff00' : '#ff0000');
-            musicToggleBg.setStrokeStyle(3, newState ? 0x00ff00 : 0xff0000);
-            // Refresh settings menu to update state
-            this.showSettingsMenu();
+            controlRowObjects.push(keyText, actionText);
+            controlRowY += 90;
         });
 
         // Back button
-        const backButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.70, '◄ BACK', {
+        const backButton = this.add.text(CONFIG.width / 2, CONFIG.height * 0.78, '◄ BACK', {
             fontSize: '28px',
             fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif',
             fontStyle: 'bold',
@@ -3556,7 +3624,7 @@ class GameScene extends Phaser.Scene {
             padding: { left: 30, right: 30, top: 15, bottom: 15 }
         }).setOrigin(0.5).setDepth(2001).setInteractive({ useHandCursor: true });
 
-        const backBg = this.add.rectangle(CONFIG.width / 2, CONFIG.height * 0.70, backButton.width + 40, backButton.height + 20, 0x1a1a3e)
+        const backBg = this.add.rectangle(CONFIG.width / 2, CONFIG.height * 0.78, backButton.width + 40, backButton.height + 20, 0x1a1a3e)
             .setDepth(2000)
             .setStrokeStyle(3, 0x00ffff);
 
@@ -3582,26 +3650,18 @@ class GameScene extends Phaser.Scene {
             this.pauseGame();
         });
 
-        this.settingsOverlay = [bg, title, soundLabel, soundToggle, soundToggleBg, musicLabel, musicToggle, musicToggleBg, backButton, backBg];
+        this.settingsOverlay = [bg, title, ...controlRowObjects, backButton, backBg];
 
-        // Keyboard control
-        this.input.keyboard.once('keydown-ESC', () => {
-            if (this.settingsOverlay) {
-                this.settingsOverlay.forEach(obj => {
-                    if (obj && obj.destroy) {
-                        obj.destroy();
-                    }
-                });
-                this.settingsOverlay = null;
-            }
-            this.pauseGame();
-        });
+        // ESC while in this submenu is handled by the single persistent listener in
+        // setupInput(), which checks for an open settingsOverlay and backs out to the pause
+        // menu instead of resuming - see release-prompts/07-*.md.
     }
     
     gameOver() {
         this.scene.start('GameOverScene', {
             score: this.gameState.score,
             highScore: this.gameState.highScore,
+            rank: this.gameState.rank,
             statistics: this.gameState.statistics
         });
     }
@@ -3613,6 +3673,7 @@ class GameOverScene extends Phaser.Scene {
     init(data) {
         this.finalScore = data.score;
         this.highScore = data.highScore;
+        this.rank = data.rank;
         this.statistics = data.statistics;
     }
     
@@ -3645,20 +3706,32 @@ class GameOverScene extends Phaser.Scene {
             }).setOrigin(0.5);
         }
 
-        // Show statistics
+        // Show statistics that actually exist in the current mission/rank system
+        // (previously this checked stats left over from an older chakra-based build that no
+        // longer exist, so nothing ever displayed here - see release-prompts/06-*.md)
         let statsY = 450;
-        if (this.statistics.enlightenmentCount > 0) {
-            this.add.text(CONFIG.width / 2, statsY, `Enlightenments: ${this.statistics.enlightenmentCount}`, {
-                fontSize: '20px', fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif', color: '#ffffff'
-            }).setOrigin(0.5);
-            statsY += 30;
-        }
 
-        if (this.statistics.saturnVortexEscapes > 0) {
-            this.add.text(CONFIG.width / 2, statsY, `Vortex Escapes: ${this.statistics.saturnVortexEscapes}`, {
-                fontSize: '20px', fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif', color: '#ffffff'
-            }).setOrigin(0.5);
-        }
+        const rankName = CONFIG.ranks[this.rank] || CONFIG.ranks[0];
+        this.add.text(CONFIG.width / 2, statsY, `Final Rank: ${rankName}`, {
+            fontSize: '20px', fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif', color: '#ffffff'
+        }).setOrigin(0.5);
+        statsY += 30;
+
+        const statLines = [
+            ['Missions Completed', this.statistics.missionsCompleted],
+            ['Bumper Hits', this.statistics.totalBumperHits],
+            ['Satellite Hits', this.statistics.totalSatelliteHits],
+            ['Lane Hits', this.statistics.totalLaneHits]
+        ];
+
+        statLines.forEach(([label, value]) => {
+            if (value > 0) {
+                this.add.text(CONFIG.width / 2, statsY, `${label}: ${value}`, {
+                    fontSize: '20px', fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif', color: '#ffffff'
+                }).setOrigin(0.5);
+                statsY += 30;
+            }
+        });
 
         const isMobile = window.gameInputManager && window.gameInputManager.isMobile;
         const playAgainText = isMobile ? 'TAP ⚡ TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
@@ -3738,6 +3811,12 @@ const gameConfig = {
         roundPixels: true
     }
 };
+
+// Read once at load: honors the OS/browser "reduce motion" accessibility preference for
+// decorative, non-essential canvas animation and camera punch (screen shake/flash). See
+// release-prompts/12-*.md. The CSS prefers-reduced-motion rule in styles.css only affects DOM
+// elements, not Phaser's on-canvas tweens/camera effects, so this flag is what those check.
+window.SPIRITBALL_reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
 window.performanceManager = new PerformanceManager();
 window.gameInputManager = new InputManager();
