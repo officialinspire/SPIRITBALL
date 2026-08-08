@@ -52,3 +52,15 @@ player has actually hit.
   of which physical fuel target the ball hit to refuel.
 - Hitting a fuel-refuel target increases the fuel count and the correct number of lights updates
   to "full," not just the specific sprite that was hit.
+
+---
+
+## Implementation note (2026-08-08)
+Added `updateFuelLightVisuals()`, which sets all 6 `this.fuelLights` sprites' tint/alpha as a
+fixed-order countdown bar based on `this.gameState.fuel` (indices `0..fuel-1` full, `fuel..5`
+low) — the same model `depleteFuel()` already used, just applied consistently everywhere fuel
+changes. Replaced the per-index tinting in `hitFuelLight()` with a call to this helper, replaced
+the countdown-index tinting in `depleteFuel()` with the same call, and added a call in
+`startMission()` (which resets fuel to full) so the lights are correctly all-lit the moment a
+mission starts rather than carrying over whatever state they were in from the previous mission.
+`node --check index.js` passes.

@@ -49,3 +49,27 @@
   `index.html`; a real favicon and apple-touch-icon are present and load without 404s.
 - Simulate a CDN failure (e.g. temporarily rename/block the Phaser `<script src>` in a local test)
   and confirm the page shows a clear message instead of a silent blank canvas.
+
+---
+
+## Implementation note (2026-08-08)
+Generated a simple icon set (`icons/icon-192.png`, `icons/icon-512.png`,
+`icons/apple-touch-icon.png` at 180×180, `icons/favicon-32.png`) matching the game's actual
+"cosmic eyeball" ball sprite (white sclera, cyan iris, dark pupil, magenta accent ring) so the
+icon is genuinely on-brand rather than a placeholder — total ~14 KB for all four sizes combined.
+Added `manifest.json` (name/short_name/start_url/standalone display/portrait orientation/icons)
+and linked it plus `<link rel="icon">`/`<link rel="apple-touch-icon">` from `index.html`.
+
+For CDN resilience: added an `onerror` handler on the primary Phaser `<script>` tag that injects
+a fallback `<script src="https://unpkg.com/phaser@3.60.0/...">` (set `async = false` so the
+browser's `window.load` event correctly waits for it rather than firing before it resolves), plus
+a final `window.load` check that shows a plain-language error message in `#game-container` if
+`Phaser` is still undefined after both attempts (blocked network, both CDNs down, etc.) instead
+of a silent blank canvas. The handler functions are defined in a `<script>` block placed *before*
+the Phaser CDN `<script>` tag (not after) — an earlier draft had it the other way around, which
+would have relied on the network request always being slower than parsing a few more lines of
+HTML to be safe; put the definitions first instead of relying on that timing assumption. Verified this sandbox's own network policy blocks `cdn.jsdelivr.net`
+outright (confirmed via the proxy's `__agentproxy/status` endpoint reporting `connect_rejected`
+for that host), so I could not do a full end-to-end live-browser verification of this fallback
+here — the logic was reviewed carefully by hand instead. Recommend a manual check (e.g. blocking
+the CDN domain via browser devtools' request-blocking) before shipping.

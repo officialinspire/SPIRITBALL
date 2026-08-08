@@ -57,3 +57,38 @@ General accessibility polish for the release. See `KNOWN_ISSUES.md` item 12.
 - With `prefers-reduced-motion: reduce` set in the OS/browser, camera shake/flash intensity and
   decorative canvas animation are visibly reduced, while core input feedback (flipper movement,
   ball trail) still functions.
+
+---
+
+## Implementation note (2026-08-08)
+**Zoom:** changed the viewport meta tag from `maximum-scale=1.0, user-scalable=no` to
+`maximum-scale=5.0` (dropping `user-scalable=no` entirely). `touch-action: manipulation` was
+already set on `*` in `styles.css`, which continues to prevent double-tap-zoom specifically on
+the game's buttons/canvas without needing to disable zoom globally.
+
+**Camera shake/flash:** added `window.SPIRITBALL_reducedMotion` (read once at load via
+`matchMedia('(prefers-reduced-motion: reduce)')`) plus two `GameScene` helpers, `cameraShake()`
+and `cameraFlash()`, that no-op when the flag is set. Replaced **every** direct
+`this.cameras.main.shake(...)`/`.flash(...)` call site in `GameScene` (21 shake + 5 flash calls)
+with the new helpers, so screen-shake/flash intensity effects from every hit handler, rank-up,
+death sequence, etc. are now fully suppressed under reduced motion — this was the main gap
+called out in the original issue (the existing CSS `prefers-reduced-motion` rule only ever
+touched DOM elements, never Phaser's canvas/camera effects).
+
+**Decorative ambient tweens:** added a third helper, `addAmbientTween()`, that also no-ops under
+reduced motion, and applied it to the specific looping animations named in the original issue as
+examples: chakra/fuel-light rotation and pulse (`setupChakras()`, 4 tweens), Saturn rotation and
+pulse (`setupSaturn()`, 2 tweens), and flipper idle glow (`setupFlippers()`, 2 tweens — distinct
+from the flipper *swing* tweens in `activate*Flipper()`, which are essential input feedback and
+were deliberately left untouched). Scoped this to those named examples rather than every single
+decorative tween in the file (ball rotation, obstacle pulsing, Grim Reaper bobbing, menu title
+animations, etc. were left as-is) to keep the change bounded and easy to review; a future pass
+could extend `addAmbientTween()` to more of them if desired.
+
+Verified `node --check index.js` passes and grepped to confirm no leftover direct
+`this.cameras.main.shake/flash` calls remain outside the two helper method bodies themselves (one
+easy mistake here: an initial `sed`-based rename accidentally rewrote the helpers' own internal
+`this.cameras.main.shake(...)` calls into self-recursive calls to themselves — caught immediately
+by rereading the diff and fixed before this was committed). Could not verify the visual result in
+an actual browser in this sandbox (Phaser's CDN is blocked by the environment's network policy) —
+recommend a manual check with the OS/browser's reduced-motion setting enabled before shipping.

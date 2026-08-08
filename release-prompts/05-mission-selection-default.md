@@ -51,3 +51,11 @@ selection step is a no-op until the player picks something *else*.
   hitting the launch ramp before hitting any mission target does not start a mission.
 - After hitting a mission-select target, the HUD updates to "Selected: <name>" and the ramp
   correctly starts that mission, exactly as before.
+
+---
+
+## Implementation note (2026-08-08)
+Changed `selectedMission` initial value to `null` in `create()`. Also added a small UX addition
+suggested in the original writeup: `hitLaunchRamp()` now shows a "SELECT A MISSION FIRST" popup
+when the ramp is hit with no mission selected and none active, instead of silently doing nothing.
+`node --check index.js` passes.

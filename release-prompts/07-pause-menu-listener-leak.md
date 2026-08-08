@@ -47,3 +47,17 @@ idempotent, but wasteful and a source of future bugs if that method ever becomes
   confirm no duplicate/triple resume side effects and no growing listener count.
 - ESC and (if kept) SPACE both still correctly resume from the paused state; SPACE still works
   normally for the plunger charge/launch when the game is *not* paused.
+
+---
+
+## Implementation note (2026-08-08)
+Removed the `once('keydown-ESC', ...)`/`once('keydown-SPACE', ...)` registrations from both
+`pauseGame()` and `showSettingsMenu()`. Replaced the single persistent `keydown-ESC` listener in
+`setupInput()` with one that checks `this.settingsOverlay`: if the Controls submenu is open, ESC
+backs out to the pause menu (matching the old submenu-specific behavior); otherwise it calls
+`handlePause()` as before. Also converted the persistent `keydown-SPACE` listener (previously
+always `handleLaunchPress()`) into one that resumes the game when paused at the top-level pause
+menu (`isPaused && !settingsOverlay`), and falls through to `handleLaunchPress()` otherwise —
+preserving the original "SPACE resumes from the main pause menu, but not from the Controls
+submenu" behavior with a single set of persistent listeners instead of leaking a fresh pair on
+every pause. `node --check index.js` passes.

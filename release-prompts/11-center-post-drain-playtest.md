@@ -56,3 +56,40 @@ reaching either a flipper hit or the drain overlap — that requires actually ru
 - If a fix was made, confirm the ball still reaches the drain reliably in the normal case (missed
   flip → drains within a couple seconds) and that flipper collisions near the post still behave
   correctly.
+
+---
+
+## Implementation note (2026-08-08) — analysis only, not a live playtest
+Could not run this in an actual browser: this sandbox's outbound network policy blocks
+`cdn.jsdelivr.net` (confirmed via `curl "$HTTPS_PROXY/__agentproxy/status"`, which reports
+`connect_rejected` / gateway 403 for that host, including when routing through the proxy with
+`--ignore-certificate-errors`), and Phaser is loaded exclusively from that CDN, so the game
+cannot initialize in this environment. Rather than fabricate a "played and confirmed fine"
+result, did the next best thing: a precise geometric analysis using the actual current
+coordinates in the code (after the item-1 flipper fix, since that changes this exact area).
+
+**Numbers used:** `centerPost` center `(270, 900)`, radius `8` (`setupTable()`). `leftFlipper`
+center `(190, 880)`, `rightFlipper` center `(350, 880)`, both now circular colliders of radius
+`62` (`setupFlippers()`, post-fix-1). Ball radius `20` (diameter `40`).
+
+**Finding:** distance from either flipper's center to the post's center is
+`sqrt(80² + 20²) ≈ 82.5px`. Subtracting the two radii (`62 + 8 = 70`) leaves **~12.5px of actual
+clearance** between the post and each flipper's collider — far too narrow for a 40px-diameter
+ball to pass through. This means a direct center-line drain (rolling straight down between both
+flippers) is **geometrically impossible** in the current layout; the post fully blocks it. This
+isn't a regression from the item-1 fix — the old rectangular flipper hitbox left a very similar
+~12px gap to the post, so this was already true before this session's changes.
+
+**Is this a problem?** Not obviously. All drains still work correctly through the outlanes (a
+ball resting against the left/right wall has its center at x≈50/490 — exactly inside the outlane
+trigger zone — with no collider blocking its path down to the drain zone, verified by the same
+coordinate check). The practical effect is just that this game variant has no "center drain"
+outcome, only outlane drains, which is arguably more forgiving, not broken. Given the existing
+ball-bounce coefficient (0.75), drag, and the generic minimum-velocity wall-nudge (which already
+applies to `centerPost` as a member of `this.walls`), a permanent frozen-ball state seems unlikely
+from this analysis, but that is a judgment call, not an observation from actual play.
+
+**Recommendation:** treat this item as reviewed-but-open. Before shipping, do a real playtest
+(desktop and a touch device) specifically trying to send the ball down the center gap at various
+speeds/angles, watching for multi-second oscillation or a ball that never resolves. `KNOWN_ISSUES.md`
+item 11 has been updated to ⚠️ REVIEWED rather than ✅ FIXED to reflect this honestly.

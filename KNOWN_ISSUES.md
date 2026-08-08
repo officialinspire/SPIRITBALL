@@ -1,9 +1,11 @@
 # SPIRITBALL — Known Issues & Release Stability Report
 
 **Date:** 2026-08-08
-**Status update (2026-08-08, same day):** Items 1–4 below have been fixed in this branch —
-see the corresponding `release-prompts/01-04-*.md` files, which now double as a record of what
-was changed and why. Items 5–12 are still open.
+**Status update (2026-08-08, same day):** Items 1–10 and 12 have been fixed in this branch — see
+the corresponding `release-prompts/NN-*.md` files, which now double as a record of what was
+changed and why. Item 11 was reviewed via geometric/physics analysis (live in-browser playtesting
+wasn't possible in the sandbox this work was done in — see its entry below and
+`release-prompts/11-*.md` for details and what's still recommended before shipping).
 **Scope:** `index.html`, `index.js`, `styles.css` (current XP-Pinball-mechanics build, v5.0)
 **Supersedes:** `CODE_REVIEW_REPORT.md` (Dec 5 2025), which reviewed an older chakra/combo-based
 build and concluded "no blocking bugs." That build no longer matches the code — the game has
@@ -71,7 +73,7 @@ target — the mission is meaningless.
 promises functionality that doesn't exist, which reads as broken to players.
 → **`release-prompts/04-audio-system-or-remove-toggle.md`**
 
-### 5. Mission auto-selected before the player does anything
+### 5. Mission auto-selected before the player does anything — ✅ FIXED
 `gameState.selectedMission` defaults to `0` (not `null`) in `create()` (~L1012), but
 `updateHUD()` and `hitLaunchRamp()` treat "a mission is selected" as `selectedMission !== null`.
 So "Launch Training" is considered selected from the first frame of gameplay, before the player
@@ -83,7 +85,7 @@ launch ramp start a mission the player never chose and the HUD never asked them 
 
 ## Medium — content correctness / stability
 
-### 6. Game Over screen shows stats that no longer exist
+### 6. Game Over screen shows stats that no longer exist — ✅ FIXED
 `GameOverScene.create()` (~L3650) reads `this.statistics.enlightenmentCount` and
 `this.statistics.saturnVortexEscapes` — leftovers from the old chakra/combo build. The current
 `gameState.statistics` object (~L1048) only has `missionsCompleted`, `totalBumperHits`,
@@ -92,7 +94,7 @@ Game Over screen never shows *any* stats line, even though real mission-era data
 should be displayed (missions completed, rank reached, bumper/satellite hits).
 → **`release-prompts/06-game-over-stats.md`**
 
-### 7. Pause menu leaks keyboard listeners over a long session
+### 7. Pause menu leaks keyboard listeners over a long session — ✅ FIXED
 `pauseGame()` (~L3299) registers `this.input.keyboard.once('keydown-ESC', …)` and
 `once('keydown-SPACE', …)` every time it runs, in addition to the persistent `on('keydown-ESC', …)`
 listener from `setupInput()`. If the player resumes via clicking "RESUME GAME" (pointer, not
@@ -102,7 +104,7 @@ duplicate listeners (each harmless individually, since `resumeGame()` is idempot
 unbounded leak and causes a single ESC press to fire `resumeGame()` multiple times).
 → **`release-prompts/07-pause-menu-listener-leak.md`**
 
-### 8. Fuel-light targets on the playfield can show the wrong on/off state
+### 8. Fuel-light targets on the playfield can show the wrong on/off state — ✅ FIXED
 `hitFuelLight()` (~L2564) lights up the specific fuel-target sprite the ball just hit (indexed
 by `index`, the physical target). `depleteFuel()` (~L2994) instead dims the sprite at array
 index `this.gameState.fuel` (the remaining-fuel count). These two indexing schemes aren't the
@@ -115,7 +117,7 @@ correct since it just iterates `0..fuel-1`; only the decorative playfield lights
 
 ## Medium — mobile/desktop production readiness
 
-### 9. 3 MB background image and unused multi-MB assets
+### 9. 3 MB background image and unused multi-MB assets — ✅ FIXED
 `background.png` loaded in `BootScene.preload()` is **3.1 MB**, loaded on every session before
 the menu even shows — a real first-load delay on mobile data connections. The repo also contains
 `psychedelic-pinball-playfield.jpg` (1.3 MB) and `chakras_example.png` (125 KB) that are **never
@@ -125,7 +127,7 @@ the whole repo directory is deployed as static hosting, that's several MB of dea
 to every mobile visitor.
 → **`release-prompts/09-asset-optimization.md`**
 
-### 10. No PWA manifest / icons, no CDN-failure fallback
+### 10. No PWA manifest / icons, no CDN-failure fallback — ✅ FIXED
 `index.html` sets `mobile-web-app-capable` / `apple-mobile-web-app-capable` meta tags implying
 "Add to Home Screen" support, but there's no `<link rel="manifest">`, no `apple-touch-icon`, and
 no favicon — home-screen installs get a blank/default icon. Separately, Phaser is loaded from a
@@ -134,17 +136,27 @@ blocked (corporate wifi, ad-blocker, offline) — the page just shows a blank ca
 nothing telling the player what happened.
 → **`release-prompts/10-pwa-and-cdn-resilience.md`**
 
-### 11. Center post / flipper-gap geometry needs a physical playtest pass
+### 11. Center post / flipper-gap geometry — ⚠️ REVIEWED, not live-playtested
 `setupTable()` places a static `centerPost` circle at `(width/2, height-60)`, sitting directly in
-the ~40px gap between the two flippers. Combined with the fact the "drain" is really just the
-ball resting against the invisible world-bounds floor and overlapping the drain-zone rectangle
-(not a true open gap), there's a real risk of the ball getting trapped oscillating between the
-post, the flipper bases, and the floor without a clean path to either a flipper hit or the drain.
-`checkBallStuck()`'s generic low-speed nudge may not reliably resolve a geometric pocket. This
-needs an actual playtest pass (desktop + touch) rather than a pure code read to confirm severity.
-→ **`release-prompts/11-center-post-drain-playtest.md`**
+the gap between the two flippers. Live in-browser playtesting wasn't possible in the sandbox this
+work was done in (its outbound network policy blocks the Phaser CDN), so this was instead
+reviewed analytically using the actual current coordinates: `centerPost` is at `(270, 900)` with
+radius 8; after the item-1 flipper fix, `leftFlipper`/`rightFlipper` are circular colliders of
+radius 62 centered at `(190, 880)`/`(350, 880)`. Distance from either flipper center to the post
+center is `sqrt(80² + 20²) ≈ 82.5px`; subtracting the two radii (`62 + 8 = 70`) leaves only
+**~12.5px of clearance** on each side of the post — well under the ball's 40px diameter. So the
+ball can **never** physically fit between the post and a flipper: a direct center-line drain
+(the classic "missed both flippers" case) is geometrically impossible here, and every drain must
+go through the outlanes instead (verified those work: a ball resting against the left/right wall
+has its center at x≈50/490, exactly inside the outlane trigger zone, with no collider blocking
+its path down to the drain zone). Given the existing bounce coefficient (0.75), drag, and the
+generic wall-collision minimum-velocity nudge (all of which already apply to `centerPost` as a
+member of `this.walls`), a hard, permanent freeze in this pocket seems unlikely, but this is an
+analytical judgment, not a confirmed observation from actual play.
+→ **`release-prompts/11-center-post-drain-playtest.md`** (updated with this analysis; a manual
+desktop + mobile playtest of this specific area is still recommended before shipping)
 
-### 12. Accessibility: zoom disabled, reduced-motion doesn't cover the canvas
+### 12. Accessibility: zoom disabled, reduced-motion doesn't cover the canvas — ✅ FIXED
 `index.html`'s viewport meta sets `user-scalable=no, maximum-scale=1.0`, blocking pinch-zoom for
 low-vision users. `styles.css`'s `prefers-reduced-motion` block only affects CSS
 animations/transitions on DOM elements (buttons, etc.) — it has no effect on the dozens of

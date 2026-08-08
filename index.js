@@ -369,7 +369,7 @@ class BootScene extends Phaser.Scene {
         }).setOrigin(0.5);
 
         // Load background image
-        this.load.image('background', 'background.png');
+        this.load.image('background', 'background.webp');
 
         // Load new psychedelic assets
         this.load.image('saturn-psychedelic', 'saturn_example.webp');
@@ -1026,7 +1026,7 @@ class GameScene extends Phaser.Scene {
 
             // XP Pinball: Mission System
             activeMission: null, // Currently active mission object
-            selectedMission: 0, // Selected mission index (0-2)
+            selectedMission: null, // Selected mission index (0-2), null = nothing selected yet
             missionProgress: 0, // Progress towards current mission
             missionActive: false, // Is a mission currently running
             missionTargetsLit: [false, false, false], // Mission selection targets
@@ -1241,8 +1241,8 @@ class GameScene extends Phaser.Scene {
             target.body.setCircle(25);
             target.missionIndex = i; // Store which mission this represents
 
-            // Add rotation animation
-            this.tweens.add({
+            // Add rotation animation (decorative - skipped under reduced motion)
+            this.addAmbientTween({
                 targets: target,
                 angle: 360,
                 duration: 2500 + (i * 300),
@@ -1250,8 +1250,8 @@ class GameScene extends Phaser.Scene {
                 ease: 'Linear'
             });
 
-            // Add pulsing glow
-            this.tweens.add({
+            // Add pulsing glow (decorative - skipped under reduced motion)
+            this.addAmbientTween({
                 targets: target,
                 scale: 0.75,
                 alpha: 0.7,
@@ -1278,8 +1278,8 @@ class GameScene extends Phaser.Scene {
             fuel.body.setCircle(20);
             fuel.fuelIndex = i; // Store which fuel light this represents
 
-            // Add rotation animation
-            this.tweens.add({
+            // Add rotation animation (decorative - skipped under reduced motion)
+            this.addAmbientTween({
                 targets: fuel,
                 angle: 360,
                 duration: 3000 + (i * 200),
@@ -1287,8 +1287,8 @@ class GameScene extends Phaser.Scene {
                 ease: 'Linear'
             });
 
-            // Add pulsing glow
-            this.tweens.add({
+            // Add pulsing glow (decorative - skipped under reduced motion)
+            this.addAmbientTween({
                 targets: fuel,
                 scale: 0.65,
                 alpha: 0.8,
@@ -1313,8 +1313,8 @@ class GameScene extends Phaser.Scene {
         this.physics.add.existing(this.saturn, true);
         this.saturn.body.setCircle(50);
 
-        // Rotation animation for Saturn
-        this.tweens.add({
+        // Rotation animation for Saturn (decorative - skipped under reduced motion)
+        this.addAmbientTween({
             targets: this.saturn,
             angle: 360,
             duration: 6000,
@@ -1322,8 +1322,8 @@ class GameScene extends Phaser.Scene {
             ease: 'Linear'
         });
 
-        // Pulsing effect for Saturn
-        this.tweens.add({
+        // Pulsing effect for Saturn (decorative - skipped under reduced motion)
+        this.addAmbientTween({
             targets: this.saturn,
             scale: { from: 0.35, to: 0.38 },
             duration: 2000,
@@ -1666,8 +1666,8 @@ class GameScene extends Phaser.Scene {
         this.leftFlipper.setDepth(99);
         this.leftFlipper.setAngle(20); // Resting position angled upward
 
-        // Add glow effect to left flipper
-        this.tweens.add({
+        // Add glow effect to left flipper (decorative - skipped under reduced motion)
+        this.addAmbientTween({
             targets: this.leftFlipper,
             alpha: 0.85,
             duration: 800,
@@ -1687,8 +1687,8 @@ class GameScene extends Phaser.Scene {
         this.rightFlipper.setDepth(99);
         this.rightFlipper.setAngle(-20); // Resting position angled upward
 
-        // Add glow effect to right flipper
-        this.tweens.add({
+        // Add glow effect to right flipper (decorative - skipped under reduced motion)
+        this.addAmbientTween({
             targets: this.rightFlipper,
             alpha: 0.85,
             duration: 800,
@@ -1841,7 +1841,7 @@ class GameScene extends Phaser.Scene {
             this.physics.add.collider(this.ball, wall, (ball, wall) => {
                 if (ball.body && ball.body.touching) {
                     if (this.cameras && this.cameras.main) {
-                        this.cameras.main.shake(40, 0.003);
+                        this.cameraShake(40, 0.003);
                     }
                     const minVelocity = 100;
                     if (Math.abs(ball.body.velocity.x) < minVelocity && ball.body.touching.left) {
@@ -2126,9 +2126,36 @@ class GameScene extends Phaser.Scene {
         this.input.keyboard.on('keyup-LEFT', () => this.deactivateLeftFlipper());
         this.input.keyboard.on('keydown-RIGHT', () => this.activateRightFlipper());
         this.input.keyboard.on('keyup-RIGHT', () => this.deactivateRightFlipper());
-        this.input.keyboard.on('keydown-SPACE', () => this.handleLaunchPress());
         this.input.keyboard.on('keyup-SPACE', () => this.handleLaunchRelease());
-        this.input.keyboard.on('keydown-ESC', () => this.handlePause());
+
+        // SPACE has two jobs depending on pause state: charge/launch the plunger during play,
+        // or resume the game from the top-level pause menu (not from the Controls submenu,
+        // matching the original behavior). A single persistent listener here avoids the
+        // dangling once()-listener leak that used to come from re-registering a resume
+        // shortcut every time the pause menu opened - see release-prompts/07-*.md.
+        this.input.keyboard.on('keydown-SPACE', () => {
+            if (this.gameState.isPaused) {
+                if (!this.settingsOverlay) {
+                    this.resumeGame();
+                }
+                return;
+            }
+            this.handleLaunchPress();
+        });
+
+        // ESC always toggles pause, except when the Controls submenu is open, where it backs
+        // out to the pause menu instead of resuming outright.
+        this.input.keyboard.on('keydown-ESC', () => {
+            if (this.gameState.isPaused && this.settingsOverlay) {
+                this.settingsOverlay.forEach(obj => {
+                    if (obj && obj.destroy) obj.destroy();
+                });
+                this.settingsOverlay = null;
+                this.pauseGame();
+                return;
+            }
+            this.handlePause();
+        });
 
         // Create keyboard object for direct key checking (more reliable for launch)
         this.keys = {
@@ -2456,7 +2483,7 @@ class GameScene extends Phaser.Scene {
             );
 
             if (this.cameras && this.cameras.main) {
-                this.cameras.main.shake(150, 0.008);
+                this.cameraShake(150, 0.008);
             }
 
             // Cooldown here is longer than a single frame so a ball still inside the (larger)
@@ -2489,7 +2516,7 @@ class GameScene extends Phaser.Scene {
             );
 
             if (this.cameras && this.cameras.main) {
-                this.cameras.main.shake(150, 0.008);
+                this.cameraShake(150, 0.008);
             }
 
             this.time.delayedCall(150, () => {
@@ -2584,7 +2611,7 @@ class GameScene extends Phaser.Scene {
         this.gameState.missionTargetsLit[index] = true;
 
         this.addScore(CONFIG.scores.missionTarget);
-        this.cameras.main.shake(60, 0.002);
+        this.cameraShake(60, 0.002);
 
         // Visual feedback
         target.setTint(CONFIG.colors.missionActive);
@@ -2605,13 +2632,29 @@ class GameScene extends Phaser.Scene {
         if (this.gameState.fuel < CONFIG.fuelLightCount) {
             this.gameState.fuel++;
             this.gameState.fuelLights[index] = true;
-            fuel.setAlpha(1);
-            fuel.setTint(CONFIG.colors.fuelFull);
+            this.updateFuelLightVisuals();
 
             this.addScore(CONFIG.scores.fuelTarget);
-            this.cameras.main.shake(50, 0.002);
+            this.cameraShake(50, 0.002);
             this.showPopup('+FUEL', fuel.x, fuel.y - 40, 18);
             this.updateHUD();
+        }
+    }
+
+    // Keeps the 6 fuel-light sprites on the playfield in sync with the actual fuel count as a
+    // simple fixed-order countdown bar (lights 0..fuel-1 full, fuel..5 low) - rather than the
+    // previous scheme where refueling lit whichever specific target was hit while depletion
+    // dimmed by remaining-count index, which could disagree with each other. See
+    // release-prompts/08-*.md.
+    updateFuelLightVisuals() {
+        for (let i = 0; i < this.fuelLights.length; i++) {
+            if (i < this.gameState.fuel) {
+                this.fuelLights[i].setAlpha(1);
+                this.fuelLights[i].setTint(CONFIG.colors.fuelFull);
+            } else {
+                this.fuelLights[i].setAlpha(0.3);
+                this.fuelLights[i].setTint(CONFIG.colors.fuelLow);
+            }
         }
     }
 
@@ -2650,7 +2693,7 @@ class GameScene extends Phaser.Scene {
         }
 
         // Strong visual/audio feedback
-        this.cameras.main.shake(120, 0.006);
+        this.cameraShake(120, 0.006);
         this.tweens.add({
             targets: bumper,
             scale: 1.15,
@@ -2676,7 +2719,7 @@ class GameScene extends Phaser.Scene {
         this.gameState.statistics.totalSatelliteHits++;
 
         this.addScore(CONFIG.scores.satellite);
-        this.cameras.main.shake(120, 0.005);
+        this.cameraShake(120, 0.005);
 
         // Check if this advances current mission
         if (this.gameState.missionActive && this.gameState.activeMission) {
@@ -2712,7 +2755,7 @@ class GameScene extends Phaser.Scene {
     hitGrimReaperDecor() {
         // Psychedelic Grim Reaper decorative element behavior
         this.addScore(750);
-        this.cameras.main.shake(100, 0.004);
+        this.cameraShake(100, 0.004);
 
         // Bounce away with extra flair
         if (this.ball.body) {
@@ -2753,9 +2796,10 @@ class GameScene extends Phaser.Scene {
         const laneIndex = lane.laneIndex;
         this.gameState.reentryLanes[laneIndex] = true;
         this.gameState.allLaneHits++;
+        this.gameState.statistics.totalLaneHits++;
 
         this.addScore(CONFIG.scores.reentryLane);
-        this.cameras.main.shake(80, 0.003);
+        this.cameraShake(80, 0.003);
 
         // Light up the lane
         lane.setFillStyle(CONFIG.colors.missionActive, 0.5);
@@ -2791,7 +2835,7 @@ class GameScene extends Phaser.Scene {
     hitLaunchRamp() {
         // XP Pinball launch ramp - starts selected mission
         this.addScore(CONFIG.scores.launchRamp);
-        this.cameras.main.shake(90, 0.003);
+        this.cameraShake(90, 0.003);
 
         // Start mission if one is selected
         if (!this.gameState.missionActive && this.gameState.selectedMission !== null) {
@@ -2802,6 +2846,8 @@ class GameScene extends Phaser.Scene {
                 this.gameState.missionProgress++;
                 this.checkMissionComplete();
             }
+        } else if (!this.gameState.missionActive) {
+            this.showPopup('SELECT A MISSION FIRST', CONFIG.width / 2, CONFIG.height / 2, 20);
         }
 
         this.showPopup('LAUNCH RAMP!', this.launchRampZone.x, this.launchRampZone.y - 40, 20);
@@ -2811,8 +2857,8 @@ class GameScene extends Phaser.Scene {
     hitBonusLane() {
         // XP Pinball bonus lane - big points
         this.addScore(CONFIG.scores.bonusLane);
-        this.cameras.main.shake(150, 0.006);
-        this.cameras.main.flash(300);
+        this.cameraShake(150, 0.006);
+        this.cameraFlash(300);
 
         // Award multiplier progress
         if (this.gameState.multiplierIndex < CONFIG.multipliers.length - 1) {
@@ -2849,7 +2895,7 @@ class GameScene extends Phaser.Scene {
         }
 
         this.addScore(points);
-        this.cameras.main.shake(60, 0.002);
+        this.cameraShake(60, 0.002);
     }
 
     hitSlingshot(slingshot) {
@@ -2871,7 +2917,7 @@ class GameScene extends Phaser.Scene {
         }
 
         // Visual feedback
-        this.cameras.main.shake(120, 0.005);
+        this.cameraShake(120, 0.005);
         this.tweens.add({
             targets: slingshot,
             alpha: 1,
@@ -2885,7 +2931,7 @@ class GameScene extends Phaser.Scene {
     hitInlane(inlane) {
         // Inlane - safe return to flippers with bonus points
         this.addScore(500);
-        this.cameras.main.shake(80, 0.003);
+        this.cameraShake(80, 0.003);
 
         inlane.setFillStyle(0x00ff00, 0.8);
         this.tweens.add({
@@ -2901,7 +2947,7 @@ class GameScene extends Phaser.Scene {
     hitOutlane(outlane) {
         // Outlane - dangerous area that drains the ball
         this.addScore(200);
-        this.cameras.main.shake(100, 0.004);
+        this.cameraShake(100, 0.004);
 
         outlane.setFillStyle(0xff0000, 0.8);
         this.tweens.add({
@@ -2928,9 +2974,10 @@ class GameScene extends Phaser.Scene {
         this.gameState.fuelDepleting = true;
         this.gameState.lastFuelDepletion = Date.now();
         this.gameState.missionStartTime = Date.now();
+        this.updateFuelLightVisuals();
 
-        this.cameras.main.shake(150, 0.006);
-        this.cameras.main.flash(400);
+        this.cameraShake(150, 0.006);
+        this.cameraFlash(400);
         this.showPopup(`MISSION: ${mission.name}`, CONFIG.width / 2, CONFIG.height / 2 - 50, 28);
         this.showPopup(mission.description, CONFIG.width / 2, CONFIG.height / 2, 18);
 
@@ -2986,8 +3033,8 @@ class GameScene extends Phaser.Scene {
         this.gameState.rankProgress++;
 
         // Visual celebration
-        this.cameras.main.shake(250, 0.008);
-        this.cameras.main.flash(600);
+        this.cameraShake(250, 0.008);
+        this.cameraFlash(600);
         this.showPopup('MISSION COMPLETE!', CONFIG.width / 2, CONFIG.height / 2 - 50, 36);
         this.showPopup(`+${CONFIG.scores.missionComplete}`, CONFIG.width / 2, CONFIG.height / 2 + 20, 28);
 
@@ -3018,8 +3065,8 @@ class GameScene extends Phaser.Scene {
 
             this.addScore(CONFIG.scores.rankUp);
 
-            this.cameras.main.shake(400, 0.01);
-            this.cameras.main.flash(1000);
+            this.cameraShake(400, 0.01);
+            this.cameraFlash(1000);
             this.showPopup('RANK UP!', CONFIG.width / 2, CONFIG.height / 2 - 60, 44);
             this.showPopup(CONFIG.ranks[this.gameState.rank], CONFIG.width / 2, CONFIG.height / 2, 36);
 
@@ -3034,12 +3081,7 @@ class GameScene extends Phaser.Scene {
         if (now - this.gameState.lastFuelDepletion >= this.gameState.fuelDepletionRate) {
             this.gameState.fuel--;
             this.gameState.lastFuelDepletion = now;
-
-            // Update fuel light visuals
-            if (this.gameState.fuel >= 0 && this.gameState.fuel < this.fuelLights.length) {
-                this.fuelLights[this.gameState.fuel].setAlpha(0.3);
-                this.fuelLights[this.gameState.fuel].setTint(CONFIG.colors.fuelLow);
-            }
+            this.updateFuelLightVisuals();
 
             if (this.gameState.fuel <= 0) {
                 this.abortMission();
@@ -3062,7 +3104,7 @@ class GameScene extends Phaser.Scene {
         });
 
         this.showPopup('MISSION ABORTED', CONFIG.width / 2, CONFIG.height / 2, 32);
-        this.cameras.main.shake(120, 0.004);
+        this.cameraShake(120, 0.004);
 
         this.updateHUD();
     }
@@ -3138,8 +3180,8 @@ class GameScene extends Phaser.Scene {
 
         // Screen effect
         if (this.cameras && this.cameras.main) {
-            this.cameras.main.shake(400, 0.008);
-            this.cameras.main.flash(200, 255, 0, 0, true);
+            this.cameraShake(400, 0.008);
+            this.cameraFlash(200, 255, 0, 0, true);
         }
     }
     
@@ -3232,7 +3274,7 @@ class GameScene extends Phaser.Scene {
         // Shake intensity based on power - with safety check
         if (this.cameras && this.cameras.main) {
             const shakeIntensity = 0.002 + (power / CONFIG.plungerMaxPower) * 0.005;
-            this.cameras.main.shake(150, shakeIntensity);
+            this.cameraShake(150, shakeIntensity);
         }
 
         // Visual feedback
@@ -3318,6 +3360,34 @@ class GameScene extends Phaser.Scene {
         });
     }
     
+    // Intensity-only feedback (screen shake/flash) skips entirely when the player has asked
+    // their OS/browser to reduce motion (window.SPIRITBALL_reducedMotion, set once at load
+    // from prefers-reduced-motion - see release-prompts/12-*.md). This does not touch
+    // essential input feedback like the flipper swing tween itself, only decorative camera
+    // punch. Every previous direct `this.cameras.main.shake(...)`/`.flash(...)` call site in
+    // this class now goes through these two helpers instead of calling the camera directly.
+    cameraShake(duration, intensity) {
+        if (window.SPIRITBALL_reducedMotion) return;
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.shake(duration, intensity);
+        }
+    }
+
+    cameraFlash(...args) {
+        if (window.SPIRITBALL_reducedMotion) return;
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.flash(...args);
+        }
+    }
+
+    // Skips purely decorative, non-essential looping animation (idle glow/pulse/rotation)
+    // under reduced motion, while essential feedback tweens (flipper swing, popups, plunger
+    // charge visuals) are left as direct this.tweens.add(...) calls elsewhere and always run.
+    addAmbientTween(config) {
+        if (window.SPIRITBALL_reducedMotion) return null;
+        return this.tweens.add(config);
+    }
+
     isOnCooldown(object) {
         return this.collisionCooldowns.has(object);
     }
@@ -3448,9 +3518,10 @@ class GameScene extends Phaser.Scene {
 
         this.pauseOverlay = [bg, title, resumeButton, resumeBg, newGameButton, newGameBg, settingsButton, settingsBg, instructions];
 
-        // Keyboard controls
-        this.input.keyboard.once('keydown-ESC', () => this.resumeGame());
-        this.input.keyboard.once('keydown-SPACE', () => this.resumeGame());
+        // ESC/SPACE-to-resume are handled by the single persistent listener registered once
+        // in setupInput() - registering another once() listener here every time pauseGame()
+        // runs used to leak a dangling listener whenever the player resumed by clicking
+        // instead of pressing a key. See release-prompts/07-*.md.
     }
 
     resumeGame() {
@@ -3581,24 +3652,16 @@ class GameScene extends Phaser.Scene {
 
         this.settingsOverlay = [bg, title, ...controlRowObjects, backButton, backBg];
 
-        // Keyboard control
-        this.input.keyboard.once('keydown-ESC', () => {
-            if (this.settingsOverlay) {
-                this.settingsOverlay.forEach(obj => {
-                    if (obj && obj.destroy) {
-                        obj.destroy();
-                    }
-                });
-                this.settingsOverlay = null;
-            }
-            this.pauseGame();
-        });
+        // ESC while in this submenu is handled by the single persistent listener in
+        // setupInput(), which checks for an open settingsOverlay and backs out to the pause
+        // menu instead of resuming - see release-prompts/07-*.md.
     }
     
     gameOver() {
         this.scene.start('GameOverScene', {
             score: this.gameState.score,
             highScore: this.gameState.highScore,
+            rank: this.gameState.rank,
             statistics: this.gameState.statistics
         });
     }
@@ -3610,6 +3673,7 @@ class GameOverScene extends Phaser.Scene {
     init(data) {
         this.finalScore = data.score;
         this.highScore = data.highScore;
+        this.rank = data.rank;
         this.statistics = data.statistics;
     }
     
@@ -3642,20 +3706,32 @@ class GameOverScene extends Phaser.Scene {
             }).setOrigin(0.5);
         }
 
-        // Show statistics
+        // Show statistics that actually exist in the current mission/rank system
+        // (previously this checked stats left over from an older chakra-based build that no
+        // longer exist, so nothing ever displayed here - see release-prompts/06-*.md)
         let statsY = 450;
-        if (this.statistics.enlightenmentCount > 0) {
-            this.add.text(CONFIG.width / 2, statsY, `Enlightenments: ${this.statistics.enlightenmentCount}`, {
-                fontSize: '20px', fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif', color: '#ffffff'
-            }).setOrigin(0.5);
-            statsY += 30;
-        }
 
-        if (this.statistics.saturnVortexEscapes > 0) {
-            this.add.text(CONFIG.width / 2, statsY, `Vortex Escapes: ${this.statistics.saturnVortexEscapes}`, {
-                fontSize: '20px', fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif', color: '#ffffff'
-            }).setOrigin(0.5);
-        }
+        const rankName = CONFIG.ranks[this.rank] || CONFIG.ranks[0];
+        this.add.text(CONFIG.width / 2, statsY, `Final Rank: ${rankName}`, {
+            fontSize: '20px', fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif', color: '#ffffff'
+        }).setOrigin(0.5);
+        statsY += 30;
+
+        const statLines = [
+            ['Missions Completed', this.statistics.missionsCompleted],
+            ['Bumper Hits', this.statistics.totalBumperHits],
+            ['Satellite Hits', this.statistics.totalSatelliteHits],
+            ['Lane Hits', this.statistics.totalLaneHits]
+        ];
+
+        statLines.forEach(([label, value]) => {
+            if (value > 0) {
+                this.add.text(CONFIG.width / 2, statsY, `${label}: ${value}`, {
+                    fontSize: '20px', fontFamily: 'Righteous, Monoton, Orbitron, Arial, sans-serif', color: '#ffffff'
+                }).setOrigin(0.5);
+                statsY += 30;
+            }
+        });
 
         const isMobile = window.gameInputManager && window.gameInputManager.isMobile;
         const playAgainText = isMobile ? 'TAP ⚡ TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
@@ -3735,6 +3811,12 @@ const gameConfig = {
         roundPixels: true
     }
 };
+
+// Read once at load: honors the OS/browser "reduce motion" accessibility preference for
+// decorative, non-essential canvas animation and camera punch (screen shake/flash). See
+// release-prompts/12-*.md. The CSS prefers-reduced-motion rule in styles.css only affects DOM
+// elements, not Phaser's on-canvas tweens/camera effects, so this flag is what those check.
+window.SPIRITBALL_reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
 window.performanceManager = new PerformanceManager();
 window.gameInputManager = new InputManager();

@@ -47,3 +47,16 @@ passes `statistics` through to `GameOverScene` correctly — the data is availab
 - Play through a game that completes at least one mission and hits at least one bumper/satellite,
   then lose all balls — the Game Over screen shows real, correct numbers for what happened in
   that game (not zero, not `undefined`, not stale chakra-era labels).
+
+---
+
+## Implementation note (2026-08-08)
+`gameOver()` now passes `rank: this.gameState.rank` alongside score/highScore/statistics, and
+`GameOverScene.init()` reads it. Replaced the two dead `enlightenmentCount`/`saturnVortexEscapes`
+conditionals with a "Final Rank: <name>" line (always shown) plus conditional lines for
+`missionsCompleted`, `totalBumperHits`, `totalSatelliteHits`, and `totalLaneHits` (only shown when
+`> 0`, matching the original short-game-shows-no-wall-of-zeroes intent). While in this area,
+noticed `totalLaneHits` was declared in `gameState.statistics` but never actually incremented
+anywhere (a small, separate dead-field bug in the same family) — fixed by incrementing it in
+`hitReentryLane()` so the new stat line is meaningful rather than permanently zero. `node --check
+index.js` passes.

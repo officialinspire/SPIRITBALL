@@ -45,3 +45,19 @@ SPIRITBALL loads a background image and two decorative sprites via `BootScene.pr
   referenced by `index.js`'s `preload()`.
 - Total page weight (HTML+CSS+JS+images, excluding the Phaser CDN script) drops meaningfully from
   its current ~4.6 MB.
+
+---
+
+## Implementation note (2026-08-08)
+Re-encoded `background.png` (1024×1536, 3.1 MB PNG) as `background.webp` at quality 78
+(234 KB — a 93% reduction), and updated `BootScene.preload()`'s `this.load.image('background', …)`
+call to point at the new file. Chose WebP over JPEG since the game already requires WebP support
+for `saturn_example.webp`/`grimreaper_example.webp`, so there's no compatibility cost, and it beat
+JPEG at a comparable quality level (234 KB vs. 344 KB for a similarly-graded JPEG). Visually
+verified the re-encoded image directly — no visible artifacts, and it's displayed at 0.6 alpha
+in-game which hides compression noise even further. Deleted the three confirmed-unused asset
+files (`psychedelic-pinball-playfield.jpg`, `chakras_example.png`,
+`Taito_Brazil_1980_Fire_Action_Parts_Layout_Diagram.gif`) after re-confirming via
+`grep -n "load\." index.js` that nothing in the codebase references them. Total repo asset
+payload dropped from ~4.8 MB to ~420 KB (background.webp + the two existing webp assets).
+`node --check index.js` passes.
