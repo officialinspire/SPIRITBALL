@@ -1,12 +1,31 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stage 1 (`babylon-prompts/01-*.md`) is implemented —
-`babylon-spike.html`/`babylon-spike.js` exist as a standalone diagnostic page. Its CDN-failure
-handling was verified working in this sandbox (the Babylon/Havok CDN is blocked here, same as
-Phaser's was in earlier sessions); the actual physics/rendering behavior still needs a real
-browser to verify before Stage 2 begins — see the implementation note in `01-*.md`. Stages 2–13
-are planned, not started.
+**Status (2026-08-09):** Stages 1–4 implemented (Stage 4 with an expanded scope — see below).
+Stage 1
+(`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
+playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
+(`babylon-game.html`/`babylon-game.js`) adds the real table boundary (7 walls, ported faithfully
+from the 2D layout via a verified-by-script coordinate conversion) and the fixed gameplay camera,
+and makes a deliberate architecture call not in the original master doc text: **tilted gravity
+with level geometry**, not tilted geometry — see the implementation note in `babylon-prompts/02-*.md`
+for why, since it affects every later stage. Also corrected the master doc's exact real-world
+table dimensions (0.51×1.07m) to a uniform-scale 0.51×0.907m to avoid distorting angled walls —
+same note. Stage 3 adds the main physics-driven ball (velocity clamp + anti-stuck recovery,
+values converted from the already-tuned 2D constants) plus a self-verifying CCD/tunneling test
+button, since this sandbox can't be used to eyeball a single ~90ms fast-moving frame — see
+`babylon-prompts/03-*.md`. Geometry and physics-constant math was sanity-checked with standalone
+Node scripts throughout; actual rendering, physics feel, and camera framing still need a real
+browser — this sandbox's Babylon/Havok CDN access is blocked, same limitation as Phaser's was in
+earlier sessions. Stage 4 adds two motorized `Physics6DoFConstraint` flippers (rest angle, sweep
+limits, and motor direction each individually derived and Node-verified for true left/right mirror
+symmetry — an earlier naive "just negate the angle" draft was geometrically wrong and caught before
+any testing, see `babylon-prompts/04-*.md`) and, at the user's explicit request, pulls the
+obstacle-placement half of Stage 6 forward: a pop bumper cluster, mission target bank, satellite,
+slingshots, and re-entry lanes now sit on the table in a fresh, Space-Cadet-inspired layout (not a
+raw port of the 2D game's coordinates) as real static colliders — physically present and
+bouncing correctly, but not yet wired to any scoring/mission logic, which stays Stage 6's job (see
+its forward-reference note). Stages 5, 7–13 are planned, not started.
 
 ## The goal
 

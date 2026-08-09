@@ -106,3 +106,27 @@ camera framing, tilt direction) - none of that can be exercised until this runs 
 Babylon/Havok CDN isn't blocked. The tilt direction is explicitly flagged in a code comment as an
 unverified guess to confirm visually and correct if wrong. This needs a real browser session
 before Stage 2 begins.
+
+## Follow-up fix (2026-08-09)
+Real playtesting reported the status panel never showed a Havok result at all (stuck, not even
+reaching the error panel). Root-caused as a likely hang, not an outright failure: `HavokPhysics()`
+fetches a `.wasm` binary internally, separate from the already-loaded UMD loader script, and if
+that specific fetch stalls (slow/blocked network, a CORS quirk on the `.wasm` asset specifically)
+the awaited promise can sit forever without resolving *or* rejecting - my original `try/catch`
+only had something to catch once a promise actually settled, so a genuine hang produced no
+console error and no error panel, just a permanently frozen "loading…" label.
+
+Hardened this: added a `withTimeout()` wrapper (20s) around the `HavokPhysics()` call so a hang
+now surfaces as a specific, actionable timeout error instead of silence; added progressive status
+text ("checking scripts…" → "loading Havok WASM…" → "initializing physics world…" → "OK") so a
+tester can see exactly where it's stuck if it happens again; and added `window.addEventListener`
+handlers for `'error'` and `'unhandledrejection'` as a last-resort safety net catching anything
+that escapes the explicit `main().catch(...)` entirely (e.g. an error thrown from inside an event
+handler registered after `main()`'s own try/catch scope has already returned).
+
+Re-verified in this sandbox: the CDN-blocked failure path (the one scenario testable here)
+still works correctly after these changes - `#status-havok` shows "FAILED" and `#error-panel`
+is visible. **Could not reproduce or verify the fix for the actual hang** reported, since this
+sandbox's CDN block produces an immediate script-load failure, not the slower stall the report
+described - that needs re-testing in the same environment/browser where the original hang was
+observed.

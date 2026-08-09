@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPIRITBALL — Babylon.js 3D (Stage 4: Flippers + Layout)</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #05010f;
+            font-family: 'Courier New', monospace;
+        }
+
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            touch-action: none;
+        }
+
+        #status-panel {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            z-index: 10;
+            background: rgba(10, 0, 25, 0.85);
+            border: 2px solid #00ffff;
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #00ffff;
+            font-size: 13px;
+            line-height: 1.6;
+            min-width: 260px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+        }
+
+        #status-panel h1 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #ff00ff;
+        }
+
+        #status-panel .row span:first-child {
+            color: #888;
+        }
+
+        #status-panel .ok { color: #00ff88; }
+        #status-panel .bad { color: #ff3355; }
+
+        #status-panel button {
+            margin-top: 6px;
+            width: 100%;
+            padding: 8px;
+            background: linear-gradient(135deg, rgba(138, 43, 226, 0.6), rgba(75, 0, 130, 0.7));
+            border: 2px solid #00ffff;
+            border-radius: 6px;
+            color: #00ffff;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        #status-panel button:active {
+            background: linear-gradient(135deg, rgba(138, 43, 226, 0.9), rgba(75, 0, 130, 1));
+        }
+
+        #error-panel {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 20;
+            background: rgba(20, 0, 0, 0.95);
+            color: #ff5566;
+            padding: 40px;
+            box-sizing: border-box;
+            font-size: 15px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            overflow: auto;
+        }
+
+        #error-panel h1 {
+            color: #ff3355;
+            margin-top: 0;
+        }
+    </style>
+
+    <!-- Confirmed CDN URLs and load order (Havok before core) - see BABYLON_3D_OVERHAUL.md. -->
+    <script src="https://cdn.babylonjs.com/havok/HavokPhysics_umd.js"></script>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+</head>
+<body>
+    <canvas id="renderCanvas"></canvas>
+
+    <div id="status-panel">
+        <h1>SPIRITBALL 3D — Stage 4: Flippers + Layout</h1>
+        <div class="row"><span>Havok: </span><span id="status-havok">loading…</span></div>
+        <div class="row"><span>Balls in scene: </span><span id="status-balls">0</span></div>
+        <div class="row"><span>Main ball stuck timer: </span><span id="status-stuck-timer">0 ms</span></div>
+        <div class="row"><span>CCD test: </span><span id="status-ccd">not run</span></div>
+        <div class="row"><span>Left flipper angle: </span><span id="status-left-flipper">—</span></div>
+        <div class="row"><span>Right flipper angle: </span><span id="status-right-flipper">—</span></div>
+        <div class="row" style="color:#888; font-size:11px; margin-top:4px;">
+            Controls: LEFT/RIGHT arrows = flippers (works anywhere on the page).
+        </div>
+        <button id="drop-btn">DROP TEST BALL (random pos)</button>
+        <button id="clear-btn">CLEAR EXTRA TEST BALLS</button>
+        <button id="ccd-test-btn">LAUNCH MAIN BALL AT WALL (CCD TEST)</button>
+        <button id="stuck-test-btn">FREEZE MAIN BALL (STUCK TEST)</button>
+        <button id="flipper-drop-btn">DROP BALL ON LEFT FLIPPER</button>
+    </div>
+
+    <div id="error-panel">
+        <h1>Failed to start</h1>
+        <div id="error-message"></div>
+    </div>
+
+    <script src="babylon-game.js"></script>
+</body>
+</html>

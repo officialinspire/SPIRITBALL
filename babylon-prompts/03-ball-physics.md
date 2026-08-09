@@ -56,3 +56,44 @@ scale, with no tunneling at realistic pinball speeds, and a 3D equivalent of the
 - The ball's resting/rolling behavior on the tilted table looks physically plausible without
   being told exactly how - it should just look like a small heavy ball rolling on a tilted
   surface, not floating, not skating on ice, not vibrating.
+
+---
+
+## Implementation note (2026-08-09)
+Extended `babylon-game.js` (no new files this stage). Added `createBall()` (a shared factory now
+used by both the main game ball and the Stage 2 debug drop-tool, removing the duplication that
+existed between them) and `updateBallPhysics()`, called every frame from the render loop via
+`engine.getDeltaTime()`.
+
+**Values used**, all converted from the 2D game's tuned constants via the same `PX_TO_M` scale
+established in Stage 2 (not re-derived from scratch): `MAX_BALL_SPEED_MS` ≈ 1.7 m/s (from
+`CONFIG.ballMaxVelocity: 1800`), stuck-speed threshold ≈ 0.038 m/s and kick components ≈ 0.19/0.36
+m/s (from `checkBallStuck()`'s 40/400/380 px/s in `release-prompts/13-*.md`). Stuck-time
+threshold (450ms) is a duration and didn't need conversion. Added one new, 3D-only component with
+no 2D equivalent: a small +Y hop (0.15 m/s) layered into the anti-stuck kick, to help the ball
+clear resting *contact* against a surface (a concept that doesn't really exist the same way in a
+top-down 2D physics sim) rather than just a horizontal/downhill push. "Downhill" itself is -Z per
+Stage 2's tilt convention, replacing the 2D version's "+Y toward the bottom of the screen."
+
+**Self-verifying CCD test, since this sandbox can't be used to eyeball a single fast frame**:
+added a button that launches the main ball at 8 m/s (≈4.7x the max-speed clamp, deliberately -
+this specifically stresses whether one physics step can outrun collision detection) directly at
+the table's thinnest wall, then automatically watches for 2.5 seconds whether the ball's Z
+position ever exceeds that wall's far edge - reporting PASS/FAIL to the status panel rather than
+requiring a human to catch a ~90ms event by eye. Also added a "freeze ball in place" button
+driving a live stuck-timer readout, so the anti-stuck recovery can be watched counting up to its
+kick without needing to find or wait for a naturally-occurring stuck spot.
+
+**Verified in this sandbox**: `node --check`; a standalone Node script confirmed all the derived
+constants are self-consistent (e.g. the anti-stuck kick's velocity magnitude stays comfortably
+under the max-speed clamp, so the two mechanisms can't fight each other; the CCD test's per-frame
+travel distance at 8 m/s is ~4.7x the target wall's thickness, a genuine tunneling stress case,
+and reaches the wall in ~91ms - well inside the 2.5s test window). Re-ran the CDN-blocked
+failure-path check; new buttons render correctly.
+
+**Not verified** (needs a real browser, same CDN-block limitation as Stages 1-2): whether the CCD
+test actually reports PASS when run for real, whether the ball's rolling/settling looks physically
+plausible (the acceptance criteria's visual-judgment items), and whether the anti-stuck kick's
+specific values feel right once there's actually something (Stage 4's flippers) to get stuck
+against - the stage doc's own text already flags these values as needing iteration once flippers
+exist, and that's still true.

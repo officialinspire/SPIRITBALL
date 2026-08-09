@@ -99,3 +99,30 @@ review of the diff; could not exercise this in an actual browser in this sandbox
 Phaser CDN (`cdn.jsdelivr.net`) is blocked by the environment's outbound network policy — a real
 deployment target will not have that restriction, but this fix should still get a manual desktop
 + mobile playtest before shipping.
+
+## Follow-up fix (2026-08-09) — the manual playtest found a real regression
+Real playtesting reported the ball "flying everywhere," not feeling controlled by the flippers.
+Root cause: the 62px collider radius chosen above covers roughly **6x the area** of the thin
+120×16 rectangle it replaced (a disk of radius 62 is ~12,076px², versus the rectangle's 1,920px²)
+— a large zone of empty space around the visual paddle that still counted as "touching the
+flipper." Combined with the 150ms cooldown, a player holding a flipper down with the ball resting
+near it could have the ball re-flipped at near-full power (`Math.max(1500, ballSpeed * 2.4)`)
+every ~150ms before it had actually cleared that oversized zone — each re-hit computed a new,
+somewhat arbitrary launch angle from wherever the ball happened to be within the disk. Repeated
+quickly enough, this is a runaway feedback loop that pins the ball at `CONFIG.ballMaxVelocity`
+and sends it caroming unpredictably — exactly the reported symptom, and specifically a flipper
+problem, not a general physics one.
+
+Fix: shrunk `flipperColliderRadius` from 62 to **40** (area ~5,027px², under half the original,
+while still comfortably larger than the ball to catch it reliably through the swing), and
+lengthened the cooldown from 150ms to **320ms** so a launched ball has time to clearly exit the
+(now smaller) zone before it's eligible to be flipped again. As a side benefit, the smaller radius
+also tightens the hit-position-based launch-angle variation (`hitPosition = (ball.x - flipper.x)
+/ 40`), so a touch near the collider's edge no longer produces as extreme an angle swing as it
+could before — less erratic-feeling shots generally, not just fewer repeat-launches.
+
+Verified with `node --check index.js`; could not re-exercise live flipper feel in this sandbox
+(same CDN block as before). This specifically needs the same real-device playtest that surfaced
+the original bug, focused on: holding a flipper with the ball resting on/near it (the exact
+scenario that broke), and normal single-tap flipping (should feel materially calmer/more
+predictable than before, not just "less broken").

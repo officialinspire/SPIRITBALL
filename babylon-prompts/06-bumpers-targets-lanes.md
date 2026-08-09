@@ -66,3 +66,19 @@ scoring/mission-progress functions.
   drain, with no double-counting or missed detections from rapid ball movement through the zone
   (revisit CCD/trigger-detection reliability from `03-*.md` if a fast ball can skip past the
   drain trigger in one physics step).
+
+---
+
+## Forward reference (2026-08-09)
+
+**Placement geometry for the bumper cluster, mission target bank, satellite, slingshots, and
+re-entry lanes was pulled forward into `04-*.md` at the user's request**, so it could be designed
+together with the flipper layout as one authentic Space-Cadet-inspired table rather than built in
+isolation. See `04-motorized-flippers.md`'s implementation note and `babylon-game.js`'s
+`buildObstacles()` for the actual positions/shapes/materials now in place - they're real static
+colliders (bounce/restitution feels physically right already) but **not yet wired to any
+scoring/mission logic** (no `hit*()` calls, no cooldowns, no trigger/sensor distinction between
+physical and detect-only elements). That wiring, along with the drain zone, launch ramp, bonus
+lane, inlanes/outlanes (none of which exist in the 3D scene yet), and everything else in this
+stage's "What to do" list, is still this stage's job - only the geometry for a subset of elements
+was pulled forward, not the logic.

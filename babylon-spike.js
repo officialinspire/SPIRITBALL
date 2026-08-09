@@ -41,7 +41,47 @@
             'work on this project).';
     }
 
+    // Global safety net: the first version of this spike only caught errors thrown inside
+    // main()'s own synchronous flow or an explicit `main().catch(...)`. That misses a real
+    // failure mode - HavokPhysics() fetches a .wasm binary internally, and if that fetch hangs
+    // (blocked/slow network, CORS issue on the .wasm asset specifically even though the loader
+    // JS itself loaded fine) the awaited promise can simply never resolve OR reject, leaving the
+    // status panel stuck on "loading..." forever with nothing in the console and no error panel
+    // shown - which is exactly what was reported after the first version of this spike was
+    // tested. These two listeners catch anything that still manages to escape without being
+    // deliberately handled.
+    window.addEventListener('error', (event) => {
+        showFatalError('Uncaught error.', event.error || event.message);
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+        showFatalError('Unhandled promise rejection.', event.reason);
+    });
+
+    // Wraps a promise so it can never hang the status panel forever - if it doesn't settle
+    // within timeoutMs, this rejects with a clear, specific message instead of silence.
+    function withTimeout(promise, timeoutMs, label) {
+        let timer;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => {
+                reject(new Error(
+                    label + ' did not finish within ' + (timeoutMs / 1000) + 's - it likely ' +
+                    'hung rather than failing outright (e.g. a stalled network fetch for the ' +
+                    'Havok .wasm binary). Check the Network tab for a pending request to ' +
+                    'cdn.babylonjs.com.'
+                ));
+            }, timeoutMs);
+        });
+        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    }
+
+    function setStatus(text) {
+        statusHavok.textContent = text;
+        statusHavok.className = '';
+    }
+
     async function main() {
+        setStatus('checking scripts…');
+
         if (typeof BABYLON === 'undefined') {
             throw new Error(
                 'window.BABYLON is undefined - the Babylon.js core script ' +
@@ -62,7 +102,13 @@
         scene.clearColor = new BABYLON.Color4(0.02, 0.0, 0.06, 1);
 
         // --- Physics init (confirmed pattern, see BABYLON_3D_OVERHAUL.md) ---
-        const havokInstance = await HavokPhysics();
+        // Progressive status text + a hard timeout, because HavokPhysics() fetches a .wasm
+        // binary internally - a stalled fetch here previously left the status panel stuck on a
+        // generic "loading…" forever with no visible error. See the withTimeout() comment above.
+        setStatus('loading Havok WASM…');
+        const havokInstance = await withTimeout(HavokPhysics(), 20000, 'HavokPhysics() WASM load');
+
+        setStatus('initializing physics world…');
         const hk = new BABYLON.HavokPlugin(true, havokInstance);
         scene.enablePhysics(new BABYLON.Vector3(0, -9.8, 0), hk);
         statusHavok.textContent = 'OK';

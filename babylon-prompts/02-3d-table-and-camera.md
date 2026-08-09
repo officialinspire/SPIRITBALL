@@ -60,3 +60,46 @@ the "box" everything else will be built inside.
   of the frame, viewed from behind/above the flipper zone, angled down the table's length.
 - The chosen tilt approach (tilted geometry vs. tilted gravity) is written down as a comment so
   Stage 3 onward doesn't have to rediscover which convention is in use.
+
+---
+
+## Implementation note (2026-08-09)
+Built `babylon-game.html`/`babylon-game.js` (new files, separate from `babylon-spike.*` which
+stays as a disposable physics-tuning sandbox per its own stage doc).
+
+**Tilt convention decision**: switched away from Stage 1's spike convention (tilted geometry,
+straight-down gravity) to **tilted gravity, level geometry** for this file onward. Reasoning:
+Stage 1 only had one ground plane, where either approach is equally simple. Stage 2 has seven
+wall pieces, and Stage 4 will add physics-constraint-jointed flippers - keeping every piece of
+geometry perfectly level/axis-aligned in local space means none of that later math (wall
+positions, hinge axes, bumper placements) needs to account for a globally-tilted parent
+transform; only the gravity vector (computed once, `GRAVITY_VECTOR_FN()`) carries the tilt. The
+fixed camera is angled to visually sell the "tilted cabinet" look even though the geometry itself
+is level - this is also how most real digital pinball simulations handle it, not a shortcut
+unique to this project.
+
+**Scale correction from the master doc**: `BABYLON_3D_OVERHAUL.md` specified 0.51m × 1.07m real
+pinball dimensions, but that pair's aspect ratio (0.4766) doesn't match the current 2D layout's
+540:960 (0.5625) - applying both numbers as independent non-uniform X/Z scale factors would have
+distorted every angled wall (slants, guide rails), changing their effective angle, not just size.
+Used one uniform scale factor instead (derived from the width), producing a 0.51m × 0.907m table
+that exactly preserves the existing 2D layout's proportions and angles at the cost of being
+somewhat shorter than a "real" pinball table. Documented in a code comment at the top of
+`babylon-game.js` so this doesn't get silently rediscovered or re-drifted in a later stage.
+
+**Verification performed**: `node --check` on the JS; a standalone Node script (no Babylon
+dependency) replicating the coordinate-conversion math to sanity-check all seven wall positions/
+sizes/rotations for symmetry and boundary-corner closure - confirmed the left/right wall pairs
+are exact mirror images and the top-wall-to-side-wall corners have no gap, inherited faithfully
+from the original 2D layout since the conversion is a linear, uniform-scale transform. Re-ran the
+CDN-blocked failure-path test (same technique as Stage 1) and confirmed the error panel still
+displays correctly on this new page.
+
+**Not verified** (needs a real browser): whether the boundary is actually gap-free once real
+Havok collision (not just the 2D math) is exercised - the `DROP TEST BALL` button exists
+specifically for this, dropping a ball at a random X/Z position each click so a human can spam it
+and watch for any ball escaping the boundary or clipping through a wall joint. Also unverified:
+the camera framing (does it actually resemble the reference screenshot's cabinet view at the
+chosen position/FOV) and the wall-rotation sign convention (`toWorldRotationY()` - flagged
+explicitly in that function's comment as a guess pending visual confirmation, with the fix
+localized to one place if the whole table reads as mirrored end-to-end).
