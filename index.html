@@ -124,6 +124,20 @@
             box-shadow: 0 0 30px rgba(0, 255, 255, 0.8);
         }
 
+        /* Camera "flash" (Stage 10, babylon-prompts/10-*.md) - a DOM overlay rather than a
+           DefaultRenderingPipeline color-grade pulse, deliberately: the pipeline only exists when
+           detectHighFidelity() is true (07-*.md), and a flash tied exclusively to that would
+           silently vanish on low-tier devices. A plain full-screen div works identically on every
+           device and is simpler to reason about without being able to see the result either way. */
+        #flash-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 15;
+            pointer-events: none;
+            opacity: 0;
+            background: #ffffff;
+        }
+
         #error-panel {
             display: none;
             position: fixed;
@@ -151,6 +165,7 @@
 </head>
 <body>
     <canvas id="renderCanvas"></canvas>
+    <div id="flash-overlay"></div>
 
     <div id="status-panel">
         <h1>SPIRITBALL 3D (dev build)</h1>

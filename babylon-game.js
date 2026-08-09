@@ -14,19 +14,22 @@
 //          (babylon-prompts/08-*.md - see that file's implementation note)
 // Stage 9: 3D-mounted backglass/dot-matrix display (babylon-prompts/09-*.md - see that file's
 //          implementation note)
+// Stage 10: camera shake/punch/flash juice + an idle attract-mode orbit camera
+//           (babylon-prompts/10-*.md - see that file's implementation note)
 // See BABYLON_3D_OVERHAUL.md for the overall architecture.
 //
 // Scope so far: the static table boundary (now with a real playfield floor), the fixed gameplay
-// camera, one physics-driven ball, two motorized flippers, a plunger/launch lane, scored
-// obstacles (bumpers, mission targets, satellite, slingshots, re-entry lanes) with real
-// collision/trigger detection and a drain zone, SPIRITBALL's actual DMT/cosmic/chakra visual
-// identity (PBR materials, glow layer, bloom, procedural starfield skybox), particle VFX (ball
-// trail, drain vortex, hit bursts, chakra sparkle) respecting both the device-tier and reduced-
-// motion gates, and a real 3D-mounted backglass panel showing score/high-score/lives/messages.
-// The full mission FSM (select/start/complete/rank-up) remains deferred to Stage 12, whose real
-// UI it needs to be testable. This file supersedes babylon-spike.js as the base for the real
-// game; the spike file stays around as a disposable physics-tuning sandbox (per its own stage
-// doc), not because this file depends on it.
+// camera (plus an idle attract-mode orbit camera active until the first launch), one physics-
+// driven ball, two motorized flippers, a plunger/launch lane, scored obstacles (bumpers, mission
+// targets, satellite, slingshots, re-entry lanes) with real collision/trigger detection and a
+// drain zone, SPIRITBALL's actual DMT/cosmic/chakra visual identity (PBR materials, glow layer,
+// bloom, procedural starfield skybox), particle VFX (ball trail, drain vortex, hit bursts, chakra
+// sparkle), a real 3D-mounted backglass panel showing score/high-score/lives/messages, and camera
+// shake/punch/screen-flash impact juice on every event that has something to react to. The full
+// mission FSM (select/start/complete/rank-up) remains deferred to Stage 12, whose real UI it
+// needs to be testable. This file supersedes babylon-spike.js as the base for the real game; the
+// spike file stays around as a disposable physics-tuning sandbox (per its own stage doc), not
+// because this file depends on it.
 // ===================================
 
 (function () {
@@ -285,6 +288,12 @@
     const COOLDOWN_SLINGSHOT_MS = 200;
     const COOLDOWN_MISSION_TARGET_MS = 500;
     const COOLDOWN_REENTRY_LANE_MS = 1000;
+    // Not present in the 2D cooldown map (walls/flippers there fire shake unconditionally, every
+    // physics-substep-worth of contact) - added here (Stage 10) specifically to keep grinding
+    // contact from shaking the camera every single frame, matching the doc's own "don't add
+    // camera effects for every single event if it starts feeling noisy" constraint.
+    const COOLDOWN_WALL_MS = 150;
+    const COOLDOWN_FLIPPER_MS = 150;
 
     // Drain zone, ported from setupDrainZone() in ../index.js (2D px: center x=270 (table
     // center), y=1010 (50px past the table's bottom edge), width=540, height=150). The 3D table
@@ -452,6 +461,7 @@
             mesh.position.set(toWorldX(def.x), WALL_HEIGHT_M / 2, toWorldZ(def.y));
             mesh.rotation.y = toWorldRotationY(def.rot);
             mesh.material = wallMat;
+            mesh.metadata = { kind: 'wall' }; // Stage 10's light per-wall-touch camera shake
 
             new BABYLON.PhysicsAggregate(
                 mesh,
@@ -588,6 +598,28 @@
         camera.setTarget(new BABYLON.Vector3(0, 0, TABLE_LENGTH_M * 0.12));
         camera.fov = BABYLON.Tools.ToRadians(50);
         camera.minZ = 0.01;
+        return camera;
+    }
+
+    // Idle/attract-mode camera (Stage 10, babylon-prompts/10-*.md) - a slow automatic orbit,
+    // genuinely 3D-only spectacle with no 2D equivalent. This build has no menu/title screen yet
+    // (Stage 12's job), so "idle" is interpreted as "before the player's first launch input" -
+    // active from page load, main() switches scene.activeCamera to the fixed gameplay camera the
+    // moment handleLaunchPress() first fires (see endAttractMode() in main()). No
+    // attachControl() call - rotation is driven programmatically (camera.alpha incremented each
+    // frame), not by user drag, so it can't be grabbed by the same touch input the flipper zones
+    // already use.
+    function buildAttractCamera(scene) {
+        const camera = new BABYLON.ArcRotateCamera(
+            'attractCamera',
+            -Math.PI / 2,
+            Math.PI / 3.2,
+            1.4,
+            new BABYLON.Vector3(0, 0.05, 0),
+            scene
+        );
+        camera.minZ = 0.01;
+        camera.fov = BABYLON.Tools.ToRadians(50);
         return camera;
     }
 
@@ -1021,6 +1053,7 @@
         mesh.position.set(pivotWorldPos.x + offsetX, pivotWorldPos.y, pivotWorldPos.z + offsetZ);
         mesh.rotation.y = restAngleRad;
         mesh.material = mat;
+        mesh.metadata = { kind: 'flipper' }; // Stage 10's flipper-contact camera shake
 
         const aggregate = new BABYLON.PhysicsAggregate(
             mesh,
@@ -1300,6 +1333,8 @@
 
         buildTable(scene);
         const camera = buildCamera(scene);
+        const attractCamera = buildAttractCamera(scene);
+        scene.activeCamera = attractCamera; // idle/attract mode until the first launch input - see endAttractMode()
         const obstacles = buildObstacles(scene);
         buildLaunchLane(scene);
         buildDrainZone(scene);
@@ -1324,6 +1359,106 @@
             pipeline.bloomWeight = 0.5;
             pipeline.bloomKernel = 64;
             pipeline.bloomScale = 0.5;
+            pipeline.addCamera(attractCamera); // Stage 10's attract-mode orbit gets bloom too, while it's still the active camera
+        }
+
+        // --- Camera choreography and impact juice (Stage 10, babylon-prompts/10-*.md) ---
+        //
+        // Shake and punch are two independently-bounded offsets added to the gameplay camera's
+        // fixed base position every frame (never accumulated/stacked - each is capped at the
+        // strongest currently-active request, matching triggerCameraShake()'s own "take the max,
+        // not the sum" rule), so no sequence of rapid-fire events can push the camera far enough
+        // to lose the ball/flippers from frame - the constraint this stage's doc calls out
+        // explicitly. Per-axis scaling on shake (full X, half Y, less Z) keeps the "into/out of
+        // the screen" axis - the one most likely to feel disorienting or clip the near/far
+        // geometry - the most damped of the three.
+        const cameraBasePosition = camera.position.clone();
+        const cameraForwardDir = camera.getTarget().subtract(camera.position).normalize();
+
+        let shakeRemainingMs = 0;
+        let shakeDurationMs = 1;
+        let shakeAmplitudeM = 0;
+
+        // intensity mirrors the 2D helper's arbitrary 0.002-0.01 "screen-shake units"
+        // (cameraShake(duration, intensity) in ../index.js) - rescaled by a flat factor into a
+        // plausible meters-of-camera-jitter amplitude for this table's ~0.5m scale, not
+        // separately re-tuned per call site, so the existing 2D hierarchy (light taps vs. strong
+        // hits) carries over directly.
+        function triggerCameraShake(durationMs, intensity) {
+            if (window.SPIRITBALL_reducedMotion) return;
+            const amplitude = intensity * 4;
+            if (amplitude >= shakeAmplitudeM || durationMs >= shakeRemainingMs) {
+                shakeAmplitudeM = Math.max(shakeAmplitudeM, amplitude);
+                shakeDurationMs = durationMs;
+                shakeRemainingMs = durationMs;
+            }
+        }
+
+        let punchRemainingMs = 0;
+        let punchDurationMs = 1;
+        const punchOffsetPeak = BABYLON.Vector3.Zero();
+
+        // A directional (not random) camera nudge - offsetVector is a world-space displacement
+        // from the base position, eased back to zero over durationMs. Used for the launch push-in
+        // and the drain dip (see their call sites below) - beats the 2D version never needed
+        // since its camera couldn't move through 3D space at all.
+        function triggerCameraPunch(durationMs, offsetVector) {
+            if (window.SPIRITBALL_reducedMotion) return;
+            if (offsetVector.length() >= punchOffsetPeak.length() || durationMs >= punchRemainingMs) {
+                punchOffsetPeak.copyFrom(offsetVector);
+                punchDurationMs = durationMs;
+                punchRemainingMs = durationMs;
+            }
+        }
+
+        function updateCameraEffects(deltaMs) {
+            let offsetX = 0, offsetY = 0, offsetZ = 0;
+
+            if (shakeRemainingMs > 0) {
+                shakeRemainingMs = Math.max(0, shakeRemainingMs - deltaMs);
+                const falloff = shakeRemainingMs / shakeDurationMs;
+                const amp = shakeAmplitudeM * falloff;
+                offsetX += (Math.random() * 2 - 1) * amp;
+                offsetY += (Math.random() * 2 - 1) * amp * 0.5;
+                offsetZ += (Math.random() * 2 - 1) * amp * 0.3;
+                if (shakeRemainingMs <= 0) shakeAmplitudeM = 0;
+            }
+
+            if (punchRemainingMs > 0) {
+                punchRemainingMs = Math.max(0, punchRemainingMs - deltaMs);
+                const falloff = punchRemainingMs / punchDurationMs;
+                offsetX += punchOffsetPeak.x * falloff;
+                offsetY += punchOffsetPeak.y * falloff;
+                offsetZ += punchOffsetPeak.z * falloff;
+                if (punchRemainingMs <= 0) punchOffsetPeak.set(0, 0, 0);
+            }
+
+            camera.position.set(
+                cameraBasePosition.x + offsetX,
+                cameraBasePosition.y + offsetY,
+                cameraBasePosition.z + offsetZ
+            );
+        }
+
+        // Flash: a DOM overlay (see index.html's #flash-overlay and its block comment), not a
+        // DefaultRenderingPipeline color-grade pulse - works identically regardless of
+        // detectHighFidelity(), where the pipeline doesn't exist at all on low-tier devices.
+        const flashOverlay = document.getElementById('flash-overlay');
+        function flashScreen(durationMs, r, g, b) {
+            if (window.SPIRITBALL_reducedMotion) return;
+            flashOverlay.style.background = 'rgb(' + (r ?? 255) + ',' + (g ?? 255) + ',' + (b ?? 255) + ')';
+            flashOverlay.style.transition = 'none';
+            flashOverlay.style.opacity = '0.5';
+            void flashOverlay.offsetWidth; // force a reflow so the transition below animates from 0.5, not skips straight to 0
+            flashOverlay.style.transition = 'opacity ' + durationMs + 'ms ease-out';
+            flashOverlay.style.opacity = '0';
+        }
+
+        let attractModeActive = true;
+        function endAttractMode() {
+            if (!attractModeActive) return;
+            attractModeActive = false;
+            scene.activeCamera = camera;
         }
 
         const plungerMat = new BABYLON.PBRMaterial('plungerMat', scene); // metal piston
@@ -1535,6 +1670,7 @@
         // *.md's desktop-launch-after-death fix, ported here since Stage 5's acceptance criteria
         // calls out the exact same scenario).
         function handleLaunchPress() {
+            endAttractMode(); // first launch input ends attract mode, even if this press turns out to be a no-op below
             if (ballInPlay) return;
             plungerCharging = true;
             plungerChargeElapsedMs = 0;
@@ -1557,6 +1693,14 @@
             plungerCharging = false;
             plunger.chargePercent = 0;
             backglass.showMessage('LAUNCH!', 600);
+
+            // Power-scaled shake, matching launchBall()'s shakeIntensity = 0.002 + powerPercent*0.005
+            // in ../index.js, plus a 3D-only push-in toward the ball (no 2D equivalent - that
+            // camera couldn't move through space at all) - both new beats the doc calls out
+            // explicitly for this stage.
+            const powerPercent = (plungerPower - PLUNGER_MIN_POWER_MS) / (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS);
+            triggerCameraShake(150, 0.002 + powerPercent * 0.005);
+            triggerCameraPunch(300, cameraForwardDir.scale(0.02 + powerPercent * 0.02));
         }
 
         window.addEventListener('keydown', (e) => {
@@ -1671,18 +1815,34 @@
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + SCORE_ATTACK_BUMPER, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
+                triggerCameraShake(120, 0.006); // matches hitAttackBumper()'s cameraShake(120, 0.006)
             } else if (meta.kind === 'satellite') {
                 setCooldown(mesh, COOLDOWN_SATELLITE_MS);
                 addScore(SCORE_SATELLITE);
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('SATELLITE!', 900);
+                triggerCameraShake(120, 0.005); // matches hitSatellite()'s cameraShake(120, 0.005)
             } else if (meta.kind === 'slingshot') {
                 setCooldown(mesh, COOLDOWN_SLINGSHOT_MS);
                 addScore(SCORE_SLINGSHOT);
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + SCORE_SLINGSHOT, 600);
+                triggerCameraShake(120, 0.005); // matches hitSlingshot()'s cameraShake(120, 0.005)
+            } else if (meta.kind === 'wall') {
+                // No score/pulse/burst - walls aren't scored in the 2D game either, just a very
+                // light shake on contact (setupCollisions()'s wall collider: cameraShake(40, 0.003)).
+                setCooldown(mesh, COOLDOWN_WALL_MS);
+                triggerCameraShake(40, 0.003);
+            } else if (meta.kind === 'flipper') {
+                // Not a literal port - the 2D shake here (updateFlipperPower()'s manual ball-
+                // velocity injection, cameraShake(150, 0.008)) belongs to a mechanic that doesn't
+                // exist in this build (Havok's real contact response replaces it, see 04-*.md/
+                // 06-*.md). Reused as the closest available proxy for "the flipper did something
+                // impactful" - fires on any ball-flipper contact, not just an active-swing hit.
+                setCooldown(mesh, COOLDOWN_FLIPPER_MS);
+                triggerCameraShake(150, 0.008);
             }
         }
 
@@ -1703,6 +1863,7 @@
                 // mission-select state exists yet (Stage 6's scope decision), so a generic
                 // acknowledgement stands in until Stage 12 gives this a real mission to name.
                 backglass.showMessage('TARGET!', 700);
+                triggerCameraShake(60, 0.002); // matches hitMissionTarget()'s cameraShake(60, 0.002)
             } else if (meta.kind === 'reentryLane') {
                 setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
                 addScore(SCORE_REENTRY_LANE);
@@ -1719,6 +1880,7 @@
                 // After the recolor, not before - the burst should match the new lit-green state.
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('RE-ENTRY!', 800);
+                triggerCameraShake(80, 0.003); // matches hitReentryLane()'s cameraShake(80, 0.003)
             }
         }
 
@@ -1734,6 +1896,11 @@
             statusLives.textContent = String(lives);
             backglass.state.lives = lives;
             backglass.showMessage('DRAINED!', 1400); // no Grim Reaper visual yet (Stage 12) - this is the stand-in
+            triggerCameraShake(400, 0.008); // matches checkDrain()'s cameraShake(400, 0.008)
+            flashScreen(200, 255, 0, 0); // matches checkDrain()'s cameraFlash(200, 255, 0, 0, true) - red
+            // Quick downward dip - a 3D-only "snap toward the void" beat with no 2D equivalent
+            // (that camera couldn't move through space at all).
+            triggerCameraPunch(400, new BABYLON.Vector3(0, -0.03, 0));
             setTimeout(() => {
                 if (lives <= 0) {
                     lives = STARTING_LIVES;
@@ -1772,6 +1939,12 @@
             updateBallPhysics(mainBall, deltaMs);
             testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
             updateBallTrail(ballTrail, mainBall, highFidelity);
+
+            if (attractModeActive) {
+                attractCamera.alpha += deltaMs * 0.00015; // slow continuous orbit
+            } else {
+                updateCameraEffects(deltaMs);
+            }
 
             if (ccdTestActive) {
                 ccdTestElapsedMs += deltaMs;

@@ -1,7 +1,7 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stages 1–9 implemented (Stages 4-9 with expanded/adjusted scope — see
+**Status (2026-08-09):** Stages 1–10 implemented (Stages 4-10 with expanded/adjusted scope — see
 below). Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
@@ -78,7 +78,17 @@ intent. Stage 9 adds a real 3D-mounted backglass panel (a `DynamicTexture`-drive
 overlay) showing score, a new localStorage-persisted high score, lives, and transient messages -
 rank/mission/multiplier are deliberately not shown yet, consistent with Stage 6's mission-FSM
 deferral to Stage 12. See `09-*.md`'s implementation note, including Node-verified camera-frustum
-placement math and a last-message-wins approach to the popup system. Stages 10-13 are planned, not
+placement math and a last-message-wins approach to the popup system. Stage 10 adds camera
+shake/punch (a bounded, non-stacking offset added to the fixed camera's base position, Node-
+verified to stay small relative to the camera-to-table distance even in the worst realistic
+combined case) and a DOM-overlay screen flash, wired to every event with something to react to
+(wall/flipper contact, the Stage 6 hit types, launch, drain) using the 2D game's own duration/
+intensity hierarchy at each site, plus a new idle attract-mode `ArcRotateCamera` that orbits until
+the player's first launch input (this build has no menu/title screen yet for a literal "idle"
+state to attach to). See `10-*.md`'s implementation note for exactly which 2D shake call sites
+don't have anything to attach to yet (fuel lights, obstacles, inlanes/outlanes, bonus lane,
+launch ramp, mission-complete, rank-up - all still Stage 12 territory) and why flash uses a DOM
+overlay instead of the `DefaultRenderingPipeline` the doc suggested. Stages 11-13 are planned, not
 started.
 
 ## The goal
