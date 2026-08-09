@@ -16,6 +16,10 @@
 //          implementation note)
 // Stage 10: camera shake/punch/flash juice + an idle attract-mode orbit camera
 //           (babylon-prompts/10-*.md - see that file's implementation note)
+// Stage 11: real mobile touch controls (arcade edge zones + launch button, ported from
+//           release-prompts/14-*.md), Havok/WASM-SIMD compatibility detection with an honest
+//           fallback message, and performance-tier gating (babylon-prompts/11-*.md - see that
+//           file's implementation note)
 // See BABYLON_3D_OVERHAUL.md for the overall architecture.
 //
 // Scope so far: the static table boundary (now with a real playfield floor), the fixed gameplay
@@ -24,10 +28,13 @@
 // targets, satellite, slingshots, re-entry lanes) with real collision/trigger detection and a
 // drain zone, SPIRITBALL's actual DMT/cosmic/chakra visual identity (PBR materials, glow layer,
 // bloom, procedural starfield skybox), particle VFX (ball trail, drain vortex, hit bursts, chakra
-// sparkle), a real 3D-mounted backglass panel showing score/high-score/lives/messages, and camera
-// shake/punch/screen-flash impact juice on every event that has something to react to. The full
-// mission FSM (select/start/complete/rank-up) remains deferred to Stage 12, whose real UI it
-// needs to be testable. This file supersedes babylon-spike.js as the base for the real game; the
+// sparkle), a real 3D-mounted backglass panel showing score/high-score/lives/messages, camera
+// shake/punch/screen-flash impact juice on every event that has something to react to, real
+// ported mobile touch controls (arcade flipper zones + launch button, fullscreen/orientation-lock,
+// rotate-prompt), and a proactive+reactive Havok/WASM-SIMD compatibility check with a link to the
+// still-working 2D build for unsupported devices. The full mission FSM (select/start/complete/
+// rank-up) remains deferred to Stage 12, whose real UI it needs to be testable. This file
+// supersedes babylon-spike.js as the base for the real game; the
 // spike file stays around as a disposable physics-tuning sandbox (per its own stage doc), not
 // because this file depends on it.
 // ===================================
@@ -41,6 +48,128 @@
     // babylon-prompts/13-*.md's forward-reference note) with its own fresh `window`. Plain
     // browser API, no BABYLON reference, safe to run immediately at top level.
     window.SPIRITBALL_reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+    // ===================================
+    // Mobile device detection, fullscreen/orientation-lock, vibration (Stage 11,
+    // babylon-prompts/11-*.md) - ported from InputManager in ../index.js (release-prompts/
+    // 02-*.md, 14-*.md), same detection logic/thresholds, not redesigned. Plain browser APIs,
+    // no BABYLON references, safe at top level/immediately. The actual DOM element wiring
+    // (flipper zones, launch button) happens inside main(), since it needs the flipper/plunger
+    // functions defined there - these are just the reusable, BABYLON-independent pieces.
+    // ===================================
+    let isMobileDevice = false;
+    let fullscreenRequested = false;
+
+    function detectMobile() {
+        const userAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const smallScreen = window.innerWidth <= 768;
+        const portrait = window.innerHeight > window.innerWidth;
+        isMobileDevice = userAgent || (smallScreen && portrait);
+        updateMobileControlsVisibility();
+    }
+
+    function updateMobileControlsVisibility() {
+        const mobileControls = document.getElementById('mobile-controls');
+        const rotateOverlay = document.getElementById('rotate-overlay');
+        const isLandscape = window.innerWidth > window.innerHeight;
+
+        // The playfield is portrait-only, same as the 2D game - a mobile device held in
+        // landscape has nowhere to put the touch controls, so show a rotate prompt instead of
+        // stranding the player with an unplayable, control-less screen.
+        if (isMobileDevice && isLandscape) {
+            if (rotateOverlay) rotateOverlay.style.display = 'flex';
+            if (mobileControls) mobileControls.style.display = 'none';
+            return;
+        }
+
+        if (rotateOverlay) rotateOverlay.style.display = 'none';
+        if (mobileControls) {
+            const shouldShow = isMobileDevice || window.innerHeight > window.innerWidth || window.innerWidth <= 767;
+            mobileControls.style.display = shouldShow ? 'block' : 'none';
+        }
+    }
+
+    // Requires a user gesture, so this can't happen automatically on page load - called from the
+    // first touchstart anywhere (see main()). Failures are silently ignored (fullscreen can be
+    // denied by the browser; orientation lock isn't supported at all on iOS Safari) - a
+    // nice-to-have enhancement, never a requirement to play.
+    function requestFullscreenAndLock() {
+        if (fullscreenRequested) return;
+        fullscreenRequested = true;
+        const el = document.documentElement;
+        const requestFs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+        const lockPortrait = () => {
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('portrait').catch(() => {});
+            }
+        };
+        if (requestFs) {
+            Promise.resolve(requestFs.call(el)).then(lockPortrait).catch(() => {});
+        } else {
+            lockPortrait();
+        }
+    }
+
+    function vibrateDevice(ms) {
+        if (navigator.vibrate) {
+            try { navigator.vibrate(ms); } catch (e) { /* ignore */ }
+        }
+    }
+
+    function setupResizeHandlers(engine) {
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                detectMobile();
+                engine.resize(); // Babylon's equivalent of the 2D game's window.game.scale.refresh()
+            }, 250);
+        });
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => {
+                detectMobile();
+                engine.resize();
+            }, 100);
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                detectMobile();
+                engine.resize();
+            }
+        });
+    }
+
+    // ===================================
+    // Havok/WASM-SIMD compatibility (Stage 11) - iOS below 16.4 has no WebAssembly SIMD support
+    // at all (confirmed in BABYLON_3D_OVERHAUL.md's research), which Havok requires; this is a
+    // hard compatibility ceiling, not a performance tier to tune away. Checked proactively here
+    // (before even attempting to load the CDN scripts) via UA version sniffing for the one
+    // specific, known-deterministic case; main()'s outer catch handler also treats any
+    // WASM/SIMD-flavored error message reactively the same way, covering other unknown
+    // SIMD-incompatible browsers this version check doesn't name. Decision, made explicitly per
+    // the doc's own prompt: yes, there is a fallback - phaser2d.html (the 2D build) already
+    // exists and works, so the message links to it rather than leaving an unsupported player
+    // with nothing playable at all.
+    // ===================================
+    function detectLikelyUnsupportedIOS() {
+        const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        if (!isIOS) return false;
+        const match = navigator.userAgent.match(/OS (\d+)_(\d+)/);
+        if (!match) return false;
+        const major = parseInt(match[1], 10);
+        const minor = parseInt(match[2], 10);
+        return major < 16 || (major === 16 && minor < 4);
+    }
+
+    function showUnsupportedMessage(reason) {
+        console.error('[SPIRITBALL 3D] Unsupported device:', reason);
+        const panel = document.getElementById('unsupported-panel');
+        if (panel) panel.style.display = 'flex';
+        const canvasEl = document.getElementById('renderCanvas');
+        if (canvasEl) canvasEl.style.display = 'none';
+        const mobileControlsEl = document.getElementById('mobile-controls');
+        if (mobileControlsEl) mobileControlsEl.style.display = 'none';
+    }
 
     // ===================================
     // Coordinate / scale conversion (the single source of truth every later stage must reuse)
@@ -1295,6 +1424,11 @@
     async function main() {
         setStatus('checking scripts…');
 
+        if (detectLikelyUnsupportedIOS()) {
+            showUnsupportedMessage('iOS version below 16.4 - no WebAssembly SIMD support');
+            return;
+        }
+
         if (typeof BABYLON === 'undefined') {
             throw new Error('window.BABYLON is undefined - check network access to cdn.babylonjs.com.');
         }
@@ -1501,36 +1635,11 @@
             if (e.code === 'ArrowRight') deactivateFlipper(rightFlipper);
         });
 
-        // Mobile touch controls: tap-and-hold the left/right half of the canvas to activate the
-        // matching flipper, release to let it fall. This is a minimal placeholder (no visible
-        // on-screen buttons/zones yet - that's Stage 11's job), but a real pinball table can't be
-        // playtested at all on a touchscreen without *some* way to fire the flippers, so this
-        // can't wait for Stage 11. Tracks touches by identifier (a Map) so both flippers can be
-        // held at once with two fingers, same as the old 2D game's arcade controls.
-        const activeFlipperTouches = new Map();
-
-        function flipperForTouchX(clientX) {
-            return clientX < window.innerWidth / 2 ? leftFlipper : rightFlipper;
-        }
-
-        canvas.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            for (const touch of e.changedTouches) {
-                const flipper = flipperForTouchX(touch.clientX);
-                activeFlipperTouches.set(touch.identifier, flipper);
-                activateFlipper(flipper);
-            }
-        }, { passive: false });
-
-        function releaseFlipperTouch(e) {
-            for (const touch of e.changedTouches) {
-                const flipper = activeFlipperTouches.get(touch.identifier);
-                if (flipper) deactivateFlipper(flipper);
-                activeFlipperTouches.delete(touch.identifier);
-            }
-        }
-        canvas.addEventListener('touchend', releaseFlipperTouch, { passive: true });
-        canvas.addEventListener('touchcancel', releaseFlipperTouch, { passive: true });
+        // Mobile flipper-zone touch controls are wired further down, alongside the launch
+        // button, fullscreen/orientation-lock request, and resize handling - see the "Mobile
+        // controls" block near handleLaunchRelease() below (Stage 11, babylon-prompts/11-*.md).
+        // (Stage 4's original tap-left/right-half-of-canvas stopgap has been fully replaced by
+        // the real ported arcade-style edge zones there, not left running alongside them.)
 
         const statusLeftFlipper = document.getElementById('status-left-flipper');
         const statusRightFlipper = document.getElementById('status-right-flipper');
@@ -1641,15 +1750,25 @@
         // --- Plunger / launch (Stage 5, babylon-prompts/05-*.md) ---
         //
         // ballInPlay is a minimal stand-in for the 2D game's canLaunch/ballInPlay pair
-        // (../index.js) - there's no drain/ball-loss detection yet (that's Stage 6's job), so
-        // once launched there's currently no automatic way back to "ready to launch" other than
-        // the RESET BALL TO PLUNGER button below. That's an accepted, documented gap for this
-        // physics-testbed stage, not an oversight.
+        // (../index.js). Real drain/ball-loss detection was added in Stage 6 (handleDrain()
+        // below), which now returns ballInPlay to false automatically via resetBallToPlunger() -
+        // the RESET BALL TO PLUNGER dev button remains too, for repeatable manual testing.
         let ballInPlay = false;
+        setLaunchReady(true); // matches setupPlunger()'s initial setLaunchReady(true) in ../index.js
         let plungerCharging = false;
         let plungerChargeElapsedMs = 0;
         let plungerPower = PLUNGER_MIN_POWER_MS;
         const statusPlungerCharge = document.getElementById('status-plunger-charge');
+
+        // Ported from InputManager.setLaunchReady() in ../index.js - toggles the launch button's
+        // idle-pulse affordance (see .launch-btn.ready in index.html) so it only visibly invites
+        // a tap when a launch is actually possible. Looks the button up fresh each call (like the
+        // 2D version) rather than relying on a captured reference, so this can be called safely
+        // from anywhere regardless of definition order.
+        function setLaunchReady(ready) {
+            const btn = document.getElementById('launch-btn');
+            if (btn) btn.classList.toggle('ready', ready);
+        }
 
         function resetBallToPlunger() {
             mainBall.mesh.position.set(plunger.baseX, 0.03, plunger.baseZ);
@@ -1661,6 +1780,7 @@
             plungerChargeElapsedMs = 0;
             plungerPower = PLUNGER_MIN_POWER_MS;
             plunger.chargePercent = 0;
+            setLaunchReady(true);
         }
 
         // Mirrors handleLaunchPress()/handleLaunchRelease() in ../index.js: power is purely a
@@ -1675,6 +1795,7 @@
             plungerCharging = true;
             plungerChargeElapsedMs = 0;
             plungerPower = PLUNGER_MIN_POWER_MS;
+            vibrateDevice(15); // matches handleLaunchPress()'s vibrate(15) in ../index.js - light tick: charging started
         }
 
         function handleLaunchRelease() {
@@ -1692,6 +1813,7 @@
             ballInPlay = true;
             plungerCharging = false;
             plunger.chargePercent = 0;
+            setLaunchReady(false);
             backglass.showMessage('LAUNCH!', 600);
 
             // Power-scaled shake, matching launchBall()'s shakeIntensity = 0.002 + powerPercent*0.005
@@ -1701,6 +1823,7 @@
             const powerPercent = (plungerPower - PLUNGER_MIN_POWER_MS) / (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS);
             triggerCameraShake(150, 0.002 + powerPercent * 0.005);
             triggerCameraPunch(300, cameraForwardDir.scale(0.02 + powerPercent * 0.02));
+            vibrateDevice(20 + Math.round(powerPercent * 40)); // matches launchBall()'s power-scaled vibrate() in ../index.js
         }
 
         window.addEventListener('keydown', (e) => {
@@ -1713,20 +1836,75 @@
             if (e.code === 'Space') handleLaunchRelease();
         });
 
+        // --- Mobile controls (Stage 11, babylon-prompts/11-*.md) ---
+        //
+        // DOM elements/CSS and event pattern ported directly from InputManager.setupMobileControls()
+        // in ../index.js (release-prompts/14-*.md) - full-height arcade-style edge zones (tap
+        // ANYWHERE along the side, not a small button) plus a discrete round launch button, both
+        // wired with the same touchstart/touchend/touchcancel + mousedown/mouseup/mouseleave
+        // pattern for touch AND desktop-mouse testing. What changed from the 2D version: press/
+        // release call this file's own activateFlipper()/deactivateFlipper()/handleLaunchPress()/
+        // handleLaunchRelease() directly, instead of setting InputManager.state flags for a
+        // Phaser scene to poll every frame - there's no separate polling step here to slot into.
+        const leftZone = document.getElementById('flipper-zone-left');
+        const leftFlipperStart = (e) => {
+            e.preventDefault();
+            activateFlipper(leftFlipper);
+            leftZone.classList.add('pressed');
+        };
+        const leftFlipperEnd = (e) => {
+            e.preventDefault();
+            deactivateFlipper(leftFlipper);
+            leftZone.classList.remove('pressed');
+        };
+        leftZone.addEventListener('touchstart', leftFlipperStart, { passive: false });
+        leftZone.addEventListener('touchend', leftFlipperEnd, { passive: false });
+        leftZone.addEventListener('touchcancel', leftFlipperEnd, { passive: false });
+        leftZone.addEventListener('mousedown', leftFlipperStart);
+        leftZone.addEventListener('mouseup', leftFlipperEnd);
+        leftZone.addEventListener('mouseleave', leftFlipperEnd);
+
+        const rightZone = document.getElementById('flipper-zone-right');
+        const rightFlipperStart = (e) => {
+            e.preventDefault();
+            activateFlipper(rightFlipper);
+            rightZone.classList.add('pressed');
+        };
+        const rightFlipperEnd = (e) => {
+            e.preventDefault();
+            deactivateFlipper(rightFlipper);
+            rightZone.classList.remove('pressed');
+        };
+        rightZone.addEventListener('touchstart', rightFlipperStart, { passive: false });
+        rightZone.addEventListener('touchend', rightFlipperEnd, { passive: false });
+        rightZone.addEventListener('touchcancel', rightFlipperEnd, { passive: false });
+        rightZone.addEventListener('mousedown', rightFlipperStart);
+        rightZone.addEventListener('mouseup', rightFlipperEnd);
+        rightZone.addEventListener('mouseleave', rightFlipperEnd);
+
         const launchBtn = document.getElementById('launch-btn');
-        launchBtn.addEventListener('pointerdown', (e) => {
+        const launchStart = (e) => {
             e.preventDefault();
             handleLaunchPress();
-            launchBtn.classList.add('charging');
-        });
-        launchBtn.addEventListener('pointerup', () => {
+            launchBtn.classList.add('pressed');
+        };
+        const launchEnd = (e) => {
+            e.preventDefault();
             handleLaunchRelease();
-            launchBtn.classList.remove('charging');
-        });
-        launchBtn.addEventListener('pointercancel', () => {
-            handleLaunchRelease();
-            launchBtn.classList.remove('charging');
-        });
+            launchBtn.classList.remove('pressed');
+        };
+        launchBtn.addEventListener('touchstart', launchStart, { passive: false });
+        launchBtn.addEventListener('touchend', launchEnd, { passive: false });
+        launchBtn.addEventListener('touchcancel', launchEnd, { passive: false });
+        launchBtn.addEventListener('mousedown', launchStart);
+        launchBtn.addEventListener('mouseup', launchEnd);
+
+        // Fullscreen + portrait-lock request on the player's first touch anywhere (needs a user
+        // gesture - can't happen automatically on load).
+        document.addEventListener('touchstart', () => requestFullscreenAndLock(), { once: true, passive: true });
+
+        setupResizeHandlers(engine);
+        detectMobile(); // initial visibility check - also runs on every resize/orientation change above
 
         const resetPlungerBtn = document.getElementById('reset-plunger-btn');
         resetPlungerBtn.addEventListener('click', resetBallToPlunger);
@@ -1986,5 +2164,17 @@
         console.log('[SPIRITBALL 3D] Flippers + obstacle layout initialized.');
     }
 
-    main().catch((err) => showFatalError('Failed to initialize SPIRITBALL 3D.', err));
+    main().catch((err) => {
+        // Reactive fallback for SIMD-incompatible browsers/devices the proactive iOS-version
+        // check above doesn't specifically name (e.g. an old desktop browser or unusual WebView)
+        // - any Havok init failure whose message mentions WASM/WebAssembly/SIMD is treated as a
+        // compatibility issue, not a generic/network failure, and gets the honest message +
+        // 2D-version link instead of the raw technical error.
+        const message = err && err.message ? err.message : String(err);
+        if (/wasm|webassembly|simd/i.test(message)) {
+            showUnsupportedMessage(message);
+        } else {
+            showFatalError('Failed to initialize SPIRITBALL 3D.', err);
+        }
+    });
 })();

@@ -1,7 +1,7 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stages 1–10 implemented (Stages 4-10 with expanded/adjusted scope — see
+**Status (2026-08-09):** Stages 1–11 implemented (Stages 4-11 with expanded/adjusted scope — see
 below). Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
@@ -88,8 +88,19 @@ the player's first launch input (this build has no menu/title screen yet for a l
 state to attach to). See `10-*.md`'s implementation note for exactly which 2D shake call sites
 don't have anything to attach to yet (fuel lights, obstacles, inlanes/outlanes, bonus lane,
 launch ramp, mission-complete, rank-up - all still Stage 12 territory) and why flash uses a DOM
-overlay instead of the `DefaultRenderingPipeline` the doc suggested. Stages 11-13 are planned, not
-started.
+overlay instead of the `DefaultRenderingPipeline` the doc suggested. Stage 11 replaces Stage 4's
+tap-canvas-half touch stopgap with the real arcade-style flipper zones and launch button ported
+directly from `release-prompts/14-*.md` (same markup/CSS, event pattern, `vibrate()`/
+`setLaunchReady()`/fullscreen-and-orientation-lock/rotate-prompt behavior - wired to this file's
+own `activateFlipper()`/`handleLaunchPress()` etc. instead of a Phaser scene's polling loop), and
+adds a proactive+reactive Havok/WASM-SIMD compatibility check (iOS below 16.4 is a known
+deterministic ceiling, checked via UA version sniffing before even attempting the CDN load;
+verified in this sandbox with spoofed user agents at the exact 15.4/16.4 boundary, real
+functional testing of the branch logic, not just a syntax check) that links to the already-working
+`phaser2d.html` as an explicit, documented fallback decision rather than leaving unsupported
+players with nothing. See `11-*.md`'s implementation note, including why performance-tier gating
+needed no new infrastructure (Stages 7-8 already cover the heavy effects). Stages 12-13 are
+planned, not started.
 
 ## The goal
 
