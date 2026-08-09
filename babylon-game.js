@@ -239,6 +239,46 @@
     const PLUNGER_TRAVEL_M = 0.045; // from the ball at rest, and how far it pulls back at full charge
 
     // ===================================
+    // Scoring, collision/trigger detection, and the drain zone (babylon-prompts/06-*.md).
+    //
+    // SCOPE DECISION for this pass, made explicitly rather than silently: the full mission FSM in
+    // ../index.js (mission select/start/complete/abort, fuel depletion, rank-up, the mission-
+    // target-selects-mission flow) is deeply tied to Phaser UI that doesn't exist in this build
+    // yet (popups, HUD text, mission-select feedback - that's Stage 12's job). Porting that logic
+    // now, with nothing able to display it, would be dead code nobody could verify. What IS
+    // ported for real this stage: the point values, the physical-vs-trigger collision
+    // architecture the doc asks for, per-object hit cooldowns (ported from
+    // isOnCooldown()/setCooldown()), and the drain zone (ball-loss detection), all driving a
+    // minimal score/lives readout on the existing dev status panel. Mission logic is deferred to
+    // whenever Stage 12's real UI exists to show it.
+    //
+    // Point values ported directly from CONFIG.scores in ../index.js (not redesigned).
+    const SCORE_ATTACK_BUMPER = 500;
+    const SCORE_SATELLITE = 1000;
+    const SCORE_MISSION_TARGET = 750;
+    const SCORE_REENTRY_LANE = 2000;
+    const SCORE_SLINGSHOT = 100;
+
+    // Cooldown durations ported from setupCollisions()'s setCooldown() calls in ../index.js.
+    const COOLDOWN_BUMPER_MS = 300;
+    const COOLDOWN_SATELLITE_MS = 400;
+    const COOLDOWN_SLINGSHOT_MS = 200;
+    const COOLDOWN_MISSION_TARGET_MS = 500;
+    const COOLDOWN_REENTRY_LANE_MS = 1000;
+
+    // Drain zone, ported from setupDrainZone() in ../index.js (2D px: center x=270 (table
+    // center), y=1010 (50px past the table's bottom edge), width=540, height=150). The 3D table
+    // boundary (buildTable()) was already built with no "bottom wall" - Stage 2 faithfully ported
+    // setupTable()'s 7 walls, none of which close off the bottom, matching the 2D game's actual
+    // open gap between the flippers for the ball to drain through. This trigger volume is what
+    // catches it on the far side of that gap, well past FLIPPER_Z_M (-0.36).
+    const DRAIN_ZONE_WIDTH_M = TABLE_WIDTH_M;
+    const DRAIN_ZONE_DEPTH_PX = 150;
+    const DRAIN_ZONE_CENTER_Y_PX = 1010;
+
+    const STARTING_LIVES = 3; // ported from CONFIG.startingLives
+
+    // ===================================
     // Loading/error handling - same hardened pattern proven out in babylon-spike.js after real
     // playtesting found the original version could hang silently. See that file's Stage 1
     // implementation note for why each piece here exists.
@@ -623,6 +663,9 @@
             const mesh = BABYLON.MeshBuilder.CreateSphere('bumper' + i, { diameter: BUMPER_RADIUS_M * 2 }, scene);
             mesh.position.set(pos.x, BUMPER_RADIUS_M, pos.z);
             mesh.material = bumperMat;
+            mesh.metadata = { kind: 'bumper' };
+            // Physical body, not a trigger - restitution alone gives the bounce; the ball's
+            // collision observable (see main()) reports the hit for scoring on top of that.
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
         });
 
@@ -638,7 +681,11 @@
             }, scene);
             mesh.position.set(pos.x, 0.015, pos.z);
             mesh.material = targetMat;
-            new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            mesh.metadata = { kind: 'missionTarget', index: i };
+            const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            // Trigger, not physical - detect-only per the doc (mission targets don't block the
+            // ball in the 2D game either; they're an overlap, not a collider, in setupCollisions()).
+            aggregate.shape.isTrigger = true;
         });
 
         const satelliteMat = new BABYLON.StandardMaterial('satelliteMat', scene);
@@ -647,6 +694,9 @@
         const satelliteMesh = BABYLON.MeshBuilder.CreateSphere('satellite', { diameter: SATELLITE_RADIUS_M * 2 }, scene);
         satelliteMesh.position.set(SATELLITE_POS.x, SATELLITE_RADIUS_M, SATELLITE_POS.z);
         satelliteMesh.material = satelliteMat;
+        satelliteMesh.metadata = { kind: 'satellite' };
+        // Physical (collider in the 2D game's setupCollisions(), not an overlap) - see this
+        // stage's implementation note for the full physical-vs-trigger mapping ported from there.
         new BABYLON.PhysicsAggregate(satelliteMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.8, friction: 0.3 }, scene);
 
         const slingshotMat = new BABYLON.StandardMaterial('slingshotMat', scene);
@@ -662,6 +712,7 @@
             mesh.position.set(def.x, 0.015, def.z);
             mesh.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20); // angled inward, like a real slingshot kicker
             mesh.material = slingshotMat;
+            mesh.metadata = { kind: 'slingshot' };
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
         });
 
@@ -677,8 +728,27 @@
             }, scene);
             mesh.position.set(pos.x, 0.01, pos.z);
             mesh.material = laneMat;
-            new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.5 }, scene);
+            mesh.metadata = { kind: 'reentryLane', index: i };
+            const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.5 }, scene);
+            aggregate.shape.isTrigger = true; // overlap, not collider, in setupCollisions()
         });
+    }
+
+    // Drain zone (Stage 6, babylon-prompts/06-*.md) - see the block comment above SCORE_ATTACK_
+    // BUMPER for the 2D->3D position conversion. A trigger volume, not a wall - the ball should
+    // pass into it, not bounce off it.
+    function buildDrainZone(scene) {
+        const mesh = BABYLON.MeshBuilder.CreateBox('drainZone', {
+            width: DRAIN_ZONE_WIDTH_M,
+            height: 0.06,
+            depth: DRAIN_ZONE_DEPTH_PX * PX_TO_M
+        }, scene);
+        mesh.position.set(0, 0.02, toWorldZ(DRAIN_ZONE_CENTER_Y_PX));
+        mesh.isVisible = false; // invisible void, matching the 2D game's black drain graphic being purely decorative
+        mesh.metadata = { kind: 'drainZone' };
+        const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
+        aggregate.shape.isTrigger = true;
+        return mesh;
     }
 
     async function main() {
@@ -711,6 +781,7 @@
         buildCamera(scene);
         buildObstacles(scene);
         buildLaunchLane(scene);
+        buildDrainZone(scene);
 
         const plungerMat = new BABYLON.StandardMaterial('plungerMat', scene);
         plungerMat.diffuseColor = new BABYLON.Color3(0.7, 0.7, 0.7);
@@ -950,6 +1021,140 @@
 
         const resetPlungerBtn = document.getElementById('reset-plunger-btn');
         resetPlungerBtn.addEventListener('click', resetBallToPlunger);
+
+        // --- Scoring, collision/trigger detection, drain (Stage 6, babylon-prompts/06-*.md) ---
+        //
+        // Architecture confirmed against Babylon's actual source (havokPlugin.ts,
+        // IPhysicsEnginePlugin.ts), not guessed: PhysicsAggregate exposes both .body and .shape;
+        // a shape's `.isTrigger = true` (set on bumpers/targets/lanes/drain above in
+        // buildObstacles()/buildDrainZone()) makes it detect-only, reported through the plugin-
+        // level `hk.onTriggerCollisionObservable` (global, not per-body - filtered below by
+        // checking which side is the ball). Regular physical hits (bumpers, satellite,
+        // slingshots - left as normal, non-trigger bodies) are reported through the ball body's
+        // own `getCollisionObservable()`, which needs `setCollisionCallbackEnabled(true)` called
+        // once first. Event `.type` values (COLLISION_STARTED, TRIGGER_ENTERED, etc.) are
+        // compared as plain strings rather than via `BABYLON.PhysicsEventType.X` - that enum is
+        // declared `const enum` in Babylon's source, which TypeScript is allowed to inline away
+        // entirely rather than emit as a real runtime object, and this sandbox has no way to load
+        // the actual CDN bundle to check whether it survived into the public build. The string
+        // values themselves ("COLLISION_STARTED" etc.) are part of the same source and not at risk
+        // of changing independently, so comparing against them directly sidesteps that question.
+        let score = 0;
+        let lives = STARTING_LIVES;
+        const statusScore = document.getElementById('status-score');
+        const statusLives = document.getElementById('status-lives');
+        statusScore.textContent = '0';
+        statusLives.textContent = String(lives);
+
+        function addScore(points) {
+            score += points;
+            statusScore.textContent = String(score);
+        }
+
+        // Per-object hit cooldown, ported from isOnCooldown()/setCooldown() in ../index.js
+        // (there keyed by Phaser game object + a Map; here keyed by mesh, same idea).
+        const hitCooldowns = new Set();
+        function isOnCooldown(mesh) {
+            return hitCooldowns.has(mesh);
+        }
+        function setCooldown(mesh, durationMs) {
+            hitCooldowns.add(mesh);
+            setTimeout(() => hitCooldowns.delete(mesh), durationMs);
+        }
+
+        // Lightweight scale-pulse as this stage's hit feedback - a 3D-appropriate stand-in for
+        // the 2D version's tween-based flash (Stage 8's particle/VFX system will do this properly
+        // later; this is enough to make a hit feel registered in the meantime).
+        function pulseMesh(mesh) {
+            const original = mesh.scaling.clone();
+            mesh.scaling.scaleInPlace(1.3);
+            setTimeout(() => {
+                if (!mesh.isDisposed()) mesh.scaling.copyFrom(original);
+            }, 100);
+        }
+
+        // Physical hits: bumpers/satellite/slingshots already bounce the ball via restitution
+        // (set in buildObstacles()) - this only adds the score/cooldown/feedback layer on top,
+        // it does NOT set the ball's velocity by hand the way the 2D version's hitAttackBumper()/
+        // hitSatellite()/hitSlingshot() did. That manual angle-based bounce was a workaround for
+        // Arcade Physics circles not imparting real force on overlap; real rigid-body contact
+        // response in Havok makes it unnecessary, not just redundant - see 04-*.md's flipper
+        // implementation note for the same reasoning applied to flippers.
+        function handlePhysicalHit(mesh) {
+            const meta = mesh.metadata;
+            if (!meta || isOnCooldown(mesh)) return;
+            if (meta.kind === 'bumper') {
+                setCooldown(mesh, COOLDOWN_BUMPER_MS);
+                addScore(SCORE_ATTACK_BUMPER);
+                pulseMesh(mesh);
+            } else if (meta.kind === 'satellite') {
+                setCooldown(mesh, COOLDOWN_SATELLITE_MS);
+                addScore(SCORE_SATELLITE);
+                pulseMesh(mesh);
+            } else if (meta.kind === 'slingshot') {
+                setCooldown(mesh, COOLDOWN_SLINGSHOT_MS);
+                addScore(SCORE_SLINGSHOT);
+                pulseMesh(mesh);
+            }
+        }
+
+        function handleTriggerHit(mesh) {
+            const meta = mesh.metadata;
+            if (!meta) return;
+            if (meta.kind === 'drainZone') {
+                handleDrain();
+                return;
+            }
+            if (isOnCooldown(mesh)) return;
+            if (meta.kind === 'missionTarget') {
+                setCooldown(mesh, COOLDOWN_MISSION_TARGET_MS);
+                addScore(SCORE_MISSION_TARGET);
+                pulseMesh(mesh);
+            } else if (meta.kind === 'reentryLane') {
+                setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
+                addScore(SCORE_REENTRY_LANE);
+                pulseMesh(mesh);
+            }
+        }
+
+        // Ported from checkDrain() in ../index.js: lose a life, end this ball's turn. No
+        // GameOverScene equivalent exists yet (Stage 12), so hitting 0 lives just resets lives
+        // and score in place after the same pause the 2D version used before showing Grim
+        // Reaper/resetting - documented as a deliberate simplification, not an oversight.
+        function handleDrain() {
+            if (!ballInPlay) return; // the ball can sit inside the trigger volume for a while;
+            // without this guard every frame it stays there would count as a separate drain.
+            ballInPlay = false;
+            lives--;
+            statusLives.textContent = String(lives);
+            setTimeout(() => {
+                if (lives <= 0) {
+                    lives = STARTING_LIVES;
+                    score = 0;
+                    statusLives.textContent = String(lives);
+                    statusScore.textContent = '0';
+                }
+                resetBallToPlunger();
+            }, 1500);
+        }
+
+        mainBall.aggregate.body.setCollisionCallbackEnabled(true);
+        mainBall.aggregate.body.getCollisionObservable().add((event) => {
+            if (event.type !== 'COLLISION_STARTED') return;
+            handlePhysicalHit(event.collidedAgainst.transformNode);
+        });
+
+        hk.onTriggerCollisionObservable.add((event) => {
+            if (event.type !== 'TRIGGER_ENTERED') return;
+            const ballBody = mainBall.aggregate.body;
+            if (event.collider === ballBody) {
+                handleTriggerHit(event.collidedAgainst.transformNode);
+            } else if (event.collidedAgainst === ballBody) {
+                handleTriggerHit(event.collider.transformNode);
+            }
+            // Trigger hits from testBalls (Stage 2's debug drop tool) are intentionally ignored -
+            // scoring/drain only tracks the one canonical mainBall.
+        });
 
         engine.runRenderLoop(() => {
             const deltaMs = engine.getDeltaTime();

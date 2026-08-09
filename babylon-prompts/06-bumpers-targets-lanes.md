@@ -82,3 +82,60 @@ physical and detect-only elements). That wiring, along with the drain zone, laun
 lane, inlanes/outlanes (none of which exist in the 3D scene yet), and everything else in this
 stage's "What to do" list, is still this stage's job - only the geometry for a subset of elements
 was pulled forward, not the logic.
+
+---
+
+## Implementation note (2026-08-09)
+
+**Scope decision, made explicitly rather than silently**: the full mission FSM in `../index.js`
+(mission select/start/complete/abort, fuel depletion, rank-up, the mission-target-selects-mission
+flow) is deeply tied to Phaser UI - popups, HUD text, mission-select visual feedback - that
+doesn't exist in this build yet (`12-*.md`'s job). Porting that logic now, with no UI able to
+display any of it, would be dead code nobody could verify or play against. What **is** ported for
+real this pass: point values, the physical-vs-trigger collision architecture, per-object hit
+cooldowns, and the drain zone, all driving a minimal score/lives readout on the existing dev
+status panel. Full mission logic is deferred until Stage 12's real UI exists to show it - at that
+point this stage's collision/trigger plumbing should need little to no rework, just real `hit*()`
+bodies instead of the simplified scoring calls currently in `handlePhysicalHit()`/
+`handleTriggerHit()`.
+
+**Collision architecture, confirmed against Babylon's actual source** (`havokPlugin.ts`,
+`IPhysicsEnginePlugin.ts`), not guessed: `PhysicsAggregate` exposes both `.body` and `.shape`.
+Setting `.shape.isTrigger = true` makes a shape detect-only, reported through the physics
+plugin's global `onTriggerCollisionObservable`. Regular physical contact is reported per-body via
+`body.getCollisionObservable()` (after `body.setCollisionCallbackEnabled(true)` once). Cross-
+checked the physical-vs-trigger split itself against `setupCollisions()` in `../index.js`
+directly (`physics.add.collider` vs `physics.add.overlap`) rather than assuming: bumpers,
+satellite, and slingshots are real colliders there too (matches what Stage 4 already built as
+physical, non-trigger bodies); mission targets and re-entry lanes are overlaps (now marked
+`isTrigger = true` to match). One deliberate behavior change from the 2D version: `hitAttackBumper()`/
+`hitSatellite()`/`hitSlingshot()` manually computed and set the ball's bounce velocity by hand -
+a workaround for Arcade Physics circle-vs-circle overlaps not imparting real force. Havok's actual
+rigid-body contact response (via each object's `restitution`, already tuned in Stage 4) makes that
+unnecessary here, not just redundant, so it wasn't ported - same reasoning already documented for
+flippers in `04-*.md`.
+
+**Event `.type` comparisons use plain strings** (`'COLLISION_STARTED'`, `'TRIGGER_ENTERED'`), not
+`BABYLON.PhysicsEventType.X`. Babylon's source declares that enum as TypeScript `const enum`,
+which can legally be inlined away entirely and omitted from a compiled bundle rather than kept as
+a real runtime object - and this sandbox has no way to load the actual CDN build to check whether
+it survived. The string values are part of the same source file and not at risk of changing
+independently of the enum, so comparing directly against them sidesteps the question rather than
+guessing.
+
+**Drain zone**: ported from `setupDrainZone()`'s position (2D px, converted the same way as every
+other element). Node-verified it sits past `FLIPPER_Z_M` with a real gap (~0.07m) for the ball to
+travel through first, and past the existing side walls' Z-extent (they stop at the table's nominal
+boundary, matching the 2D game's walls not reaching the drain either) - so the ball genuinely has
+to clear the flipper zone into open space to reach it, not get caught by a wall first. The debug
+floor from Stage 2 remains a backstop if a fast ball somehow skips the trigger.
+
+**Verified in this sandbox**: `node --check`; a Node script confirming the drain zone's geometry
+(position relative to the flippers, table walls, and ball-rest position); re-ran the CDN-blocked
+failure-path check in headless Chromium.
+
+**Not verified** (needs the real device): whether trigger detection actually fires reliably for a
+fast-moving ball (this stage's own acceptance criteria calls out exactly this risk - CCD helps
+solid-collision tunneling but this hasn't been confirmed to also cover trigger volumes), whether
+the cooldown durations feel right without the 2D version's tween/camera-shake feedback to lean on,
+and whether the minimal score/lives readout is legible/useful during actual play on a phone.

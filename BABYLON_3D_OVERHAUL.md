@@ -1,7 +1,7 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stages 1–5 implemented (Stages 4-5 with expanded/adjusted scope — see
+**Status (2026-08-09):** Stages 1–6 implemented (Stages 4-6 with expanded/adjusted scope — see
 below). Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
@@ -46,7 +46,17 @@ the plunger/launch mechanic: a kinematic (non-physics) plunger mesh, the same ch
 curve as the 2D game re-derived into real-world units, and a dedicated mobile launch button
 (Pointer Events) since the flipper touch zones already claim the rest of the screen - see
 `05-*.md`'s implementation note, including a second real-wall-clearance bug caught via the same
-Node-verification habit before any testing. Stages 6-13 are planned, not started.
+Node-verification habit before any testing. Stage 6 wires real collision/trigger detection
+(`PhysicsAggregate.shape.isTrigger`, confirmed against Babylon's source, not guessed) to a
+deliberately minimal scoring layer - point values, per-object hit cooldowns, and a real drain zone
+ending a ball's turn, all ported from `../index.js` and driving the dev status panel's new
+score/lives readout. The full mission FSM (select/start/complete/rank-up) is explicitly deferred:
+it's tied to Phaser UI (popups, HUD) that doesn't exist in this build yet, and porting it with
+nothing able to display it would be dead code - that's Stage 12's job once real screens exist. See
+`06-*.md`'s implementation note for the full physical-vs-trigger mapping (cross-checked against
+`setupCollisions()` in `../index.js` element-by-element) and why the 2D version's manual bumper/
+satellite/slingshot bounce-velocity code wasn't ported (real Havok contact response replaces it).
+Stages 7-13 are planned, not started.
 
 ## The goal
 
