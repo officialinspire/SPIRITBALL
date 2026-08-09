@@ -20,23 +20,27 @@
 //           release-prompts/14-*.md), Havok/WASM-SIMD compatibility detection with an honest
 //           fallback message, and performance-tier gating (babylon-prompts/11-*.md - see that
 //           file's implementation note)
+// Stage 12: Menu/Pause/Controls/Game-Over DOM-overlay screens, real pause (scene.physicsEnabled),
+//           and Game Over on 0 lives (babylon-prompts/12-*.md - see that file's implementation
+//           note, including why the full mission FSM still isn't built even now - no stage in
+//           this 13-stage plan actually assigns building it, only deferred to "whenever real UI
+//           exists," which this stage's screens now do)
 // See BABYLON_3D_OVERHAUL.md for the overall architecture.
 //
 // Scope so far: the static table boundary (now with a real playfield floor), the fixed gameplay
 // camera (plus an idle attract-mode orbit camera active until the first launch), one physics-
 // driven ball, two motorized flippers, a plunger/launch lane, scored obstacles (bumpers, mission
-// targets, satellite, slingshots, re-entry lanes) with real collision/trigger detection and a
-// drain zone, SPIRITBALL's actual DMT/cosmic/chakra visual identity (PBR materials, glow layer,
-// bloom, procedural starfield skybox), particle VFX (ball trail, drain vortex, hit bursts, chakra
-// sparkle), a real 3D-mounted backglass panel showing score/high-score/lives/messages, camera
-// shake/punch/screen-flash impact juice on every event that has something to react to, real
-// ported mobile touch controls (arcade flipper zones + launch button, fullscreen/orientation-lock,
-// rotate-prompt), and a proactive+reactive Havok/WASM-SIMD compatibility check with a link to the
-// still-working 2D build for unsupported devices. The full mission FSM (select/start/complete/
-// rank-up) remains deferred to Stage 12, whose real UI it needs to be testable. This file
-// supersedes babylon-spike.js as the base for the real game; the
-// spike file stays around as a disposable physics-tuning sandbox (per its own stage doc), not
-// because this file depends on it.
+// targets, satellite, slingshots, re-entry lanes) with real collision/trigger detection and a real
+// Game Over flow, SPIRITBALL's actual DMT/cosmic/chakra visual identity (PBR materials, glow
+// layer, bloom, procedural starfield skybox), particle VFX (ball trail, drain vortex, hit bursts,
+// chakra sparkle), a real 3D-mounted backglass panel showing score/high-score/lives/messages,
+// camera shake/punch/screen-flash impact juice, real ported mobile touch controls (arcade flipper
+// zones + launch button, fullscreen/orientation-lock, rotate-prompt), a proactive+reactive Havok/
+// WASM-SIMD compatibility check with a link to the still-working 2D build, and DOM-overlay Menu/
+// Pause/Controls/Game-Over screens with a real physics-halting pause. The mission FSM (select/
+// complete/rank-up) itself remains unbuilt - this file supersedes babylon-spike.js as the base
+// for the real game; the spike file stays around as a disposable physics-tuning sandbox (per its
+// own stage doc), not because this file depends on it.
 // ===================================
 
 (function () {
@@ -1473,7 +1477,15 @@
         buildLaunchLane(scene);
         buildDrainZone(scene);
         const backglass = buildBackglass(scene);
-        const highScoreKey = 'spiritball3d-highscore'; // separate from the 2D game's 'spiritball-highscore'
+        // Stage 9 originally used a separate 'spiritball3d-highscore' key to avoid cross-
+        // contaminating the 2D build's scores during parallel development. Stage 12's doc
+        // explicitly asks to reuse the 2D game's key instead ("so high scores aren't lost in the
+        // transition for anyone who played the 2D version") - now that phaser2d.html is a
+        // permanent, intentional fallback (not just a transitional artifact, per 11-*.md), this
+        // explicit instruction supersedes that earlier reasoning. Switched here; the tradeoff
+        // (scores are now shared between the 2D and 3D builds in the same browser) is the doc's
+        // own explicit intent, not an oversight.
+        const highScoreKey = 'spiritball-highscore';
         backglass.state.highScore = parseInt(localStorage.getItem(highScoreKey), 10) || 0;
         backglass.redraw();
 
@@ -1826,11 +1838,30 @@
             vibrateDevice(20 + Math.round(powerPercent * 40)); // matches launchBall()'s power-scaled vibrate() in ../index.js
         }
 
+        // SPACE has multiple jobs depending on screen state, matching the 2D game's single-
+        // persistent-listener approach (release-prompts/07-*.md's lesson: check state each time,
+        // don't re-register a listener per screen-open) - dismiss the menu and start, resume from
+        // pause, restart from game over, or (the normal case) charge/launch the plunger. All of
+        // isPaused/gameOverActive/menuOverlay/resumeGame()/startNewGame() are declared later in
+        // this function (the screens module below) but safely readable here via closure, since
+        // this callback only ever fires after main()'s full synchronous setup has completed.
         window.addEventListener('keydown', (e) => {
-            if (e.code === 'Space') {
-                e.preventDefault(); // stop the page from scrolling on spacebar
-                handleLaunchPress();
+            if (e.code !== 'Space') return;
+            e.preventDefault(); // stop the page from scrolling on spacebar
+            if (menuOverlay.style.display === 'flex') {
+                hideMenuScreen();
+                handleLaunchPress(); // also ends attract mode internally
+                return;
             }
+            if (gameOverActive) {
+                startNewGame();
+                return;
+            }
+            if (isPaused) {
+                resumeGame();
+                return;
+            }
+            handleLaunchPress();
         });
         window.addEventListener('keyup', (e) => {
             if (e.code === 'Space') handleLaunchRelease();
@@ -1928,6 +1959,12 @@
         // of changing independently, so comparing against them directly sidesteps that question.
         let score = 0;
         let lives = STARTING_LIVES;
+        // Simple hit counters, ported from gameState.statistics in ../index.js - just the ones
+        // that actually exist given Stage 6's scoped-down obstacle set (bumper/satellite/mission-
+        // target/re-entry-lane; the 2D statistics object also tracks obstacle/inlane/outlane hits
+        // that have no 3D equivalent yet). Feeds the Game Over screen's stat lines (Stage 12).
+        // Bookkeeping only, not the deferred mission FSM itself.
+        const stats = { bumperHits: 0, satelliteHits: 0, targetHits: 0, laneHits: 0 };
         const statusScore = document.getElementById('status-score');
         const statusLives = document.getElementById('status-lives');
         statusScore.textContent = '0';
@@ -1990,6 +2027,7 @@
             if (meta.kind === 'bumper') {
                 setCooldown(mesh, COOLDOWN_BUMPER_MS);
                 addScore(SCORE_ATTACK_BUMPER);
+                stats.bumperHits++;
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + SCORE_ATTACK_BUMPER, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
@@ -1997,6 +2035,7 @@
             } else if (meta.kind === 'satellite') {
                 setCooldown(mesh, COOLDOWN_SATELLITE_MS);
                 addScore(SCORE_SATELLITE);
+                stats.satelliteHits++;
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('SATELLITE!', 900);
@@ -2035,6 +2074,7 @@
             if (meta.kind === 'missionTarget') {
                 setCooldown(mesh, COOLDOWN_MISSION_TARGET_MS);
                 addScore(SCORE_MISSION_TARGET);
+                stats.targetHits++;
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 // hitMissionTarget() in ../index.js shows "Selected: {missionName}" here - no
@@ -2045,6 +2085,7 @@
             } else if (meta.kind === 'reentryLane') {
                 setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
                 addScore(SCORE_REENTRY_LANE);
+                stats.laneHits++;
                 // Persistent recolor to "lit" green MUST happen before pulseMesh(), not after -
                 // pulseMesh() captures whatever emissiveColor is current when it's called and
                 // restores exactly that after its 100ms flash, so recoloring afterward would get
@@ -2081,12 +2122,12 @@
             triggerCameraPunch(400, new BABYLON.Vector3(0, -0.03, 0));
             setTimeout(() => {
                 if (lives <= 0) {
-                    lives = STARTING_LIVES;
-                    score = 0;
-                    statusLives.textContent = String(lives);
-                    statusScore.textContent = '0';
-                    backglass.state.lives = lives;
-                    backglass.state.score = score;
+                    // Stage 12: was "reset lives/score in place" (Stage 6's documented
+                    // simplification, made before any Game Over screen existed to show final
+                    // results on). Now shows the real Game Over screen instead; NEW GAME/restart
+                    // input there is what actually resets state - see showGameOverScreen().
+                    showGameOverScreen();
+                    return;
                 }
                 backglass.redraw();
                 resetBallToPlunger();
@@ -2111,12 +2152,249 @@
             // scoring/drain only tracks the one canonical mainBall.
         });
 
+        // --- Menu, Pause, Controls, Game Over screens (Stage 12, babylon-prompts/12-*.md) ---
+        //
+        // Built as DOM/CSS overlays, not 3D meshes or Babylon GUI, per the doc's own explicit
+        // instruction (see index.html's <style> block comment for the full reasoning - HTML/CSS
+        // is easier to get font rendering/focus/screen-reader behavior right on for text-heavy,
+        // infrequently-changing screens than a 3D-scene text layout system would be; the 3D-
+        // mounted-panel treatment is reserved for the in-gameplay backglass, 09-*.md, which earns
+        // its 3D-ness by being part of the cabinet during play).
+        //
+        // Scope note: Final Rank and mission-progress stats from GameOverScene in ../index.js are
+        // deliberately NOT shown - this stage builds the screens, not the mission FSM itself
+        // (still deferred, per Stage 6's decision), and a "Final Rank" with no rank-progression
+        // system behind it would just be a permanently-fake "Rookie." Only the hit-count stats
+        // that genuinely exist (see the `stats` object above) are shown.
+        const menuOverlay = document.getElementById('menu-overlay');
+        const pauseOverlay = document.getElementById('pause-overlay');
+        const controlsOverlay = document.getElementById('controls-overlay');
+        const gameOverOverlay = document.getElementById('gameover-overlay');
+        const pauseBtn = document.getElementById('pause-btn');
+
+        let isPaused = false;
+        let gameOverActive = false;
+
+        // --- Menu/title screen: shown until the first launch input, translucent so the idle
+        // attract-mode camera (10-*.md) is visible behind it, matching the doc's explicit spec. ---
+        document.getElementById('menu-highscore').textContent = 'HIGH SCORE: ' + backglass.state.highScore;
+        document.getElementById('menu-start-instructions').textContent =
+            isMobileDevice ? 'TAP ⚡ TO START' : 'PRESS SPACE TO START';
+        menuOverlay.style.display = 'flex';
+
+        function hideMenuScreen() {
+            menuOverlay.style.display = 'none';
+        }
+
+        // Tap-anywhere-to-start, matching MenuScene's this.input.once('pointerdown', ...) in
+        // ../index.js - the overlay covers the full screen while visible, so this naturally
+        // takes priority over the flipper zones/launch button underneath without needing to
+        // modify their own handlers.
+        menuOverlay.addEventListener('click', () => {
+            hideMenuScreen();
+            handleLaunchPress(); // also ends attract mode internally
+        });
+
+        // --- Controls reference content, platform-aware (release-prompts/04-*.md's content -
+        // this already-replaced the old non-functional sound/music toggle with a real controls
+        // reference; that decision carries over unchanged, just re-rendered as DOM). ---
+        function renderControlsRows() {
+            const rowsEl = document.getElementById('controls-rows');
+            rowsEl.innerHTML = '';
+            const rows = isMobileDevice ? [
+                ['◀ / ▶ ZONES', 'Left / Right Flippers'],
+                ['⚡ BUTTON', 'Hold to Charge, Release to Launch'],
+                ['⏸ BUTTON', 'Pause / Resume']
+            ] : [
+                ['LEFT / RIGHT ARROWS', 'Left / Right Flippers'],
+                ['SPACE', 'Hold to Charge, Release to Launch'],
+                ['ESC', 'Pause / Resume']
+            ];
+            rows.forEach(([key, action]) => {
+                const row = document.createElement('div');
+                row.className = 'control-row';
+                const keySpan = document.createElement('span');
+                keySpan.className = 'key';
+                keySpan.textContent = key;
+                const actionSpan = document.createElement('span');
+                actionSpan.className = 'action';
+                actionSpan.textContent = action;
+                row.appendChild(keySpan);
+                row.appendChild(actionSpan);
+                rowsEl.appendChild(row);
+            });
+        }
+        renderControlsRows();
+
+        // --- Pause / Controls flow, ported from pauseGame()/resumeGame()/showSettingsMenu() in
+        // ../index.js. scene.physicsEnabled toggling confirmed against Babylon's actual source
+        // (see the render loop's pause-gate comment below) - not guessed. ---
+        function openPauseMenu() {
+            if (isPaused || gameOverActive || menuOverlay.style.display === 'flex') return;
+            isPaused = true;
+            scene.physicsEnabled = false;
+            pauseOverlay.style.display = 'flex';
+        }
+
+        function resumeGame() {
+            if (!isPaused) return;
+            isPaused = false;
+            scene.physicsEnabled = true;
+            pauseOverlay.style.display = 'none';
+            controlsOverlay.style.display = 'none';
+        }
+
+        function openControlsScreen() {
+            pauseOverlay.style.display = 'none';
+            controlsOverlay.style.display = 'flex';
+        }
+
+        function backFromControlsScreen() {
+            controlsOverlay.style.display = 'none';
+            pauseOverlay.style.display = 'flex';
+        }
+
+        // Matches restartGame()'s scene.start('GameScene') in ../index.js - straight back into
+        // gameplay, no menu detour. Resets all run state, not just the ball's position.
+        function startNewGame() {
+            score = 0;
+            lives = STARTING_LIVES;
+            stats.bumperHits = 0;
+            stats.satelliteHits = 0;
+            stats.targetHits = 0;
+            stats.laneHits = 0;
+            statusScore.textContent = '0';
+            statusLives.textContent = String(lives);
+            backglass.state.score = 0;
+            backglass.state.lives = lives;
+            backglass.redraw();
+            resetBallToPlunger();
+            isPaused = false;
+            scene.physicsEnabled = true;
+            pauseOverlay.style.display = 'none';
+            controlsOverlay.style.display = 'none';
+            gameOverOverlay.style.display = 'none';
+            gameOverActive = false;
+        }
+
+        document.getElementById('pause-resume-btn').addEventListener('click', resumeGame);
+        document.getElementById('pause-newgame-btn').addEventListener('click', startNewGame);
+        document.getElementById('pause-controls-btn').addEventListener('click', openControlsScreen);
+        document.getElementById('controls-back-btn').addEventListener('click', backFromControlsScreen);
+
+        function togglePauseFromButton(e) {
+            e.preventDefault();
+            if (isPaused) {
+                resumeGame();
+            } else {
+                openPauseMenu();
+            }
+        }
+        pauseBtn.addEventListener('click', togglePauseFromButton);
+        pauseBtn.addEventListener('touchstart', togglePauseFromButton, { passive: false });
+
+        // ESC: single persistent listener (release-prompts/07-*.md's lesson - check state each
+        // time a key event fires, don't re-register a resume/back shortcut every time a screen
+        // opens, which is what caused the original listener-leak bug this ports the fix from).
+        // Backs out of the Controls submenu to the pause menu instead of resuming outright when
+        // that submenu is open, matching the 2D version's exact behavior.
+        window.addEventListener('keydown', (e) => {
+            if (e.code !== 'Escape') return;
+            if (controlsOverlay.style.display === 'flex') {
+                backFromControlsScreen();
+                return;
+            }
+            if (isPaused) {
+                resumeGame();
+            } else if (!gameOverActive && menuOverlay.style.display !== 'flex') {
+                openPauseMenu();
+            }
+        });
+
+        // --- Game Over screen, ported from GameOverScene in ../index.js. Triggered from
+        // handleDrain() above when lives reach 0 (previously that just reset score/lives in
+        // place - see this stage's implementation note). ---
+        function showGameOverScreen() {
+            gameOverActive = true;
+            document.getElementById('gameover-score').textContent = String(score);
+
+            const hsLine = document.getElementById('gameover-highscore-line');
+            if (score >= backglass.state.highScore) {
+                hsLine.textContent = 'NEW HIGH SCORE!';
+                hsLine.classList.add('pulse-text');
+            } else {
+                hsLine.textContent = 'HIGH SCORE: ' + backglass.state.highScore;
+                hsLine.classList.remove('pulse-text');
+            }
+
+            const statsEl = document.getElementById('gameover-stats');
+            statsEl.innerHTML = '';
+            const statLines = [
+                ['Bumper Hits', stats.bumperHits],
+                ['Satellite Hits', stats.satelliteHits],
+                ['Target Hits', stats.targetHits],
+                ['Lane Hits', stats.laneHits]
+            ];
+            statLines.forEach(([label, value]) => {
+                if (value > 0) {
+                    const p = document.createElement('p');
+                    p.textContent = label + ': ' + value;
+                    statsEl.appendChild(p);
+                }
+            });
+
+            document.getElementById('gameover-restart-instructions').textContent =
+                isMobileDevice ? 'TAP ⚡ TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
+            gameOverOverlay.style.display = 'flex';
+        }
+
+        // Tap-anywhere-to-restart, matching GameOverScene's this.input.once('pointerdown', ...).
+        gameOverOverlay.addEventListener('click', startNewGame);
+
         engine.runRenderLoop(() => {
             const deltaMs = engine.getDeltaTime();
 
-            updateBallPhysics(mainBall, deltaMs);
-            testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
-            updateBallTrail(ballTrail, mainBall, highFidelity);
+            // Pause gate (Stage 12, babylon-prompts/12-*.md): scene.physicsEnabled = false
+            // (toggled in openPauseMenu()/resumeGame() below) already stops Havok's own step -
+            // confirmed against Babylon's actual source (scene.pure.ts: `if (this.physicsEnabled)
+            // this._advancePhysicsEngineStep(...)`) - so the flippers/ball naturally freeze via
+            // real physics with no separate flag needed for them. What Havok's flag does NOT
+            // cover is this file's OWN per-frame JS logic (anti-stuck kicks, velocity clamping,
+            // trail emission, plunger charge accumulation) - those run every render-loop tick
+            // regardless of scene.physicsEnabled, so they need their own explicit guard here to
+            // satisfy the doc's "no charge-time or physics-state corruption from the pause
+            // duration" requirement. Camera effects and the dev-panel status readouts are left
+            // running during pause - harmless either way, and simpler than guarding everything.
+            if (!isPaused) {
+                updateBallPhysics(mainBall, deltaMs);
+                testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
+                updateBallTrail(ballTrail, mainBall, highFidelity);
+
+                if (ccdTestActive) {
+                    ccdTestElapsedMs += deltaMs;
+                    if (mainBall.mesh.position.z > topWallFarEdgeZ) {
+                        statusCcd.textContent = 'FAIL — tunneled through top wall';
+                        statusCcd.className = 'bad';
+                        ccdTestActive = false;
+                    } else if (ccdTestElapsedMs >= CCD_TEST_DURATION_MS) {
+                        statusCcd.textContent = 'PASS — never exceeded wall bound';
+                        statusCcd.className = 'ok';
+                        ccdTestActive = false;
+                    }
+                }
+
+                // Continuous charge-to-power curve, ported from updatePlunger() in ../index.js -
+                // no fixed tiers, power increases smoothly with hold duration up to
+                // PLUNGER_CHARGE_TIME_MS. Guarded by isPaused so charge time doesn't keep
+                // accumulating while the pause menu is open.
+                if (plungerCharging) {
+                    plungerChargeElapsedMs += deltaMs;
+                    const chargePercent = Math.min(plungerChargeElapsedMs / PLUNGER_CHARGE_TIME_MS, 1);
+                    plungerPower = PLUNGER_MIN_POWER_MS + (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS) * chargePercent;
+                    plunger.chargePercent = chargePercent;
+                }
+                updatePlungerVisual(plunger);
+            }
 
             if (attractModeActive) {
                 attractCamera.alpha += deltaMs * 0.00015; // slow continuous orbit
@@ -2124,30 +2402,7 @@
                 updateCameraEffects(deltaMs);
             }
 
-            if (ccdTestActive) {
-                ccdTestElapsedMs += deltaMs;
-                if (mainBall.mesh.position.z > topWallFarEdgeZ) {
-                    statusCcd.textContent = 'FAIL — tunneled through top wall';
-                    statusCcd.className = 'bad';
-                    ccdTestActive = false;
-                } else if (ccdTestElapsedMs >= CCD_TEST_DURATION_MS) {
-                    statusCcd.textContent = 'PASS — never exceeded wall bound';
-                    statusCcd.className = 'ok';
-                    ccdTestActive = false;
-                }
-            }
-
             statusStuckTimer.textContent = Math.round(mainBall.stuckTimeMs) + ' ms';
-
-            // Continuous charge-to-power curve, ported from updatePlunger() in ../index.js - no
-            // fixed tiers, power increases smoothly with hold duration up to PLUNGER_CHARGE_TIME_MS.
-            if (plungerCharging) {
-                plungerChargeElapsedMs += deltaMs;
-                const chargePercent = Math.min(plungerChargeElapsedMs / PLUNGER_CHARGE_TIME_MS, 1);
-                plungerPower = PLUNGER_MIN_POWER_MS + (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS) * chargePercent;
-                plunger.chargePercent = chargePercent;
-            }
-            updatePlungerVisual(plunger);
             statusPlungerCharge.textContent = Math.round(plunger.chargePercent * 100) + '%';
 
             // Live flipper angle readout (degrees) - see createFlipper()'s comment on the

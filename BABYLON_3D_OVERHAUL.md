@@ -1,7 +1,7 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stages 1–11 implemented (Stages 4-11 with expanded/adjusted scope — see
+**Status (2026-08-09):** Stages 1–12 implemented (Stages 4-12 with expanded/adjusted scope — see
 below). Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
@@ -99,8 +99,21 @@ verified in this sandbox with spoofed user agents at the exact 15.4/16.4 boundar
 functional testing of the branch logic, not just a syntax check) that links to the already-working
 `phaser2d.html` as an explicit, documented fallback decision rather than leaving unsupported
 players with nothing. See `11-*.md`'s implementation note, including why performance-tier gating
-needed no new infrastructure (Stages 7-8 already cover the heavy effects). Stages 12-13 are
-planned, not started.
+needed no new infrastructure (Stages 7-8 already cover the heavy effects). Stage 12 builds the
+Menu/Pause/Controls/Game-Over screens as DOM/CSS overlays (per the doc's own instruction, not 3D
+meshes) ported from `MenuScene`/`GameOverScene`/`pauseGame()`/`showSettingsMenu()` in
+`../index.js` - same content, platform-aware instructions, and tap-anywhere/single-persistent-ESC-
+listener behavior. Pause genuinely halts physics via `scene.physicsEnabled` (confirmed against
+Babylon's actual source, not assumed from the name) plus an explicit render-loop guard around this
+file's own per-frame JS that Havok's flag alone doesn't cover (plunger charge accumulation, anti-
+stuck kicks). `handleDrain()` now shows a real Game Over screen on 0 lives instead of Stage 6's
+placeholder reset-in-place. High-score storage switched from the separate `spiritball3d-highscore`
+key back to the 2D game's own `spiritball-highscore`, per this stage's explicit instruction, now
+that `phaser2d.html` is a permanent fallback rather than a transitional artifact. See `12-*.md`'s
+implementation note for what's still deliberately not shown (Final Rank, mission progress - no
+stage in this plan actually assigns building the mission FSM itself, only defers it to "whenever
+real UI exists," which now it does). Stage 13 (parity QA and cleanup) remains planned, not
+started.
 
 ## The goal
 
