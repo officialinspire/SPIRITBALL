@@ -397,7 +397,10 @@
     // instead, the on-page flipper-angle readout (see main()) exists specifically so a human can
     // immediately see whether this assumption held - if a flipper doesn't move, moves the wrong
     // way, or both flippers move the same absolute direction instead of mirroring, this is where
-    // to look first.
+    // to look first. (First real playtest showed both flippers reading a static 0.0deg even at
+    // rest - that turned out to be a separate bug in the readout itself, not this assumption; see
+    // flipperAngleDegrees()'s comment. This assumption is still unconfirmed pending a retest with
+    // the fixed readout.)
     // ===================================
     function createFlipper(scene, name, pivotWorldPos, isLeft, mat) {
         const anchor = BABYLON.MeshBuilder.CreateBox(name + 'Anchor', { size: 0.006 }, scene);
@@ -480,6 +483,23 @@
             BABYLON.PhysicsConstraintAxis.ANGULAR_Y,
             -flipper.motorSign * FLIPPER_RETURN_SPEED_RAD_S
         );
+    }
+
+    // A physics-driven mesh's `.rotation` Euler property is NOT reliable for reading its current
+    // orientation. Confirmed against Babylon's actual source (transformNode.pure.ts): the
+    // rotationQuaternion setter explicitly resets `.rotation` to (0,0,0) the moment
+    // rotationQuaternion takes over ("// reset the rotation vector" in Babylon's own code) -
+    // which happens automatically inside PhysicsAggregate's PhysicsBody constructor. Havok's
+    // per-frame sync then only ever writes rotationQuaternion, never touches `.rotation` again -
+    // so `.rotation.y` stays permanently frozen at 0 for the whole life of any physics body.
+    // (This is what made the flipper-angle readout below show a static 0.0deg for both flippers
+    // even once real playtesting on a physical device confirmed Havok, the table, and the ball
+    // were all otherwise working - a broken readout, not proof of a broken constraint.)
+    function flipperAngleDegrees(mesh) {
+        if (mesh.rotationQuaternion) {
+            return (mesh.rotationQuaternion.toEulerAngles().y * 180) / Math.PI;
+        }
+        return (mesh.rotation.y * 180) / Math.PI;
     }
 
     // ===================================
@@ -765,9 +785,10 @@
 
             // Live flipper angle readout (degrees) - see createFlipper()'s comment on the
             // biggest unverified assumption in this stage; this is how a human confirms whether
-            // it held.
-            statusLeftFlipper.textContent = (leftFlipper.mesh.rotation.y * 180 / Math.PI).toFixed(1) + '°';
-            statusRightFlipper.textContent = (rightFlipper.mesh.rotation.y * 180 / Math.PI).toFixed(1) + '°';
+            // it held. Uses flipperAngleDegrees(), not raw mesh.rotation.y - see that function's
+            // comment for why the raw Euler property can't be trusted on a physics-driven mesh.
+            statusLeftFlipper.textContent = flipperAngleDegrees(leftFlipper.mesh).toFixed(1) + '°';
+            statusRightFlipper.textContent = flipperAngleDegrees(rightFlipper.mesh).toFixed(1) + '°';
 
             scene.render();
         });
