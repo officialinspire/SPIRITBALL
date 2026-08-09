@@ -1,8 +1,12 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status:** Planning complete, implementation not started. This document plus
-`babylon-prompts/01-13-*.md` are the deliverable — no code has been changed yet.
+**Status (2026-08-09):** Stage 1 (`babylon-prompts/01-*.md`) is implemented —
+`babylon-spike.html`/`babylon-spike.js` exist as a standalone diagnostic page. Its CDN-failure
+handling was verified working in this sandbox (the Babylon/Havok CDN is blocked here, same as
+Phaser's was in earlier sessions); the actual physics/rendering behavior still needs a real
+browser to verify before Stage 2 begins — see the implementation note in `01-*.md`. Stages 2–13
+are planned, not started.
 
 ## The goal
 

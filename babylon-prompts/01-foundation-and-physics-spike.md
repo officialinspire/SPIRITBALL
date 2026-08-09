@@ -72,3 +72,37 @@ chosen scale), find out here, not four stages in.
 - If anything about this spike feels physically wrong (ball floats, jitters uncontrollably,
   tunnels through the floor at higher drop heights), **stop and fix it here** before moving to
   Stage 2 - every later stage assumes this foundation is solid.
+
+---
+
+## Implementation note (2026-08-09)
+Built `babylon-spike.html` + `babylon-spike.js`. Before writing code, verified the additional
+API surface this stage needed beyond what `BABYLON_3D_OVERHAUL.md` already confirmed:
+`PhysicsAggregate`'s constructor shape (`mesh, PhysicsShapeType, options, scene`),
+`PhysicsShapeType.BOX`/`.SPHERE`, and - specifically - the CCD method names
+`setCcdMotionThreshold`/`setCcdSweptSphereRadius` on a Havok `PhysicsBody`, confirmed via a
+Babylon.js forum thread ("Continuous Collision Detection with Havok") surfaced through web
+search (the thread itself was blocked by this environment's egress proxy, same as
+`doc.babylonjs.com`, but the search engine's summary of it was accessible and consistent enough
+to trust). Code defensively checks for those methods' existence before calling them and logs a
+warning if absent, rather than assuming and crashing.
+
+Implemented: CDN load-failure detection (`typeof BABYLON`/`typeof HavokPhysics` checks) before
+touching either API, a full try/catch around async init with a loud on-page error panel (not
+just a console error) on any failure, a tilted static box ground + dynamic sphere ball at
+real-world pinball scale (27mm ball, ~6.5° tilt), CCD wired up on the ball body, a freely
+orbitable camera for inspection, and a status readout (Havok load state, live ball speed/height)
+plus a reset button that disposes and recreates the ball's physics body rather than relying on
+unverified mesh-to-physics transform sync behavior.
+
+**Verified in this sandbox**: the failure path. `cdn.babylonjs.com` is blocked by this
+environment's network policy (confirmed via the same headless-Chromium + proxy technique used to
+verify Phaser's CDN block in earlier sessions) - loading the page correctly shows the on-page
+error panel with a specific, actionable message ("window.BABYLON is undefined... check network
+access to cdn.babylonjs.com") rather than a silent blank canvas, and this was confirmed by
+inspecting the rendered DOM (`#error-panel` has `style="display: block;"`) and the console log,
+not just by reading the code. **Not verified**: the actual physics behavior (ball rolling, CCD,
+camera framing, tilt direction) - none of that can be exercised until this runs somewhere the
+Babylon/Havok CDN isn't blocked. The tilt direction is explicitly flagged in a code comment as an
+unverified guess to confirm visually and correct if wrong. This needs a real browser session
+before Stage 2 begins.
