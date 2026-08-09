@@ -53,3 +53,54 @@ style, updated live from game state.
   quick succession.
 - The panel visually reads as "part of the cabinet," lit and glowing consistently with the rest of
   the Stage 7 visual treatment, not like a flat debug-text overlay pasted onto the scene.
+
+---
+
+## Implementation note (2026-08-09)
+
+**Scope, decided consistently with Stage 6**: the doc asks for rank/mission/multiplier alongside
+score/lives, but none of that state exists in this build - Stage 6 explicitly deferred the full
+mission FSM (select/start/complete/rank-up) to Stage 12, since it needs real UI to be worth
+porting. This panel is a *renderer*, not a new source of state, so it can only show what's
+actually tracked: score, a new high score, lives, and transient messages. Rank/mission/multiplier
+will slot into this same panel once Stage 12 gives them real values.
+
+**Real 3D-mounted panel**, not a DOM overlay: a `MeshBuilder.CreatePlane` positioned above/behind
+the playfield at the far end (+Z, opposite the flippers - the real-cabinet backglass position),
+tilted to face back toward the fixed camera, `DOUBLESIDE` so it's visible regardless of which way
+Babylon's default plane-facing convention turns out to be (unverifiable in this sandbox either
+way, so the safer option was taken over guessing the sign). Node-verified the panel sits at ~18.6°
+off the camera's look direction, comfortably inside its 25° half-FOV cone.
+
+**Rendering**: one `DynamicTexture` (`{width, height}` constructor form, confirmed against
+Babylon's actual source since the alternate `number`-only form was the one already used for
+Stage 7's starfield and I wanted to confirm both are real), redrawn from scratch on every change
+rather than partially updated - simplest and most robust option, no partial-clear bugs to chase
+sight-unseen. A faint repeating dot-grid overlay evokes the dot-matrix look without rasterizing
+actual per-character dot glyphs (a lot of unverifiable-by-me complexity for a first pass).
+
+**Message system**: last-message-wins - a new `showMessage()` call cancels any pending clear-timer
+from the previous message and replaces it immediately, rather than queuing. This satisfies the
+"don't stack illegibly" acceptance criterion directly, at the cost of a very-quick second hit
+cutting the first message's dwell time short - judged acceptable over building a real queue for a
+panel whose actual on-screen legibility can't be checked here anyway. Wired to the same trigger
+points `updateHUD()`/`showPopup()` use in `../index.js`: launch, each hit type (with the exact
+point values where the 2D version shows them, e.g. `+500`), mission-target hits (a generic
+"TARGET!" instead of `hitMissionTarget()`'s "Selected: {missionName}", since there's no mission to
+name yet), and drain (a text message standing in for the 2D version's Grim Reaper visual, which
+doesn't exist in this build).
+
+**High score**: new, persisted via `localStorage` under `spiritball3d-highscore` - a deliberately
+different key from the 2D game's `spiritball-highscore`, so the two builds don't cross-contaminate
+each other's high scores while both exist in parallel during this project.
+
+**Verified in this sandbox**: `node --check`; the DynamicTexture constructor signature confirmed
+against Babylon's actual source; a Node script confirming the panel's position/angle sits inside
+the fixed camera's FOV cone; the established top-level-`BABYLON`-reference grep sweep (clean); the
+CDN-blocked failure-path check in headless Chromium.
+
+**Not verified** (same limitation as Stages 7-8): whether the panel is actually legible at that
+size/distance/angle, whether the dot-matrix styling reads as intended, whether messages are
+readable during their 600-1400ms window, and whether the tilt/facing direction chosen actually
+shows the panel's front (not back) face to the camera - `DOUBLESIDE` should make this moot, but
+it's untested.

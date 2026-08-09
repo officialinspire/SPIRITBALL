@@ -4,20 +4,172 @@
 // Stage 3: ball physics + anti-stuck logic (babylon-prompts/03-*.md)
 // Stage 4: motorized flippers + an authentic Space-Cadet-inspired obstacle layout
 //          (babylon-prompts/04-*.md, expanded scope - see that file's implementation note)
+// Stage 5: plunger and launch mechanic (babylon-prompts/05-*.md)
+// Stage 6: collision/trigger detection, scoring, drain zone (babylon-prompts/06-*.md, scoped -
+//          see that file's implementation note for what's deferred to Stage 12)
+// Stage 7: real materials, lighting, glow/bloom, and a procedural skybox
+//          (babylon-prompts/07-*.md - see that file's implementation note, including a real
+//          playfield-floor bug fixed as part of this stage, not just a visual pass)
+// Stage 8: particle VFX - ball trail, drain vortex, per-hit bursts, chakra sparkle
+//          (babylon-prompts/08-*.md - see that file's implementation note)
+// Stage 9: 3D-mounted backglass/dot-matrix display (babylon-prompts/09-*.md - see that file's
+//          implementation note)
+// Stage 10: camera shake/punch/flash juice + an idle attract-mode orbit camera
+//           (babylon-prompts/10-*.md - see that file's implementation note)
+// Stage 11: real mobile touch controls (arcade edge zones + launch button, ported from
+//           release-prompts/14-*.md), Havok/WASM-SIMD compatibility detection with an honest
+//           fallback message, and performance-tier gating (babylon-prompts/11-*.md - see that
+//           file's implementation note)
 // See BABYLON_3D_OVERHAUL.md for the overall architecture.
 //
-// Scope so far: the static table BOUNDARY, the fixed gameplay camera, one physics-driven ball,
-// two motorized flippers, and PLACEHOLDER (unscored) geometry for the pop bumper cluster,
-// mission target bank, satellite, slingshots, and re-entry lanes - positioned per a fresh,
-// authentic pinball-cabinet-inspired layout rather than a raw port of the old 2D game's
-// coordinates. Full scoring/mission logic for those obstacles is still Stage 6's job; this stage
-// only establishes where things physically sit and how the ball bounces off them. This file
-// supersedes babylon-spike.js as the base for the real game; the spike file stays around as a
-// disposable physics-tuning sandbox (per its own stage doc), not because this file depends on it.
+// Scope so far: the static table boundary (now with a real playfield floor), the fixed gameplay
+// camera (plus an idle attract-mode orbit camera active until the first launch), one physics-
+// driven ball, two motorized flippers, a plunger/launch lane, scored obstacles (bumpers, mission
+// targets, satellite, slingshots, re-entry lanes) with real collision/trigger detection and a
+// drain zone, SPIRITBALL's actual DMT/cosmic/chakra visual identity (PBR materials, glow layer,
+// bloom, procedural starfield skybox), particle VFX (ball trail, drain vortex, hit bursts, chakra
+// sparkle), a real 3D-mounted backglass panel showing score/high-score/lives/messages, camera
+// shake/punch/screen-flash impact juice on every event that has something to react to, real
+// ported mobile touch controls (arcade flipper zones + launch button, fullscreen/orientation-lock,
+// rotate-prompt), and a proactive+reactive Havok/WASM-SIMD compatibility check with a link to the
+// still-working 2D build for unsupported devices. The full mission FSM (select/start/complete/
+// rank-up) remains deferred to Stage 12, whose real UI it needs to be testable. This file
+// supersedes babylon-spike.js as the base for the real game; the
+// spike file stays around as a disposable physics-tuning sandbox (per its own stage doc), not
+// because this file depends on it.
 // ===================================
 
 (function () {
     'use strict';
+
+    // Reduced-motion detection, ported from the bottom of ../index.js
+    // (window.SPIRITBALL_reducedMotion) - re-declared here rather than assumed shared, since this
+    // is a separate page load (index.html no longer loads index.js at all; see
+    // babylon-prompts/13-*.md's forward-reference note) with its own fresh `window`. Plain
+    // browser API, no BABYLON reference, safe to run immediately at top level.
+    window.SPIRITBALL_reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+    // ===================================
+    // Mobile device detection, fullscreen/orientation-lock, vibration (Stage 11,
+    // babylon-prompts/11-*.md) - ported from InputManager in ../index.js (release-prompts/
+    // 02-*.md, 14-*.md), same detection logic/thresholds, not redesigned. Plain browser APIs,
+    // no BABYLON references, safe at top level/immediately. The actual DOM element wiring
+    // (flipper zones, launch button) happens inside main(), since it needs the flipper/plunger
+    // functions defined there - these are just the reusable, BABYLON-independent pieces.
+    // ===================================
+    let isMobileDevice = false;
+    let fullscreenRequested = false;
+
+    function detectMobile() {
+        const userAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const smallScreen = window.innerWidth <= 768;
+        const portrait = window.innerHeight > window.innerWidth;
+        isMobileDevice = userAgent || (smallScreen && portrait);
+        updateMobileControlsVisibility();
+    }
+
+    function updateMobileControlsVisibility() {
+        const mobileControls = document.getElementById('mobile-controls');
+        const rotateOverlay = document.getElementById('rotate-overlay');
+        const isLandscape = window.innerWidth > window.innerHeight;
+
+        // The playfield is portrait-only, same as the 2D game - a mobile device held in
+        // landscape has nowhere to put the touch controls, so show a rotate prompt instead of
+        // stranding the player with an unplayable, control-less screen.
+        if (isMobileDevice && isLandscape) {
+            if (rotateOverlay) rotateOverlay.style.display = 'flex';
+            if (mobileControls) mobileControls.style.display = 'none';
+            return;
+        }
+
+        if (rotateOverlay) rotateOverlay.style.display = 'none';
+        if (mobileControls) {
+            const shouldShow = isMobileDevice || window.innerHeight > window.innerWidth || window.innerWidth <= 767;
+            mobileControls.style.display = shouldShow ? 'block' : 'none';
+        }
+    }
+
+    // Requires a user gesture, so this can't happen automatically on page load - called from the
+    // first touchstart anywhere (see main()). Failures are silently ignored (fullscreen can be
+    // denied by the browser; orientation lock isn't supported at all on iOS Safari) - a
+    // nice-to-have enhancement, never a requirement to play.
+    function requestFullscreenAndLock() {
+        if (fullscreenRequested) return;
+        fullscreenRequested = true;
+        const el = document.documentElement;
+        const requestFs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+        const lockPortrait = () => {
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('portrait').catch(() => {});
+            }
+        };
+        if (requestFs) {
+            Promise.resolve(requestFs.call(el)).then(lockPortrait).catch(() => {});
+        } else {
+            lockPortrait();
+        }
+    }
+
+    function vibrateDevice(ms) {
+        if (navigator.vibrate) {
+            try { navigator.vibrate(ms); } catch (e) { /* ignore */ }
+        }
+    }
+
+    function setupResizeHandlers(engine) {
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                detectMobile();
+                engine.resize(); // Babylon's equivalent of the 2D game's window.game.scale.refresh()
+            }, 250);
+        });
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => {
+                detectMobile();
+                engine.resize();
+            }, 100);
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                detectMobile();
+                engine.resize();
+            }
+        });
+    }
+
+    // ===================================
+    // Havok/WASM-SIMD compatibility (Stage 11) - iOS below 16.4 has no WebAssembly SIMD support
+    // at all (confirmed in BABYLON_3D_OVERHAUL.md's research), which Havok requires; this is a
+    // hard compatibility ceiling, not a performance tier to tune away. Checked proactively here
+    // (before even attempting to load the CDN scripts) via UA version sniffing for the one
+    // specific, known-deterministic case; main()'s outer catch handler also treats any
+    // WASM/SIMD-flavored error message reactively the same way, covering other unknown
+    // SIMD-incompatible browsers this version check doesn't name. Decision, made explicitly per
+    // the doc's own prompt: yes, there is a fallback - phaser2d.html (the 2D build) already
+    // exists and works, so the message links to it rather than leaving an unsupported player
+    // with nothing playable at all.
+    // ===================================
+    function detectLikelyUnsupportedIOS() {
+        const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        if (!isIOS) return false;
+        const match = navigator.userAgent.match(/OS (\d+)_(\d+)/);
+        if (!match) return false;
+        const major = parseInt(match[1], 10);
+        const minor = parseInt(match[2], 10);
+        return major < 16 || (major === 16 && minor < 4);
+    }
+
+    function showUnsupportedMessage(reason) {
+        console.error('[SPIRITBALL 3D] Unsupported device:', reason);
+        const panel = document.getElementById('unsupported-panel');
+        if (panel) panel.style.display = 'flex';
+        const canvasEl = document.getElementById('renderCanvas');
+        if (canvasEl) canvasEl.style.display = 'none';
+        const mobileControlsEl = document.getElementById('mobile-controls');
+        if (mobileControlsEl) mobileControlsEl.style.display = 'none';
+    }
 
     // ===================================
     // Coordinate / scale conversion (the single source of truth every later stage must reuse)
@@ -197,6 +349,94 @@
     ]; // 3 lanes near the top wall, matching CONFIG.reentryLaneCount
 
     // ===================================
+    // Plunger / launch lane (babylon-prompts/05-*.md). Per that stage's own recommendation, this
+    // is a kinematic-animated plunger mesh (no physics body of its own) plus a directly-set ball
+    // velocity on release - not a simulated spring - for the same determinism reasons the 2D
+    // version (CONFIG.plungerMinPower/plungerMaxPower, updatePlunger()/launchBall() in
+    // ../index.js, hardened in release-prompts/13-*.md) kept its launch mechanic simple.
+    // ===================================
+
+    // Launch lane position/size, ported from setupPlunger()'s launchPort rectangle and
+    // resetBall()'s ball-rest position in ../index.js (2D CONFIG-space pixels), not redesigned.
+    const BALL_REST_X_PX = 470; // matches resetBall()'s (CONFIG.width-70, CONFIG.height-220) exactly
+    const BALL_REST_Z_PX = 740;
+    // The lane's only wall that didn't already exist: rightWall (see buildTable()) already forms
+    // the lane's outer edge, but nothing separated it from the main playfield on the inner side.
+    // NOT derived from setupPlunger()'s launchPort rectangle (center 495, width 50, "inner edge"
+    // at 470, same as BALL_REST_X_PX) - confirmed that rectangle is purely decorative in the 2D
+    // game (setupPlunger() never calls physics.add.existing() on it, unlike every real wall in
+    // setupTable()), so reusing 470 for a genuine physics wall here would put the ball resting
+    // flush against it with zero clearance. Node-verified: needs >= ball radius (0.0135m) + this
+    // wall's own half-thickness (~0.0038m) =~0.017m of clearance from BALL_REST_X_PX; picked 30px
+    // (~0.028m) for a comfortable margin, which also reads as a believably real-width lane.
+    const LANE_INNER_WALL_X_PX = BALL_REST_X_PX - 30; // 440
+    const LANE_WALL_Z_TOP_PX = 500; // a bit past the old decorative port's own 535-785 span for margin
+    const LANE_WALL_Z_BOTTOM_PX = 830;
+
+    const PLUNGER_CHARGE_TIME_MS = 2000; // same charge window as CONFIG.plungerChargeTime
+    // Power range ported from CONFIG.plungerMinPower/plungerMaxPower (700/1600 px/s) via the same
+    // PX_TO_M scale used for MAX_BALL_SPEED_MS in 03-*.md - these become target ball speeds in
+    // m/s, directly set on release (not an impulse - see the block comment above), consistent
+    // with how updateBallPhysics()'s anti-stuck kick already sets velocity directly rather than
+    // applying a force/impulse.
+    const PLUNGER_MIN_POWER_MS = 700 * PX_TO_M; // ~0.66 m/s
+    const PLUNGER_MAX_POWER_MS = 1600 * PX_TO_M; // ~1.51 m/s - comfortably under MAX_BALL_SPEED_MS
+    // launchBall()'s horizontal kick (-(150 + power*0.08)) ported the same way: a fixed base plus
+    // a ratio of the power itself, so proportionally weaker/stronger launches still curve the same
+    // relative amount.
+    const PLUNGER_HORIZONTAL_BASE_MS = 150 * PX_TO_M;
+    const PLUNGER_HORIZONTAL_RATIO = 0.08;
+
+    const PLUNGER_REST_Z_M = -0.02; // new 3D-only visual detail: how far the plunger tip sits
+    const PLUNGER_TRAVEL_M = 0.045; // from the ball at rest, and how far it pulls back at full charge
+
+    // ===================================
+    // Scoring, collision/trigger detection, and the drain zone (babylon-prompts/06-*.md).
+    //
+    // SCOPE DECISION for this pass, made explicitly rather than silently: the full mission FSM in
+    // ../index.js (mission select/start/complete/abort, fuel depletion, rank-up, the mission-
+    // target-selects-mission flow) is deeply tied to Phaser UI that doesn't exist in this build
+    // yet (popups, HUD text, mission-select feedback - that's Stage 12's job). Porting that logic
+    // now, with nothing able to display it, would be dead code nobody could verify. What IS
+    // ported for real this stage: the point values, the physical-vs-trigger collision
+    // architecture the doc asks for, per-object hit cooldowns (ported from
+    // isOnCooldown()/setCooldown()), and the drain zone (ball-loss detection), all driving a
+    // minimal score/lives readout on the existing dev status panel. Mission logic is deferred to
+    // whenever Stage 12's real UI exists to show it.
+    //
+    // Point values ported directly from CONFIG.scores in ../index.js (not redesigned).
+    const SCORE_ATTACK_BUMPER = 500;
+    const SCORE_SATELLITE = 1000;
+    const SCORE_MISSION_TARGET = 750;
+    const SCORE_REENTRY_LANE = 2000;
+    const SCORE_SLINGSHOT = 100;
+
+    // Cooldown durations ported from setupCollisions()'s setCooldown() calls in ../index.js.
+    const COOLDOWN_BUMPER_MS = 300;
+    const COOLDOWN_SATELLITE_MS = 400;
+    const COOLDOWN_SLINGSHOT_MS = 200;
+    const COOLDOWN_MISSION_TARGET_MS = 500;
+    const COOLDOWN_REENTRY_LANE_MS = 1000;
+    // Not present in the 2D cooldown map (walls/flippers there fire shake unconditionally, every
+    // physics-substep-worth of contact) - added here (Stage 10) specifically to keep grinding
+    // contact from shaking the camera every single frame, matching the doc's own "don't add
+    // camera effects for every single event if it starts feeling noisy" constraint.
+    const COOLDOWN_WALL_MS = 150;
+    const COOLDOWN_FLIPPER_MS = 150;
+
+    // Drain zone, ported from setupDrainZone() in ../index.js (2D px: center x=270 (table
+    // center), y=1010 (50px past the table's bottom edge), width=540, height=150). The 3D table
+    // boundary (buildTable()) was already built with no "bottom wall" - Stage 2 faithfully ported
+    // setupTable()'s 7 walls, none of which close off the bottom, matching the 2D game's actual
+    // open gap between the flippers for the ball to drain through. This trigger volume is what
+    // catches it on the far side of that gap, well past FLIPPER_Z_M (-0.36).
+    const DRAIN_ZONE_WIDTH_M = TABLE_WIDTH_M;
+    const DRAIN_ZONE_DEPTH_PX = 150;
+    const DRAIN_ZONE_CENTER_Y_PX = 1010;
+
+    const STARTING_LIVES = 3; // ported from CONFIG.startingLives
+
+    // ===================================
     // Loading/error handling - same hardened pattern proven out in babylon-spike.js after real
     // playtesting found the original version could hang silently. See that file's Stage 1
     // implementation note for why each piece here exists.
@@ -250,14 +490,84 @@
     }
 
     // ===================================
+    // Visual identity (babylon-prompts/07-*.md) - SPIRITBALL's actual DMT/cosmic/chakra palette,
+    // ported directly from CONFIG.colors in ../index.js (hex -> BABYLON.Color3, /255 per
+    // channel), not redesigned. Used by every material below instead of the Stage 1-6 placeholder
+    // flat colors.
+    //
+    // The actual BABYLON.Color3 objects are NOT constructed here at top-level scope - only the
+    // raw hex numbers are (safe, no BABYLON reference). Every prior stage's top-level constants
+    // learned this the hard way (see 04-*.md's implementation note): a top-level `new
+    // BABYLON.Color3(...)` call evaluates at script-parse time, before the `typeof BABYLON ===
+    // 'undefined'` guard in main() ever runs, and would throw an unguarded ReferenceError if the
+    // CDN is blocked - defeating this file's entire CDN-failure error-handling effort before it
+    // even registers. The COLOR_* names are declared here (as `let`, unassigned) so every
+    // function below can close over them, but they're only actually populated inside main(),
+    // after the guard - see the "Populate deferred COLOR_* constants" block there.
+    // ===================================
+    function hexToColor3(hex) {
+        return new BABYLON.Color3(
+            ((hex >> 16) & 0xff) / 255,
+            ((hex >> 8) & 0xff) / 255,
+            (hex & 0xff) / 255
+        );
+    }
+
+    const HEX_BALL = 0xffffff;
+    const HEX_EYEBALL = 0x00ffff;
+    const HEX_FLIPPER = 0xff00ff;
+    const HEX_WALL = 0x00ccff;
+    const HEX_BUMPERS = [0xff0099, 0x00ffff, 0xff00ff, 0xffff00];
+    const HEX_CHAKRA = [0x9400d3, 0xff1493, 0xffff00, 0x00ff00, 0x00ffff, 0x0000ff, 0x8b00ff];
+    const HEX_SATURN = 0xffa500;
+    const HEX_SATURN_RING = 0xffd700;
+    const HEX_MISSION_ACTIVE = 0x00ff00;
+    const HEX_BACKGROUND = 0x1a0033;
+
+    let COLOR_BALL, COLOR_EYEBALL, COLOR_FLIPPER, COLOR_WALL, COLOR_BUMPERS, COLOR_CHAKRA,
+        COLOR_SATURN, COLOR_SATURN_RING, COLOR_MISSION_ACTIVE, COLOR_BACKGROUND;
+
+    // Device-tier gate, ported from PerformanceManager.detectPerformance() in ../index.js -
+    // simplified to the single boolean the doc asks for ("structured so they *can* be gated...
+    // behind a single 'high fidelity' boolean"), not the full 3-tier system, since Stage 11 owns
+    // real mobile performance tuning. Gates glow/bloom only - materials/colors/lighting stay the
+    // same on every device, only the heavier postprocessing is conditional.
+    function detectHighFidelity() {
+        const cores = navigator.hardwareConcurrency || 2;
+        const memory = navigator.deviceMemory || 2;
+        const isLowEnd = /Android\s[1-6]\.|iPhone\s[1-7]\.|iPad\s[1-5]\./i.test(navigator.userAgent);
+        let score = 0;
+        if (cores >= 8) score += 3;
+        else if (cores >= 4) score += 2;
+        else if (cores >= 2) score += 1;
+        if (memory >= 8) score += 3;
+        else if (memory >= 4) score += 2;
+        else if (memory >= 2) score += 1;
+        if (isLowEnd) score -= 2;
+        return score >= 3; // matches the 2D PerformanceManager's "medium" and "high" cutoff
+    }
+
+    // ===================================
     // Table geometry, ported from ../index.js GameScene.setupTable(). Boundary only (matches
     // this stage's scope) - the center divider post between the flippers is NOT included here;
     // it belongs conceptually with the flipper/obstacle work in later stages, not the outer
     // boundary this stage is responsible for.
     // ===================================
     function buildTable(scene) {
-        const wallMat = new BABYLON.StandardMaterial('wallMat', scene);
-        wallMat.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.55); // placeholder only - Stage 7 does real materials
+        // Chrome rails, per the doc's spec - PBR with no environment/reflection texture (a
+        // deliberate risk call: this project already depends on one fragile CDN load
+        // (Babylon/Havok itself); adding a second external texture fetch for IBL reflections
+        // wasn't worth the extra failure mode, especially since this whole stage can't be
+        // visually verified in this sandbox anyway). A true metallic=1 PBR material with no
+        // environment texture would read as nearly black (metals have almost no diffuse
+        // response, they rely on reflection) - kept metallic moderate and albedo bright enough
+        // that the walls stay clearly visible under direct light alone, at some cost to how
+        // convincingly "chrome" they read without real reflections.
+        const wallMat = new BABYLON.PBRMaterial('wallMat', scene);
+        wallMat.albedoColor = COLOR_WALL;
+        wallMat.metallic = 0.6;
+        wallMat.roughness = 0.3;
+        wallMat.emissiveColor = COLOR_WALL.scale(0.15);
 
         // [x2d, y2d, width2d, height2d, rotation2d] - lifted directly from setupTable() in
         // ../index.js so this stays a faithful port, not a redesign.
@@ -280,6 +590,7 @@
             mesh.position.set(toWorldX(def.x), WALL_HEIGHT_M / 2, toWorldZ(def.y));
             mesh.rotation.y = toWorldRotationY(def.rot);
             mesh.material = wallMat;
+            mesh.metadata = { kind: 'wall' }; // Stage 10's light per-wall-touch camera shake
 
             new BABYLON.PhysicsAggregate(
                 mesh,
@@ -291,10 +602,40 @@
             return mesh;
         });
 
-        // A large, level base plane under everything, purely so a ball that somehow gets past a
-        // boundary gap is still visible resting somewhere instead of vanishing (a debugging aid
-        // for this stage, not a claim that the layout is gap-free - that still needs a real
-        // playtest with the drop-ball tool below). Not part of the "official" table geometry.
+        // ---------------------------------------------------------------------------------
+        // REAL BUG FIX, not just a visual pass: Stages 2-6 never built an actual playfield floor.
+        // The wall boxes above only span Y=[0, WALL_HEIGHT_M] (0 to 0.04) - there was nothing
+        // solid at Y=0 for the ball to rest ON. Every ball has actually been falling 0.15m past
+        // the walls' base down to the debugFloor below (added purely as an escaped-ball safety
+        // net, explicitly "not part of the official table geometry" per its own comment) and
+        // settling there - well below where the flippers/bumpers/walls visually and physically
+        // sit, with no lateral (X/Z) containment at that depth either, since the walls don't
+        // extend down that far. Nothing built so far would have caught this: the CCD test only
+        // checks Z position, the stuck-timer/ball-count readouts don't check height, and the
+        // camera's tilted long-distance framing could plausibly hide a 15cm vertical offset from
+        // a phone screen. Fixed here, discovered while implementing this stage's own "playfield
+        // surface" material requirement, which implies a floor mesh should exist to material -
+        // it didn't, so this had to be built before it could be materialed.
+        // ---------------------------------------------------------------------------------
+        const playfieldMat = new BABYLON.PBRMaterial('playfieldMat', scene);
+        playfieldMat.albedoColor = COLOR_BACKGROUND.scale(0.5);
+        playfieldMat.metallic = 0.3;
+        playfieldMat.roughness = 0.35; // glossy-varnished, not mirror-flat, per the doc
+        const playfield = BABYLON.MeshBuilder.CreateBox('playfield', {
+            width: TABLE_WIDTH_M,
+            height: 0.02,
+            depth: TABLE_LENGTH_M
+        }, scene);
+        playfield.position.set(0, -0.01, 0); // top face at Y=0, matching the walls' base
+        playfield.material = playfieldMat;
+        new BABYLON.PhysicsAggregate(playfield, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.2, friction: 0.5 }, scene);
+        // Deliberately does NOT extend into the drain zone's Z range (past FLIPPER_Z_M, see
+        // 06-*.md) - the ball needs to keep falling through there, that's the whole mechanic.
+
+        // Large safety-net plane well below the real playfield, purely so a ball that somehow
+        // gets past a boundary gap (or through the now-unreachable-in-normal-play drain zone) is
+        // still visible resting somewhere instead of vanishing into the void forever. Not part of
+        // the "official" table geometry.
         const floor = BABYLON.MeshBuilder.CreateBox('debugFloor', {
             width: TABLE_WIDTH_M * 2,
             height: 0.01,
@@ -308,6 +649,69 @@
         new BABYLON.PhysicsAggregate(floor, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.1, friction: 0.8 }, scene);
 
         return walls;
+    }
+
+    // The launch lane's one missing wall (see LANE_INNER_WALL_X_PX's comment) - separates the
+    // plunger channel from the main playfield. rightWall (above) already forms the lane's outer
+    // edge, so this is the only new physical geometry this stage needs beyond that.
+    function buildLaunchLane(scene) {
+        const laneMat = new BABYLON.PBRMaterial('laneWallMat', scene); // same chrome treatment as buildTable()'s walls
+        laneMat.albedoColor = COLOR_WALL;
+        laneMat.metallic = 0.6;
+        laneMat.roughness = 0.3;
+        laneMat.emissiveColor = COLOR_WALL.scale(0.15);
+
+        const wall = BABYLON.MeshBuilder.CreateBox('launchLaneWall', {
+            width: 8 * PX_TO_M,
+            height: WALL_HEIGHT_M,
+            depth: (LANE_WALL_Z_BOTTOM_PX - LANE_WALL_Z_TOP_PX) * PX_TO_M
+        }, scene);
+        wall.position.set(
+            toWorldX(LANE_INNER_WALL_X_PX),
+            WALL_HEIGHT_M / 2,
+            toWorldZ((LANE_WALL_Z_TOP_PX + LANE_WALL_Z_BOTTOM_PX) / 2)
+        );
+        wall.material = laneMat;
+        new BABYLON.PhysicsAggregate(wall, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.6 }, scene);
+
+        return wall;
+    }
+
+    // Kinematic-animated plunger mesh (no physics body - see the "Plunger / launch lane" block
+    // comment above). chargePercent (0-1) directly drives its Z position between rest and
+    // fully-pulled-back; main() reads/writes .chargePercent every frame, this function only
+    // builds the mesh and applies whatever chargePercent currently holds.
+    function createPlunger(scene, mat) {
+        const mesh = BABYLON.MeshBuilder.CreateCylinder('plunger', {
+            diameter: 8 * PX_TO_M,
+            height: 0.03,
+            tessellation: 12
+        }, scene);
+        mesh.rotation.x = Math.PI / 2; // lay the cylinder flat along Z, the lane's long axis
+        mesh.material = mat;
+
+        const plunger = {
+            mesh,
+            chargePercent: 0,
+            baseX: toWorldX(BALL_REST_X_PX),
+            baseY: 0.02,
+            baseZ: toWorldZ(BALL_REST_Z_PX) + PLUNGER_REST_Z_M
+        };
+        plunger.mesh.position.set(plunger.baseX, plunger.baseY, plunger.baseZ);
+        return plunger;
+    }
+
+    function updatePlungerVisual(plunger) {
+        // Pulls back along -Z (toward the near/camera end) as charge increases, matching the 2D
+        // plunger sprite's tween-back-then-snap-forward motion - see release-prompts/13-*.md.
+        plunger.mesh.position.z = plunger.baseZ - plunger.chargePercent * PLUNGER_TRAVEL_M;
+        // Simple color pulse at max charge in place of a particle effect (Stage 8's job) - the
+        // stage doc explicitly allows this as the minimum viable max-charge feedback for now.
+        if (plunger.chargePercent >= 1) {
+            plunger.mesh.material.emissiveColor = new BABYLON.Color3(0, 0.8, 0.8);
+        } else {
+            plunger.mesh.material.emissiveColor = new BABYLON.Color3(0, 0.2, 0.2);
+        }
     }
 
     // Fixed, non-orbitable pinball-cabinet camera: positioned near the flipper end (-Z, per the
@@ -324,6 +728,360 @@
         camera.fov = BABYLON.Tools.ToRadians(50);
         camera.minZ = 0.01;
         return camera;
+    }
+
+    // Idle/attract-mode camera (Stage 10, babylon-prompts/10-*.md) - a slow automatic orbit,
+    // genuinely 3D-only spectacle with no 2D equivalent. This build has no menu/title screen yet
+    // (Stage 12's job), so "idle" is interpreted as "before the player's first launch input" -
+    // active from page load, main() switches scene.activeCamera to the fixed gameplay camera the
+    // moment handleLaunchPress() first fires (see endAttractMode() in main()). No
+    // attachControl() call - rotation is driven programmatically (camera.alpha incremented each
+    // frame), not by user drag, so it can't be grabbed by the same touch input the flipper zones
+    // already use.
+    function buildAttractCamera(scene) {
+        const camera = new BABYLON.ArcRotateCamera(
+            'attractCamera',
+            -Math.PI / 2,
+            Math.PI / 3.2,
+            1.4,
+            new BABYLON.Vector3(0, 0.05, 0),
+            scene
+        );
+        camera.minZ = 0.01;
+        camera.fov = BABYLON.Tools.ToRadians(50);
+        return camera;
+    }
+
+    // Lighting rig (babylon-prompts/07-*.md): dim ambient fill + a couple of point lights for
+    // definition, deliberately NOT scene-wide flat illumination - "the emissive materials and
+    // glow layer should carry most of the visual energy," matching the reference image's mostly-
+    // dark cabinet interior lit by its own glowing elements.
+    function buildLighting(scene) {
+        const ambient = new BABYLON.HemisphericLight('ambientLight', new BABYLON.Vector3(0, 1, -0.3), scene);
+        ambient.intensity = 0.35;
+
+        const flipperLight = new BABYLON.PointLight('flipperLight', new BABYLON.Vector3(0, 0.15, FLIPPER_Z_M), scene);
+        flipperLight.diffuse = COLOR_FLIPPER;
+        flipperLight.intensity = 0.4;
+        flipperLight.range = TABLE_LENGTH_M * 0.6;
+
+        // Near the far/top wall, the re-entry lanes, and the satellite - the "backglass" end of
+        // the table conceptually, even though this build has no literal backglass panel yet.
+        const backLight = new BABYLON.PointLight('backLight', new BABYLON.Vector3(0, 0.15, TABLE_LENGTH_M * 0.4), scene);
+        backLight.diffuse = new BABYLON.Color3(0.6, 0.2, 1);
+        backLight.intensity = 0.35;
+        backLight.range = TABLE_LENGTH_M * 0.7;
+
+        return { ambient, flipperLight, backLight };
+    }
+
+    // Procedural starfield skybox - a DynamicTexture (canvas-drawn dots, the same technique
+    // BootScene.preload() uses for the 2D eyeball sprite in ../index.js, just applied here to a
+    // sphere instead of a flat sprite) rather than loading an external image. Deliberate: this
+    // project already depends on one fragile CDN load (Babylon/Havok itself), and the existing
+    // background.webp asset (release-prompts/09-*.md) was authored as a flat 2D portrait-game
+    // backdrop, not a projection suited to wrapping around a 3D sphere - reusing it as-is would
+    // look wrong, and re-authoring a proper equirectangular version wasn't worth doing sight-
+    // unseen in a sandbox that can't render the result either way.
+    function createStarfieldTexture(scene) {
+        const size = 512;
+        const texture = new BABYLON.DynamicTexture('starfieldTex', size, scene, false);
+        const ctx = texture.getContext();
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, size);
+        gradient.addColorStop(0, '#1a0033'); // CONFIG.colors.background
+        gradient.addColorStop(1, '#05000f');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+
+        for (let i = 0; i < 300; i++) {
+            const x = Math.random() * size;
+            const y = Math.random() * size;
+            const r = Math.random() * 1.4 + 0.3;
+            ctx.fillStyle = 'rgba(255,255,255,' + Math.random().toFixed(2) + ')';
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        texture.update();
+        return texture;
+    }
+
+    function buildSkybox(scene) {
+        const skyMat = new BABYLON.StandardMaterial('skyMat', scene);
+        skyMat.backFaceCulling = false; // render the inside of the sphere, camera sits inside it
+        skyMat.disableLighting = true; // unlit - it's a backdrop, not a lit surface
+        skyMat.emissiveTexture = createStarfieldTexture(scene);
+        skyMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+
+        const skybox = BABYLON.MeshBuilder.CreateSphere('skybox', { diameter: 20, sideOrientation: BABYLON.Mesh.BACKSIDE }, scene);
+        skybox.material = skyMat;
+        skybox.infiniteDistance = true;
+        return skybox;
+    }
+
+    // ===================================
+    // Backglass / dot-matrix display (babylon-prompts/09-*.md) - a real mounted 3D panel, not a
+    // flat DOM/canvas overlay, per the doc's explicit point that a floating UI layer wouldn't
+    // read as "part of the cabinet." Driven by one DynamicTexture, redrawn from scratch on every
+    // change (simplest and most robust option - no partial-clear bugs to chase in a sandbox that
+    // can't watch it render). A faint dot-grid overlay evokes the "dot-matrix" look without
+    // rasterizing actual per-character dot glyphs, which would be a lot of unverifiable-by-me
+    // complexity for a first pass. DOUBLESIDE so it's visible from the fixed camera regardless of
+    // which way Babylon's default plane-facing convention turns out to be - another place this
+    // sandbox can't confirm visually, so the safer option was taken over guessing the correct sign.
+    //
+    // Scope note: the doc asks for rank/mission/multiplier alongside score/lives - none of that
+    // state exists yet, deliberately (Stage 6's scope decision: the full mission FSM is deferred
+    // to Stage 12, since it needs real UI to be worth porting, and this panel doesn't change that
+    // - it's a renderer, not a new source of state). Only score, a new high-score (localStorage,
+    // separate key from the 2D game's so the two builds don't cross-contaminate during parallel
+    // development), lives, and the message line are wired up; rank/mission/multiplier will slot
+    // into this same panel once Stage 12 gives them real values to show.
+    // ===================================
+    function buildBackglass(scene) {
+        const width = 512;
+        const height = 256;
+        const texture = new BABYLON.DynamicTexture('backglassTex', { width, height }, scene, false);
+        const ctx = texture.getContext();
+
+        const mat = new BABYLON.StandardMaterial('backglassMat', scene);
+        mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        mat.disableLighting = true; // unlit - the DynamicTexture IS the display's own light source
+        mat.emissiveTexture = texture;
+        mat.backFaceCulling = false;
+
+        const mesh = BABYLON.MeshBuilder.CreatePlane('backglass', {
+            width: 0.32,
+            height: 0.15,
+            sideOrientation: BABYLON.Mesh.DOUBLESIDE
+        }, scene);
+        // Mounted above/behind the playfield at the far end (+Z, opposite the flippers), tilted
+        // to face back down toward the camera - the real-cabinet backglass position.
+        mesh.position.set(0, 0.28, TABLE_LENGTH_M / 2 + 0.06);
+        mesh.rotation.x = 0.4;
+        mesh.material = mat;
+
+        const state = { score: 0, highScore: 0, lives: STARTING_LIVES, message: '', messageTimer: null };
+
+        function redraw() {
+            ctx.fillStyle = '#05000f';
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.05)';
+            for (let y = 6; y < height; y += 8) {
+                for (let x = 6; x < width; x += 8) {
+                    ctx.fillRect(x, y, 2, 2);
+                }
+            }
+
+            ctx.textBaseline = 'top';
+            ctx.textAlign = 'left';
+            ctx.font = 'bold 30px monospace';
+            ctx.fillStyle = '#00ffff';
+            ctx.fillText('SCORE ' + state.score, 16, 16);
+
+            ctx.font = 'bold 20px monospace';
+            ctx.fillStyle = '#ffd700';
+            ctx.fillText('HI ' + state.highScore, 16, 58);
+
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#ff0099';
+            ctx.fillText('BALLS ' + state.lives, width - 16, 58);
+            ctx.textAlign = 'left';
+
+            if (state.message) {
+                ctx.font = 'bold 32px monospace';
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.fillText(state.message, width / 2, height - 76);
+                ctx.textAlign = 'left';
+            }
+
+            texture.update();
+        }
+
+        // Last-message-wins: a new call cancels any pending clear from the previous one instead
+        // of queuing, so rapid-fire hits replace rather than stack illegibly (per the doc's
+        // acceptance criteria) - the tradeoff is a very quick second hit can cut the first
+        // message's dwell time short, judged an acceptable simplification over building a real
+        // message queue for a stage whose actual on-screen legibility can't be checked here.
+        function showMessage(text, durationMs) {
+            if (state.messageTimer) clearTimeout(state.messageTimer);
+            state.message = text;
+            redraw();
+            state.messageTimer = setTimeout(() => {
+                state.message = '';
+                state.messageTimer = null;
+                redraw();
+            }, durationMs || 1100); // 1100ms matches showPopup()'s tween duration in ../index.js
+        }
+
+        redraw();
+        return { mesh, state, redraw, showMessage };
+    }
+
+    // ===================================
+    // Particle VFX (babylon-prompts/08-*.md). One shared soft-dot texture (a DynamicTexture radial
+    // gradient, same self-contained-asset approach as Stage 7's starfield - no new external image
+    // dependency) reused/tinted across every particle system below via color1/color2, rather than
+    // loading a dedicated particle sprite.
+    //
+    // Honesty note: the doc frames ball trail and drain vortex as "direct port[s]" of existing 2D
+    // effects, which is accurate (setupParticles() in ../index.js has both, ported faithfully
+    // below). Hit-burst effects and chakra sparkle, however, do NOT actually exist in the current
+    // 2D codebase - grepped for other add.particles() calls and found none; hit feedback there is
+    // tween/tint-based only (Stage 7 already ported the tween-equivalent scale/emissive pulse).
+    // Built fresh here to match the doc's intent, not literally ported from anywhere.
+    // ===================================
+    function createParticleTexture(scene) {
+        const size = 32;
+        const texture = new BABYLON.DynamicTexture('particleTex', size, scene, false);
+        const ctx = texture.getContext();
+        const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+        gradient.addColorStop(0, 'rgba(255,255,255,1)');
+        gradient.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+        texture.update();
+        texture.hasAlpha = true;
+        return texture;
+    }
+
+    // Ball trail: emitter attached directly to the ball mesh (particles spawn at its current
+    // position every frame automatically), cyan/eyeball-tinted, additive - direct port of
+    // setupParticles()'s follow-the-ball ballTrail emitter. Started immediately but with emitRate
+    // driven every frame from the ball's actual speed (see updateBallTrail() in main()'s render
+    // loop) rather than a constant rate, so it reads as "the ball is moving fast" per the
+    // acceptance criteria instead of a trail that's equally visible at rest.
+    function buildBallTrail(scene, texture, ballMesh, highFidelity) {
+        const trail = new BABYLON.ParticleSystem('ballTrail', highFidelity ? 200 : 80, scene);
+        trail.particleTexture = texture;
+        trail.emitter = ballMesh;
+        trail.minEmitBox = new BABYLON.Vector3(0, 0, 0);
+        trail.maxEmitBox = new BABYLON.Vector3(0, 0, 0);
+        trail.color1 = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0.7);
+        trail.color2 = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0.4);
+        trail.colorDead = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0);
+        trail.minSize = 0.005;
+        trail.maxSize = 0.012;
+        trail.minLifeTime = 0.25;
+        trail.maxLifeTime = 0.4; // matches the 2D version's 400ms lifespan
+        trail.emitRate = 0; // driven per-frame by updateBallTrail() based on ball speed
+        trail.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        trail.direction1 = new BABYLON.Vector3(-0.05, 0, -0.05);
+        trail.direction2 = new BABYLON.Vector3(0.05, 0.05, 0.05);
+        trail.minEmitPower = 0.02;
+        trail.maxEmitPower = 0.08;
+        trail.start();
+        return trail;
+    }
+
+    // Continuously adjusts the ball trail's emit rate from its actual current speed - called once
+    // per frame from the render loop. Below the stuck-speed threshold it's effectively off; above
+    // MAX_BALL_SPEED_MS it's at full rate.
+    function updateBallTrail(trail, ball, highFidelity) {
+        const velocity = ball.aggregate.body.getLinearVelocity();
+        const speed = velocity.length();
+        const speedFraction = Math.min(speed / MAX_BALL_SPEED_MS, 1);
+        const maxRate = highFidelity ? 60 : 25; // ~40/sec at 2D's frequency:25ms was the baseline; scaled up a bit since this trail fades with speed instead of running constantly
+        trail.emitRate = speedFraction > 0.1 ? maxRate * speedFraction : 0;
+    }
+
+    // Drain vortex: ambient, always-running emitter at the drain zone, purple/black/indigo -
+    // direct port of setupParticles()'s drainParticles (continuous for the whole game in the 2D
+    // version too, not event-triggered). Simplification: Babylon's core ParticleSystem
+    // interpolates color1->color2 per particle rather than picking from a discrete tint array the
+    // way Phaser's `tint: [...]` does, and a true inward spiral needs a custom per-particle update
+    // function - approximated instead with a downward/inward direction cone, which reads as
+    // "falling into a void" without that added complexity in a stage that can't be visually
+    // checked anyway. Reduced-motion: this is decorative/ambient, not the "hit confirmed"
+    // feedback the doc says must stay intact, so it's significantly reduced (not fully removed -
+    // the drain zone should still read as *something*) rather than skipped outright.
+    function buildDrainVortex(scene, texture, highFidelity) {
+        const vortex = new BABYLON.ParticleSystem('drainVortex', highFidelity ? 150 : 60, scene);
+        vortex.particleTexture = texture;
+        vortex.emitter = new BABYLON.Vector3(0, 0.02, toWorldZ(DRAIN_ZONE_CENTER_Y_PX) + 0.06);
+        vortex.minEmitBox = new BABYLON.Vector3(-DRAIN_ZONE_WIDTH_M / 2, 0, -0.02);
+        vortex.maxEmitBox = new BABYLON.Vector3(DRAIN_ZONE_WIDTH_M / 2, 0, 0.02);
+        vortex.color1 = new BABYLON.Color4(0.58, 0, 0.83, 0.8); // 0x9400D3
+        vortex.color2 = new BABYLON.Color4(0.29, 0, 0.51, 0.6); // 0x4B0082
+        vortex.colorDead = new BABYLON.Color4(0, 0, 0, 0);
+        vortex.minSize = 0.006;
+        vortex.maxSize = 0.014;
+        vortex.minLifeTime = 1.0;
+        vortex.maxLifeTime = 1.5; // matches the 2D version's 1500ms
+        vortex.direction1 = new BABYLON.Vector3(-0.15, -0.1, -0.2);
+        vortex.direction2 = new BABYLON.Vector3(0.15, 0.05, -0.35); // net -Z/-Y bias = "into the void"
+        vortex.minEmitPower = 0.05;
+        vortex.maxEmitPower = 0.15;
+        const baseRate = highFidelity ? 20 : 8;
+        vortex.emitRate = window.SPIRITBALL_reducedMotion ? baseRate * 0.25 : baseRate;
+        vortex.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        vortex.start();
+        return vortex;
+    }
+
+    // Chakra sparkle: low-intensity ambient particles rising from each mission target, tinted to
+    // that target's own chakra color (reuses the mesh's current material color, so it stays
+    // correct even if the material changes later e.g. once mission-select visuals exist in Stage
+    // 12). Fully skipped under reduced-motion - purely decorative, no gameplay-feedback role.
+    function buildChakraSparkle(scene, texture, targetMesh, highFidelity) {
+        if (window.SPIRITBALL_reducedMotion) return null;
+        const color = targetMesh.material.albedoColor;
+        const sparkle = new BABYLON.ParticleSystem('chakraSparkle', highFidelity ? 40 : 15, scene);
+        sparkle.particleTexture = texture;
+        sparkle.emitter = targetMesh;
+        sparkle.minEmitBox = new BABYLON.Vector3(-0.01, 0, -0.005);
+        sparkle.maxEmitBox = new BABYLON.Vector3(0.01, 0.02, 0.005);
+        sparkle.color1 = new BABYLON.Color4(color.r, color.g, color.b, 0.6);
+        sparkle.color2 = new BABYLON.Color4(color.r, color.g, color.b, 0.3);
+        sparkle.colorDead = new BABYLON.Color4(color.r, color.g, color.b, 0);
+        sparkle.minSize = 0.003;
+        sparkle.maxSize = 0.007;
+        sparkle.minLifeTime = 0.6;
+        sparkle.maxLifeTime = 1.0;
+        sparkle.direction1 = new BABYLON.Vector3(-0.01, 0.03, -0.01);
+        sparkle.direction2 = new BABYLON.Vector3(0.01, 0.06, 0.01); // gentle upward drift
+        sparkle.minEmitPower = 0.01;
+        sparkle.maxEmitPower = 0.03;
+        sparkle.emitRate = highFidelity ? 8 : 3;
+        sparkle.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        sparkle.start();
+        return sparkle;
+    }
+
+    // One-shot hit-burst: color-matched to whatever the hit mesh's material currently shows
+    // (so it automatically matches e.g. a re-entry lane's persistent lit-green recolor from
+    // 07-*.md, not a separately-tracked color). Always fires regardless of reduced-motion - this
+    // IS the "hit confirmed" feedback the doc says must stay intact; only its particle COUNT is
+    // reduced on low-tier devices, which is a performance gate, not a motion gate.
+    // disposeOnStop cleans itself up automatically once its burst particles finish dying, so
+    // repeated hits don't accumulate leaked particle systems.
+    function spawnHitBurst(scene, texture, mesh, highFidelity) {
+        const color = mesh.material.albedoColor || mesh.material.diffuseColor;
+        const burst = new BABYLON.ParticleSystem('hitBurst', highFidelity ? 30 : 12, scene);
+        burst.particleTexture = texture;
+        burst.emitter = mesh.position.clone();
+        burst.minEmitBox = BABYLON.Vector3.Zero();
+        burst.maxEmitBox = BABYLON.Vector3.Zero();
+        burst.color1 = new BABYLON.Color4(color.r, color.g, color.b, 1);
+        burst.color2 = new BABYLON.Color4(1, 1, 1, 0.8);
+        burst.colorDead = new BABYLON.Color4(color.r, color.g, color.b, 0);
+        burst.minSize = 0.006;
+        burst.maxSize = 0.016;
+        burst.minLifeTime = 0.25;
+        burst.maxLifeTime = 0.45;
+        burst.direction1 = new BABYLON.Vector3(-1, -0.3, -1);
+        burst.direction2 = new BABYLON.Vector3(1, 0.6, 1);
+        burst.minEmitPower = 0.3;
+        burst.maxEmitPower = 0.7;
+        burst.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        burst.manualEmitCount = highFidelity ? 22 : 10;
+        burst.disposeOnStop = true;
+        burst.start();
+        burst.stop();
     }
 
     // Creates one physics-driven ball at the given position. Shared by the main game ball and
@@ -397,7 +1155,10 @@
     // instead, the on-page flipper-angle readout (see main()) exists specifically so a human can
     // immediately see whether this assumption held - if a flipper doesn't move, moves the wrong
     // way, or both flippers move the same absolute direction instead of mirroring, this is where
-    // to look first.
+    // to look first. (First real playtest showed both flippers reading a static 0.0deg even at
+    // rest - that turned out to be a separate bug in the readout itself, not this assumption; see
+    // flipperAngleDegrees()'s comment. This assumption is still unconfirmed pending a retest with
+    // the fixed readout.)
     // ===================================
     function createFlipper(scene, name, pivotWorldPos, isLeft, mat) {
         const anchor = BABYLON.MeshBuilder.CreateBox(name + 'Anchor', { size: 0.006 }, scene);
@@ -421,6 +1182,7 @@
         mesh.position.set(pivotWorldPos.x + offsetX, pivotWorldPos.y, pivotWorldPos.z + offsetZ);
         mesh.rotation.y = restAngleRad;
         mesh.material = mat;
+        mesh.metadata = { kind: 'flipper' }; // Stage 10's flipper-contact camera shake
 
         const aggregate = new BABYLON.PhysicsAggregate(
             mesh,
@@ -482,6 +1244,23 @@
         );
     }
 
+    // A physics-driven mesh's `.rotation` Euler property is NOT reliable for reading its current
+    // orientation. Confirmed against Babylon's actual source (transformNode.pure.ts): the
+    // rotationQuaternion setter explicitly resets `.rotation` to (0,0,0) the moment
+    // rotationQuaternion takes over ("// reset the rotation vector" in Babylon's own code) -
+    // which happens automatically inside PhysicsAggregate's PhysicsBody constructor. Havok's
+    // per-frame sync then only ever writes rotationQuaternion, never touches `.rotation` again -
+    // so `.rotation.y` stays permanently frozen at 0 for the whole life of any physics body.
+    // (This is what made the flipper-angle readout below show a static 0.0deg for both flippers
+    // even once real playtesting on a physical device confirmed Havok, the table, and the ball
+    // were all otherwise working - a broken readout, not proof of a broken constraint.)
+    function flipperAngleDegrees(mesh) {
+        if (mesh.rotationQuaternion) {
+            return (mesh.rotationQuaternion.toEulerAngles().y * 180) / Math.PI;
+        }
+        return (mesh.rotation.y * 180) / Math.PI;
+    }
+
     // ===================================
     // Obstacle layout - placeholder geometry only (see file header). All static (mass: 0) so
     // they don't need their own anti-stuck/velocity-clamp handling; restitution alone gives a
@@ -493,21 +1272,42 @@
     // note for why building real trigger/sensor detection wasn't taken on this turn).
     // ===================================
     function buildObstacles(scene) {
-        const bumperMat = new BABYLON.StandardMaterial('bumperMat', scene);
-        bumperMat.diffuseColor = new BABYLON.Color3(0, 1, 0.6);
-        bumperMat.emissiveColor = new BABYLON.Color3(0, 0.3, 0.2);
+        // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
+        // identity, not one shared color - each bumper is its own emissive-glass PBR material so
+        // it can be individually recolored/pulsed on hit (pulseMesh() in main()).
+        const bumperMats = COLOR_BUMPERS.map((color, i) => {
+            const mat = new BABYLON.PBRMaterial('bumperMat' + i, scene);
+            mat.albedoColor = color;
+            mat.metallic = 0.2;
+            mat.roughness = 0.3;
+            mat.alpha = 0.88; // "glass-or-crystal-like... moderate transparency" per the doc
+            mat.emissiveColor = color.scale(0.6);
+            return mat;
+        });
 
         BUMPER_CLUSTER.forEach((pos, i) => {
             const mesh = BABYLON.MeshBuilder.CreateSphere('bumper' + i, { diameter: BUMPER_RADIUS_M * 2 }, scene);
             mesh.position.set(pos.x, BUMPER_RADIUS_M, pos.z);
-            mesh.material = bumperMat;
+            mesh.material = bumperMats[i % bumperMats.length];
+            mesh.metadata = { kind: 'bumper' };
+            // Physical body, not a trigger - restitution alone gives the bounce; the ball's
+            // collision observable (see main()) reports the hit for scoring on top of that.
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
         });
 
-        const targetMat = new BABYLON.StandardMaterial('targetMat', scene);
-        targetMat.diffuseColor = new BABYLON.Color3(1, 0, 0.8);
-        targetMat.emissiveColor = new BABYLON.Color3(0.3, 0, 0.25);
+        // CONFIG.colors.chakra (7 colors) - each mission target gets its own chakra color
+        // (targets 0-2 use chakra[0-2]: violet, pink, yellow) instead of one shared color.
+        const targetMats = COLOR_CHAKRA.map((color, i) => {
+            const mat = new BABYLON.PBRMaterial('targetMat' + i, scene);
+            mat.albedoColor = color;
+            mat.metallic = 0.15;
+            mat.roughness = 0.25;
+            mat.alpha = 0.85;
+            mat.emissiveColor = color.scale(0.55);
+            return mat;
+        });
 
+        const missionTargetMeshes = [];
         MISSION_TARGET_BANK.forEach((pos, i) => {
             const mesh = BABYLON.MeshBuilder.CreateBox('missionTarget' + i, {
                 width: TARGET_RADIUS_M * 2,
@@ -515,21 +1315,52 @@
                 depth: 0.008
             }, scene);
             mesh.position.set(pos.x, 0.015, pos.z);
-            mesh.material = targetMat;
-            new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            mesh.material = targetMats[i % targetMats.length];
+            mesh.metadata = { kind: 'missionTarget', index: i };
+            const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            // Trigger, not physical - detect-only per the doc (mission targets don't block the
+            // ball in the 2D game either; they're an overlap, not a collider, in setupCollisions()).
+            aggregate.shape.isTrigger = true;
+            missionTargetMeshes.push(mesh);
         });
 
-        const satelliteMat = new BABYLON.StandardMaterial('satelliteMat', scene);
-        satelliteMat.diffuseColor = new BABYLON.Color3(1, 0.65, 0);
-        satelliteMat.emissiveColor = new BABYLON.Color3(0.3, 0.2, 0);
+        const satelliteMat = new BABYLON.PBRMaterial('satelliteMat', scene);
+        satelliteMat.albedoColor = COLOR_SATURN;
+        satelliteMat.metallic = 0.5;
+        satelliteMat.roughness = 0.3;
+        satelliteMat.emissiveColor = COLOR_SATURN.scale(0.3);
         const satelliteMesh = BABYLON.MeshBuilder.CreateSphere('satellite', { diameter: SATELLITE_RADIUS_M * 2 }, scene);
         satelliteMesh.position.set(SATELLITE_POS.x, SATELLITE_RADIUS_M, SATELLITE_POS.z);
         satelliteMesh.material = satelliteMat;
+        satelliteMesh.metadata = { kind: 'satellite' };
+        // Physical (collider in the 2D game's setupCollisions(), not an overlap) - see this
+        // stage's implementation note for the full physical-vs-trigger mapping ported from there.
         new BABYLON.PhysicsAggregate(satelliteMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.8, friction: 0.3 }, scene);
 
-        const slingshotMat = new BABYLON.StandardMaterial('slingshotMat', scene);
-        slingshotMat.diffuseColor = new BABYLON.Color3(1, 0, 1);
-        slingshotMat.emissiveColor = new BABYLON.Color3(0.3, 0, 0.3);
+        // Small ring, matching CONFIG.colors.saturnRing and the satellite's own "Saturn" naming/
+        // fiction in ../index.js - a cheap, self-contained addition (one flattened torus, no new
+        // asset dependency) beyond what the doc strictly asked for, purely decorative/non-physical.
+        const ringMat = new BABYLON.PBRMaterial('saturnRingMat', scene);
+        ringMat.albedoColor = COLOR_SATURN_RING;
+        ringMat.metallic = 0.6;
+        ringMat.roughness = 0.25;
+        ringMat.emissiveColor = COLOR_SATURN_RING.scale(0.3);
+        const ring = BABYLON.MeshBuilder.CreateTorus('satelliteRing', {
+            diameter: SATELLITE_RADIUS_M * 3.2,
+            thickness: SATELLITE_RADIUS_M * 0.25,
+            tessellation: 24
+        }, scene);
+        ring.position.set(SATELLITE_POS.x, SATELLITE_RADIUS_M, SATELLITE_POS.z);
+        ring.rotation.x = Math.PI / 2.4; // tilted, not flat, so it actually reads as a ring from the fixed camera angle
+        ring.material = ringMat;
+        // No physics body - purely decorative, would otherwise double the ball's satellite hit
+        // detection (this is exactly why it isn't just a bigger satellite sphere).
+
+        const slingshotMat = new BABYLON.PBRMaterial('slingshotMat', scene);
+        slingshotMat.albedoColor = new BABYLON.Color3(1, 0, 1); // no direct CONFIG.colors entry for slingshots - kept the existing magenta identity
+        slingshotMat.metallic = 0.3;
+        slingshotMat.roughness = 0.3;
+        slingshotMat.emissiveColor = new BABYLON.Color3(0.5, 0, 0.5);
 
         SLINGSHOTS.forEach((def, i) => {
             const mesh = BABYLON.MeshBuilder.CreateBox('slingshot' + i, {
@@ -540,14 +1371,22 @@
             mesh.position.set(def.x, 0.015, def.z);
             mesh.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20); // angled inward, like a real slingshot kicker
             mesh.material = slingshotMat;
+            mesh.metadata = { kind: 'slingshot' };
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
         });
 
-        const laneMat = new BABYLON.StandardMaterial('laneMat', scene);
-        laneMat.diffuseColor = new BABYLON.Color3(1, 1, 0);
-        laneMat.alpha = 0.6;
-
+        // Unlit state: dim yellow-ish neutral (no direct 2D equivalent - the 2D lanes start
+        // unlit/grey and only take on a color once hit). Lit state (CONFIG.colors.missionActive,
+        // green) is applied per-lane in handleTriggerHit() in main(), matching hitReentryLane()'s
+        // persistent lane.setFillStyle() recoloring in ../index.js, not just a brief pulse.
         REENTRY_LANES.forEach((pos, i) => {
+            const laneMat = new BABYLON.PBRMaterial('laneMat' + i, scene);
+            laneMat.albedoColor = new BABYLON.Color3(0.5, 0.5, 0.15);
+            laneMat.metallic = 0.1;
+            laneMat.roughness = 0.4;
+            laneMat.alpha = 0.6;
+            laneMat.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.05);
+
             const mesh = BABYLON.MeshBuilder.CreateBox('reentryLane' + i, {
                 width: REENTRY_LANE_RADIUS_M * 2,
                 height: 0.02,
@@ -555,12 +1394,40 @@
             }, scene);
             mesh.position.set(pos.x, 0.01, pos.z);
             mesh.material = laneMat;
-            new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.5 }, scene);
+            mesh.metadata = { kind: 'reentryLane', index: i };
+            const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.5 }, scene);
+            aggregate.shape.isTrigger = true; // overlap, not collider, in setupCollisions()
         });
+
+        // Returned so main() can attach Stage 8's chakra-sparkle particle systems - the only
+        // piece of obstacle geometry a later stage needs a direct mesh reference to.
+        return { missionTargetMeshes };
+    }
+
+    // Drain zone (Stage 6, babylon-prompts/06-*.md) - see the block comment above SCORE_ATTACK_
+    // BUMPER for the 2D->3D position conversion. A trigger volume, not a wall - the ball should
+    // pass into it, not bounce off it.
+    function buildDrainZone(scene) {
+        const mesh = BABYLON.MeshBuilder.CreateBox('drainZone', {
+            width: DRAIN_ZONE_WIDTH_M,
+            height: 0.06,
+            depth: DRAIN_ZONE_DEPTH_PX * PX_TO_M
+        }, scene);
+        mesh.position.set(0, 0.02, toWorldZ(DRAIN_ZONE_CENTER_Y_PX));
+        mesh.isVisible = false; // invisible void, matching the 2D game's black drain graphic being purely decorative
+        mesh.metadata = { kind: 'drainZone' };
+        const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
+        aggregate.shape.isTrigger = true;
+        return mesh;
     }
 
     async function main() {
         setStatus('checking scripts…');
+
+        if (detectLikelyUnsupportedIOS()) {
+            showUnsupportedMessage('iOS version below 16.4 - no WebAssembly SIMD support');
+            return;
+        }
 
         if (typeof BABYLON === 'undefined') {
             throw new Error('window.BABYLON is undefined - check network access to cdn.babylonjs.com.');
@@ -568,6 +1435,19 @@
         if (typeof HavokPhysics === 'undefined') {
             throw new Error('window.HavokPhysics is undefined - check network access to cdn.babylonjs.com.');
         }
+
+        // Populate deferred COLOR_* constants (see the "Visual identity" block comment above) -
+        // now safe, since BABYLON is confirmed defined past this point.
+        COLOR_BALL = hexToColor3(HEX_BALL);
+        COLOR_EYEBALL = hexToColor3(HEX_EYEBALL);
+        COLOR_FLIPPER = hexToColor3(HEX_FLIPPER);
+        COLOR_WALL = hexToColor3(HEX_WALL);
+        COLOR_BUMPERS = HEX_BUMPERS.map(hexToColor3);
+        COLOR_CHAKRA = HEX_CHAKRA.map(hexToColor3);
+        COLOR_SATURN = hexToColor3(HEX_SATURN);
+        COLOR_SATURN_RING = hexToColor3(HEX_SATURN_RING);
+        COLOR_MISSION_ACTIVE = hexToColor3(HEX_MISSION_ACTIVE);
+        COLOR_BACKGROUND = hexToColor3(HEX_BACKGROUND);
 
         const engine = new BABYLON.Engine(canvas, true);
         const scene = new BABYLON.Scene(engine);
@@ -582,16 +1462,153 @@
         statusHavok.textContent = 'OK';
         statusHavok.className = 'ok';
 
-        const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, -0.3), scene);
-        light.intensity = 0.9;
+        buildLighting(scene);
+        buildSkybox(scene);
 
         buildTable(scene);
-        buildCamera(scene);
-        buildObstacles(scene);
+        const camera = buildCamera(scene);
+        const attractCamera = buildAttractCamera(scene);
+        scene.activeCamera = attractCamera; // idle/attract mode until the first launch input - see endAttractMode()
+        const obstacles = buildObstacles(scene);
+        buildLaunchLane(scene);
+        buildDrainZone(scene);
+        const backglass = buildBackglass(scene);
+        const highScoreKey = 'spiritball3d-highscore'; // separate from the 2D game's 'spiritball-highscore'
+        backglass.state.highScore = parseInt(localStorage.getItem(highScoreKey), 10) || 0;
+        backglass.redraw();
 
-        const flipperMat = new BABYLON.StandardMaterial('flipperMat', scene);
-        flipperMat.diffuseColor = new BABYLON.Color3(1, 0, 1);
-        flipperMat.emissiveColor = new BABYLON.Color3(0.35, 0, 0.35);
+        // Glow layer picks up every emissive material already assigned above/below automatically
+        // - no per-mesh registration needed. Bloom is gated behind detectHighFidelity() per the
+        // doc ("structured so they *can* be gated... behind a single 'high fidelity' boolean");
+        // materials/colors/lighting stay identical on every device, only this postprocessing pass
+        // is conditional. Full mobile performance tuning remains Stage 11's job.
+        const highFidelity = detectHighFidelity();
+        const glowLayer = new BABYLON.GlowLayer('glow', scene);
+        glowLayer.intensity = highFidelity ? 0.8 : 0.5;
+
+        if (highFidelity) {
+            const pipeline = new BABYLON.DefaultRenderingPipeline('defaultPipeline', true, scene, [camera]);
+            pipeline.bloomEnabled = true;
+            pipeline.bloomThreshold = 0.6;
+            pipeline.bloomWeight = 0.5;
+            pipeline.bloomKernel = 64;
+            pipeline.bloomScale = 0.5;
+            pipeline.addCamera(attractCamera); // Stage 10's attract-mode orbit gets bloom too, while it's still the active camera
+        }
+
+        // --- Camera choreography and impact juice (Stage 10, babylon-prompts/10-*.md) ---
+        //
+        // Shake and punch are two independently-bounded offsets added to the gameplay camera's
+        // fixed base position every frame (never accumulated/stacked - each is capped at the
+        // strongest currently-active request, matching triggerCameraShake()'s own "take the max,
+        // not the sum" rule), so no sequence of rapid-fire events can push the camera far enough
+        // to lose the ball/flippers from frame - the constraint this stage's doc calls out
+        // explicitly. Per-axis scaling on shake (full X, half Y, less Z) keeps the "into/out of
+        // the screen" axis - the one most likely to feel disorienting or clip the near/far
+        // geometry - the most damped of the three.
+        const cameraBasePosition = camera.position.clone();
+        const cameraForwardDir = camera.getTarget().subtract(camera.position).normalize();
+
+        let shakeRemainingMs = 0;
+        let shakeDurationMs = 1;
+        let shakeAmplitudeM = 0;
+
+        // intensity mirrors the 2D helper's arbitrary 0.002-0.01 "screen-shake units"
+        // (cameraShake(duration, intensity) in ../index.js) - rescaled by a flat factor into a
+        // plausible meters-of-camera-jitter amplitude for this table's ~0.5m scale, not
+        // separately re-tuned per call site, so the existing 2D hierarchy (light taps vs. strong
+        // hits) carries over directly.
+        function triggerCameraShake(durationMs, intensity) {
+            if (window.SPIRITBALL_reducedMotion) return;
+            const amplitude = intensity * 4;
+            if (amplitude >= shakeAmplitudeM || durationMs >= shakeRemainingMs) {
+                shakeAmplitudeM = Math.max(shakeAmplitudeM, amplitude);
+                shakeDurationMs = durationMs;
+                shakeRemainingMs = durationMs;
+            }
+        }
+
+        let punchRemainingMs = 0;
+        let punchDurationMs = 1;
+        const punchOffsetPeak = BABYLON.Vector3.Zero();
+
+        // A directional (not random) camera nudge - offsetVector is a world-space displacement
+        // from the base position, eased back to zero over durationMs. Used for the launch push-in
+        // and the drain dip (see their call sites below) - beats the 2D version never needed
+        // since its camera couldn't move through 3D space at all.
+        function triggerCameraPunch(durationMs, offsetVector) {
+            if (window.SPIRITBALL_reducedMotion) return;
+            if (offsetVector.length() >= punchOffsetPeak.length() || durationMs >= punchRemainingMs) {
+                punchOffsetPeak.copyFrom(offsetVector);
+                punchDurationMs = durationMs;
+                punchRemainingMs = durationMs;
+            }
+        }
+
+        function updateCameraEffects(deltaMs) {
+            let offsetX = 0, offsetY = 0, offsetZ = 0;
+
+            if (shakeRemainingMs > 0) {
+                shakeRemainingMs = Math.max(0, shakeRemainingMs - deltaMs);
+                const falloff = shakeRemainingMs / shakeDurationMs;
+                const amp = shakeAmplitudeM * falloff;
+                offsetX += (Math.random() * 2 - 1) * amp;
+                offsetY += (Math.random() * 2 - 1) * amp * 0.5;
+                offsetZ += (Math.random() * 2 - 1) * amp * 0.3;
+                if (shakeRemainingMs <= 0) shakeAmplitudeM = 0;
+            }
+
+            if (punchRemainingMs > 0) {
+                punchRemainingMs = Math.max(0, punchRemainingMs - deltaMs);
+                const falloff = punchRemainingMs / punchDurationMs;
+                offsetX += punchOffsetPeak.x * falloff;
+                offsetY += punchOffsetPeak.y * falloff;
+                offsetZ += punchOffsetPeak.z * falloff;
+                if (punchRemainingMs <= 0) punchOffsetPeak.set(0, 0, 0);
+            }
+
+            camera.position.set(
+                cameraBasePosition.x + offsetX,
+                cameraBasePosition.y + offsetY,
+                cameraBasePosition.z + offsetZ
+            );
+        }
+
+        // Flash: a DOM overlay (see index.html's #flash-overlay and its block comment), not a
+        // DefaultRenderingPipeline color-grade pulse - works identically regardless of
+        // detectHighFidelity(), where the pipeline doesn't exist at all on low-tier devices.
+        const flashOverlay = document.getElementById('flash-overlay');
+        function flashScreen(durationMs, r, g, b) {
+            if (window.SPIRITBALL_reducedMotion) return;
+            flashOverlay.style.background = 'rgb(' + (r ?? 255) + ',' + (g ?? 255) + ',' + (b ?? 255) + ')';
+            flashOverlay.style.transition = 'none';
+            flashOverlay.style.opacity = '0.5';
+            void flashOverlay.offsetWidth; // force a reflow so the transition below animates from 0.5, not skips straight to 0
+            flashOverlay.style.transition = 'opacity ' + durationMs + 'ms ease-out';
+            flashOverlay.style.opacity = '0';
+        }
+
+        let attractModeActive = true;
+        function endAttractMode() {
+            if (!attractModeActive) return;
+            attractModeActive = false;
+            scene.activeCamera = camera;
+        }
+
+        const plungerMat = new BABYLON.PBRMaterial('plungerMat', scene); // metal piston
+        plungerMat.albedoColor = new BABYLON.Color3(0.7, 0.7, 0.7);
+        plungerMat.metallic = 0.7;
+        plungerMat.roughness = 0.35;
+        plungerMat.emissiveColor = new BABYLON.Color3(0, 0.2, 0.2);
+        const plunger = createPlunger(scene, plungerMat);
+
+        // CONFIG.colors.flipper (0xff00ff) - already an exact match for the placeholder color
+        // used since Stage 4, now upgraded to a proper emissive-glass PBR material.
+        const flipperMat = new BABYLON.PBRMaterial('flipperMat', scene);
+        flipperMat.albedoColor = COLOR_FLIPPER;
+        flipperMat.metallic = 0.4;
+        flipperMat.roughness = 0.4;
+        flipperMat.emissiveColor = COLOR_FLIPPER.scale(0.5);
 
         const leftFlipper = createFlipper(
             scene, 'leftFlipper',
@@ -618,56 +1635,44 @@
             if (e.code === 'ArrowRight') deactivateFlipper(rightFlipper);
         });
 
-        // Mobile touch controls: tap-and-hold the left/right half of the canvas to activate the
-        // matching flipper, release to let it fall. This is a minimal placeholder (no visible
-        // on-screen buttons/zones yet - that's Stage 11's job), but a real pinball table can't be
-        // playtested at all on a touchscreen without *some* way to fire the flippers, so this
-        // can't wait for Stage 11. Tracks touches by identifier (a Map) so both flippers can be
-        // held at once with two fingers, same as the old 2D game's arcade controls.
-        const activeFlipperTouches = new Map();
-
-        function flipperForTouchX(clientX) {
-            return clientX < window.innerWidth / 2 ? leftFlipper : rightFlipper;
-        }
-
-        canvas.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            for (const touch of e.changedTouches) {
-                const flipper = flipperForTouchX(touch.clientX);
-                activeFlipperTouches.set(touch.identifier, flipper);
-                activateFlipper(flipper);
-            }
-        }, { passive: false });
-
-        function releaseFlipperTouch(e) {
-            for (const touch of e.changedTouches) {
-                const flipper = activeFlipperTouches.get(touch.identifier);
-                if (flipper) deactivateFlipper(flipper);
-                activeFlipperTouches.delete(touch.identifier);
-            }
-        }
-        canvas.addEventListener('touchend', releaseFlipperTouch, { passive: true });
-        canvas.addEventListener('touchcancel', releaseFlipperTouch, { passive: true });
+        // Mobile flipper-zone touch controls are wired further down, alongside the launch
+        // button, fullscreen/orientation-lock request, and resize handling - see the "Mobile
+        // controls" block near handleLaunchRelease() below (Stage 11, babylon-prompts/11-*.md).
+        // (Stage 4's original tap-left/right-half-of-canvas stopgap has been fully replaced by
+        // the real ported arcade-style edge zones there, not left running alongside them.)
 
         const statusLeftFlipper = document.getElementById('status-left-flipper');
         const statusRightFlipper = document.getElementById('status-right-flipper');
 
         const flipperDropBtn = document.getElementById('flipper-drop-btn');
 
-        const ballMat = new BABYLON.StandardMaterial('ballMat', scene);
-        ballMat.diffuseColor = new BABYLON.Color3(0, 1, 1);
-        ballMat.emissiveColor = new BABYLON.Color3(0, 0.3, 0.3);
+        // "Cosmic eyeball" ball, simplified: the doc allows a plain glowing emissive sphere
+        // instead of a painted DynamicTexture eyeball "if the eyeball detail doesn't read well
+        // at pinball-ball scale... judge by how it actually looks once placed" - this sandbox
+        // cannot render anything, so there is no way to make that visual judgment call here.
+        // Took the simpler, lower-risk option the doc explicitly allows for exactly this
+        // situation, using CONFIG.colors.ball (white) + CONFIG.colors.eyeball (cyan) as the base/
+        // emissive pair rather than attempting unverifiable texture work.
+        const ballMat = new BABYLON.PBRMaterial('ballMat', scene);
+        ballMat.albedoColor = COLOR_BALL;
+        ballMat.metallic = 0.1;
+        ballMat.roughness = 0.25;
+        ballMat.emissiveColor = COLOR_EYEBALL.scale(0.4);
 
         // --- The main game ball (Stage 3): one canonical ball, physics-maintained every frame
-        // via updateBallPhysics(). Spawned near the flipper end, off to one side, roughly where
-        // a launch chute will sit in a later stage - not exact plunger placement yet (that's
-        // Stage 5's job), just a sensible starting point for observing table-tilt rolling
-        // behavior now. ---
+        // via updateBallPhysics(). Now spawned resting on the plunger (Stage 5), matching
+        // resetBall()'s ball-rest position in ../index.js, instead of Stage 3's placeholder spot. ---
         const mainBall = createBall(
             scene,
-            new BABYLON.Vector3(TABLE_WIDTH_M * 0.32, 0.05, -TABLE_LENGTH_M * 0.25),
+            new BABYLON.Vector3(plunger.baseX, 0.03, plunger.baseZ),
             ballMat
         );
+
+        // --- Particle VFX (Stage 8, babylon-prompts/08-*.md) ---
+        const particleTexture = createParticleTexture(scene);
+        const ballTrail = buildBallTrail(scene, particleTexture, mainBall.mesh, highFidelity);
+        buildDrainVortex(scene, particleTexture, highFidelity);
+        obstacles.missionTargetMeshes.forEach((mesh) => buildChakraSparkle(scene, particleTexture, mesh, highFidelity));
 
         // --- Debug drop-tool balls (from Stage 2), kept for repeatable boundary-gap testing -
         // now backed by the same createBall() factory as the main ball instead of duplicating
@@ -742,11 +1747,382 @@
             mainBall.stuckTimeMs = 0;
         });
 
+        // --- Plunger / launch (Stage 5, babylon-prompts/05-*.md) ---
+        //
+        // ballInPlay is a minimal stand-in for the 2D game's canLaunch/ballInPlay pair
+        // (../index.js). Real drain/ball-loss detection was added in Stage 6 (handleDrain()
+        // below), which now returns ballInPlay to false automatically via resetBallToPlunger() -
+        // the RESET BALL TO PLUNGER dev button remains too, for repeatable manual testing.
+        let ballInPlay = false;
+        setLaunchReady(true); // matches setupPlunger()'s initial setLaunchReady(true) in ../index.js
+        let plungerCharging = false;
+        let plungerChargeElapsedMs = 0;
+        let plungerPower = PLUNGER_MIN_POWER_MS;
+        const statusPlungerCharge = document.getElementById('status-plunger-charge');
+
+        // Ported from InputManager.setLaunchReady() in ../index.js - toggles the launch button's
+        // idle-pulse affordance (see .launch-btn.ready in index.html) so it only visibly invites
+        // a tap when a launch is actually possible. Looks the button up fresh each call (like the
+        // 2D version) rather than relying on a captured reference, so this can be called safely
+        // from anywhere regardless of definition order.
+        function setLaunchReady(ready) {
+            const btn = document.getElementById('launch-btn');
+            if (btn) btn.classList.toggle('ready', ready);
+        }
+
+        function resetBallToPlunger() {
+            mainBall.mesh.position.set(plunger.baseX, 0.03, plunger.baseZ);
+            mainBall.aggregate.body.setLinearVelocity(BABYLON.Vector3.Zero());
+            mainBall.aggregate.body.setAngularVelocity(BABYLON.Vector3.Zero());
+            mainBall.stuckTimeMs = 0;
+            ballInPlay = false;
+            plungerCharging = false;
+            plungerChargeElapsedMs = 0;
+            plungerPower = PLUNGER_MIN_POWER_MS;
+            plunger.chargePercent = 0;
+            setLaunchReady(true);
+        }
+
+        // Mirrors handleLaunchPress()/handleLaunchRelease() in ../index.js: power is purely a
+        // continuous function of hold duration (see the render loop below), and release always
+        // tries to launch if the ball is ready - no separate "did we see a press" bookkeeping,
+        // which is what makes "release immediately after a reset" reliable (release-prompts/13-
+        // *.md's desktop-launch-after-death fix, ported here since Stage 5's acceptance criteria
+        // calls out the exact same scenario).
+        function handleLaunchPress() {
+            endAttractMode(); // first launch input ends attract mode, even if this press turns out to be a no-op below
+            if (ballInPlay) return;
+            plungerCharging = true;
+            plungerChargeElapsedMs = 0;
+            plungerPower = PLUNGER_MIN_POWER_MS;
+            vibrateDevice(15); // matches handleLaunchPress()'s vibrate(15) in ../index.js - light tick: charging started
+        }
+
+        function handleLaunchRelease() {
+            if (ballInPlay) return;
+            if (!plungerCharging) {
+                plungerPower = PLUNGER_MIN_POWER_MS;
+            }
+            // +Z = up-table, matching launchBall()'s velocityY = -power under the toWorldZ()
+            // sign flip (02-*.md); velocityX keeps the same sign/scale relationship as the 2D
+            // version's -(150 + power*0.08) kick - see PLUNGER_HORIZONTAL_BASE_MS's comment.
+            const velocityZ = plungerPower;
+            const velocityX = -(PLUNGER_HORIZONTAL_BASE_MS + plungerPower * PLUNGER_HORIZONTAL_RATIO);
+            mainBall.aggregate.body.setLinearVelocity(new BABYLON.Vector3(velocityX, 0, velocityZ));
+            mainBall.stuckTimeMs = 0;
+            ballInPlay = true;
+            plungerCharging = false;
+            plunger.chargePercent = 0;
+            setLaunchReady(false);
+            backglass.showMessage('LAUNCH!', 600);
+
+            // Power-scaled shake, matching launchBall()'s shakeIntensity = 0.002 + powerPercent*0.005
+            // in ../index.js, plus a 3D-only push-in toward the ball (no 2D equivalent - that
+            // camera couldn't move through space at all) - both new beats the doc calls out
+            // explicitly for this stage.
+            const powerPercent = (plungerPower - PLUNGER_MIN_POWER_MS) / (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS);
+            triggerCameraShake(150, 0.002 + powerPercent * 0.005);
+            triggerCameraPunch(300, cameraForwardDir.scale(0.02 + powerPercent * 0.02));
+            vibrateDevice(20 + Math.round(powerPercent * 40)); // matches launchBall()'s power-scaled vibrate() in ../index.js
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault(); // stop the page from scrolling on spacebar
+                handleLaunchPress();
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') handleLaunchRelease();
+        });
+
+        // --- Mobile controls (Stage 11, babylon-prompts/11-*.md) ---
+        //
+        // DOM elements/CSS and event pattern ported directly from InputManager.setupMobileControls()
+        // in ../index.js (release-prompts/14-*.md) - full-height arcade-style edge zones (tap
+        // ANYWHERE along the side, not a small button) plus a discrete round launch button, both
+        // wired with the same touchstart/touchend/touchcancel + mousedown/mouseup/mouseleave
+        // pattern for touch AND desktop-mouse testing. What changed from the 2D version: press/
+        // release call this file's own activateFlipper()/deactivateFlipper()/handleLaunchPress()/
+        // handleLaunchRelease() directly, instead of setting InputManager.state flags for a
+        // Phaser scene to poll every frame - there's no separate polling step here to slot into.
+        const leftZone = document.getElementById('flipper-zone-left');
+        const leftFlipperStart = (e) => {
+            e.preventDefault();
+            activateFlipper(leftFlipper);
+            leftZone.classList.add('pressed');
+        };
+        const leftFlipperEnd = (e) => {
+            e.preventDefault();
+            deactivateFlipper(leftFlipper);
+            leftZone.classList.remove('pressed');
+        };
+        leftZone.addEventListener('touchstart', leftFlipperStart, { passive: false });
+        leftZone.addEventListener('touchend', leftFlipperEnd, { passive: false });
+        leftZone.addEventListener('touchcancel', leftFlipperEnd, { passive: false });
+        leftZone.addEventListener('mousedown', leftFlipperStart);
+        leftZone.addEventListener('mouseup', leftFlipperEnd);
+        leftZone.addEventListener('mouseleave', leftFlipperEnd);
+
+        const rightZone = document.getElementById('flipper-zone-right');
+        const rightFlipperStart = (e) => {
+            e.preventDefault();
+            activateFlipper(rightFlipper);
+            rightZone.classList.add('pressed');
+        };
+        const rightFlipperEnd = (e) => {
+            e.preventDefault();
+            deactivateFlipper(rightFlipper);
+            rightZone.classList.remove('pressed');
+        };
+        rightZone.addEventListener('touchstart', rightFlipperStart, { passive: false });
+        rightZone.addEventListener('touchend', rightFlipperEnd, { passive: false });
+        rightZone.addEventListener('touchcancel', rightFlipperEnd, { passive: false });
+        rightZone.addEventListener('mousedown', rightFlipperStart);
+        rightZone.addEventListener('mouseup', rightFlipperEnd);
+        rightZone.addEventListener('mouseleave', rightFlipperEnd);
+
+        const launchBtn = document.getElementById('launch-btn');
+        const launchStart = (e) => {
+            e.preventDefault();
+            handleLaunchPress();
+            launchBtn.classList.add('pressed');
+        };
+        const launchEnd = (e) => {
+            e.preventDefault();
+            handleLaunchRelease();
+            launchBtn.classList.remove('pressed');
+        };
+        launchBtn.addEventListener('touchstart', launchStart, { passive: false });
+        launchBtn.addEventListener('touchend', launchEnd, { passive: false });
+        launchBtn.addEventListener('touchcancel', launchEnd, { passive: false });
+        launchBtn.addEventListener('mousedown', launchStart);
+        launchBtn.addEventListener('mouseup', launchEnd);
+
+        // Fullscreen + portrait-lock request on the player's first touch anywhere (needs a user
+        // gesture - can't happen automatically on load).
+        document.addEventListener('touchstart', () => requestFullscreenAndLock(), { once: true, passive: true });
+
+        setupResizeHandlers(engine);
+        detectMobile(); // initial visibility check - also runs on every resize/orientation change above
+
+        const resetPlungerBtn = document.getElementById('reset-plunger-btn');
+        resetPlungerBtn.addEventListener('click', resetBallToPlunger);
+
+        // --- Scoring, collision/trigger detection, drain (Stage 6, babylon-prompts/06-*.md) ---
+        //
+        // Architecture confirmed against Babylon's actual source (havokPlugin.ts,
+        // IPhysicsEnginePlugin.ts), not guessed: PhysicsAggregate exposes both .body and .shape;
+        // a shape's `.isTrigger = true` (set on bumpers/targets/lanes/drain above in
+        // buildObstacles()/buildDrainZone()) makes it detect-only, reported through the plugin-
+        // level `hk.onTriggerCollisionObservable` (global, not per-body - filtered below by
+        // checking which side is the ball). Regular physical hits (bumpers, satellite,
+        // slingshots - left as normal, non-trigger bodies) are reported through the ball body's
+        // own `getCollisionObservable()`, which needs `setCollisionCallbackEnabled(true)` called
+        // once first. Event `.type` values (COLLISION_STARTED, TRIGGER_ENTERED, etc.) are
+        // compared as plain strings rather than via `BABYLON.PhysicsEventType.X` - that enum is
+        // declared `const enum` in Babylon's source, which TypeScript is allowed to inline away
+        // entirely rather than emit as a real runtime object, and this sandbox has no way to load
+        // the actual CDN bundle to check whether it survived into the public build. The string
+        // values themselves ("COLLISION_STARTED" etc.) are part of the same source and not at risk
+        // of changing independently, so comparing against them directly sidesteps that question.
+        let score = 0;
+        let lives = STARTING_LIVES;
+        const statusScore = document.getElementById('status-score');
+        const statusLives = document.getElementById('status-lives');
+        statusScore.textContent = '0';
+        statusLives.textContent = String(lives);
+
+        function addScore(points) {
+            score += points;
+            statusScore.textContent = String(score);
+            backglass.state.score = score;
+            if (score > backglass.state.highScore) {
+                backglass.state.highScore = score;
+                localStorage.setItem(highScoreKey, String(score));
+            }
+            backglass.redraw();
+        }
+
+        // Per-object hit cooldown, ported from isOnCooldown()/setCooldown() in ../index.js
+        // (there keyed by Phaser game object + a Map; here keyed by mesh, same idea).
+        const hitCooldowns = new Set();
+        function isOnCooldown(mesh) {
+            return hitCooldowns.has(mesh);
+        }
+        function setCooldown(mesh, durationMs) {
+            hitCooldowns.add(mesh);
+            setTimeout(() => hitCooldowns.delete(mesh), durationMs);
+        }
+
+        // Lightweight scale-pulse as this stage's hit feedback - a 3D-appropriate stand-in for
+        // the 2D version's tween-based flash (Stage 8's particle/VFX system will do this properly
+        // later; this is enough to make a hit feel registered in the meantime).
+        function pulseMesh(mesh) {
+            const original = mesh.scaling.clone();
+            mesh.scaling.scaleInPlace(1.3);
+            // Emissive flash to near-white on top of the scale pulse - the doc's "briefly
+            // intensify... the object's emissive color" hit-reactivity spec, mirroring the 2D
+            // version's setTint(0xffffff) flash in hitAttackBumper() etc. Only meshes with a
+            // material exposing emissiveColor get this (all of this stage's PBR materials do).
+            const mat = mesh.material;
+            const originalEmissive = mat && mat.emissiveColor ? mat.emissiveColor.clone() : null;
+            if (originalEmissive) {
+                mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+            }
+            setTimeout(() => {
+                if (mesh.isDisposed()) return;
+                mesh.scaling.copyFrom(original);
+                if (originalEmissive) mat.emissiveColor.copyFrom(originalEmissive);
+            }, 100);
+        }
+
+        // Physical hits: bumpers/satellite/slingshots already bounce the ball via restitution
+        // (set in buildObstacles()) - this only adds the score/cooldown/feedback layer on top,
+        // it does NOT set the ball's velocity by hand the way the 2D version's hitAttackBumper()/
+        // hitSatellite()/hitSlingshot() did. That manual angle-based bounce was a workaround for
+        // Arcade Physics circles not imparting real force on overlap; real rigid-body contact
+        // response in Havok makes it unnecessary, not just redundant - see 04-*.md's flipper
+        // implementation note for the same reasoning applied to flippers.
+        function handlePhysicalHit(mesh) {
+            const meta = mesh.metadata;
+            if (!meta || isOnCooldown(mesh)) return;
+            if (meta.kind === 'bumper') {
+                setCooldown(mesh, COOLDOWN_BUMPER_MS);
+                addScore(SCORE_ATTACK_BUMPER);
+                pulseMesh(mesh);
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage('+' + SCORE_ATTACK_BUMPER, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
+                triggerCameraShake(120, 0.006); // matches hitAttackBumper()'s cameraShake(120, 0.006)
+            } else if (meta.kind === 'satellite') {
+                setCooldown(mesh, COOLDOWN_SATELLITE_MS);
+                addScore(SCORE_SATELLITE);
+                pulseMesh(mesh);
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage('SATELLITE!', 900);
+                triggerCameraShake(120, 0.005); // matches hitSatellite()'s cameraShake(120, 0.005)
+            } else if (meta.kind === 'slingshot') {
+                setCooldown(mesh, COOLDOWN_SLINGSHOT_MS);
+                addScore(SCORE_SLINGSHOT);
+                pulseMesh(mesh);
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage('+' + SCORE_SLINGSHOT, 600);
+                triggerCameraShake(120, 0.005); // matches hitSlingshot()'s cameraShake(120, 0.005)
+            } else if (meta.kind === 'wall') {
+                // No score/pulse/burst - walls aren't scored in the 2D game either, just a very
+                // light shake on contact (setupCollisions()'s wall collider: cameraShake(40, 0.003)).
+                setCooldown(mesh, COOLDOWN_WALL_MS);
+                triggerCameraShake(40, 0.003);
+            } else if (meta.kind === 'flipper') {
+                // Not a literal port - the 2D shake here (updateFlipperPower()'s manual ball-
+                // velocity injection, cameraShake(150, 0.008)) belongs to a mechanic that doesn't
+                // exist in this build (Havok's real contact response replaces it, see 04-*.md/
+                // 06-*.md). Reused as the closest available proxy for "the flipper did something
+                // impactful" - fires on any ball-flipper contact, not just an active-swing hit.
+                setCooldown(mesh, COOLDOWN_FLIPPER_MS);
+                triggerCameraShake(150, 0.008);
+            }
+        }
+
+        function handleTriggerHit(mesh) {
+            const meta = mesh.metadata;
+            if (!meta) return;
+            if (meta.kind === 'drainZone') {
+                handleDrain();
+                return;
+            }
+            if (isOnCooldown(mesh)) return;
+            if (meta.kind === 'missionTarget') {
+                setCooldown(mesh, COOLDOWN_MISSION_TARGET_MS);
+                addScore(SCORE_MISSION_TARGET);
+                pulseMesh(mesh);
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                // hitMissionTarget() in ../index.js shows "Selected: {missionName}" here - no
+                // mission-select state exists yet (Stage 6's scope decision), so a generic
+                // acknowledgement stands in until Stage 12 gives this a real mission to name.
+                backglass.showMessage('TARGET!', 700);
+                triggerCameraShake(60, 0.002); // matches hitMissionTarget()'s cameraShake(60, 0.002)
+            } else if (meta.kind === 'reentryLane') {
+                setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
+                addScore(SCORE_REENTRY_LANE);
+                // Persistent recolor to "lit" green MUST happen before pulseMesh(), not after -
+                // pulseMesh() captures whatever emissiveColor is current when it's called and
+                // restores exactly that after its 100ms flash, so recoloring afterward would get
+                // silently clobbered back to the old unlit color by that restore. Matches
+                // hitReentryLane()'s lane.setFillStyle(CONFIG.colors.missionActive, ...) in
+                // ../index.js - stays lit, not just a brief pulse like the other obstacle types
+                // (07-*.md's new touch, since Stages 4-6 only had the unlit placeholder color).
+                mesh.material.albedoColor = COLOR_MISSION_ACTIVE;
+                mesh.material.emissiveColor = COLOR_MISSION_ACTIVE.scale(0.5);
+                pulseMesh(mesh);
+                // After the recolor, not before - the burst should match the new lit-green state.
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage('RE-ENTRY!', 800);
+                triggerCameraShake(80, 0.003); // matches hitReentryLane()'s cameraShake(80, 0.003)
+            }
+        }
+
+        // Ported from checkDrain() in ../index.js: lose a life, end this ball's turn. No
+        // GameOverScene equivalent exists yet (Stage 12), so hitting 0 lives just resets lives
+        // and score in place after the same pause the 2D version used before showing Grim
+        // Reaper/resetting - documented as a deliberate simplification, not an oversight.
+        function handleDrain() {
+            if (!ballInPlay) return; // the ball can sit inside the trigger volume for a while;
+            // without this guard every frame it stays there would count as a separate drain.
+            ballInPlay = false;
+            lives--;
+            statusLives.textContent = String(lives);
+            backglass.state.lives = lives;
+            backglass.showMessage('DRAINED!', 1400); // no Grim Reaper visual yet (Stage 12) - this is the stand-in
+            triggerCameraShake(400, 0.008); // matches checkDrain()'s cameraShake(400, 0.008)
+            flashScreen(200, 255, 0, 0); // matches checkDrain()'s cameraFlash(200, 255, 0, 0, true) - red
+            // Quick downward dip - a 3D-only "snap toward the void" beat with no 2D equivalent
+            // (that camera couldn't move through space at all).
+            triggerCameraPunch(400, new BABYLON.Vector3(0, -0.03, 0));
+            setTimeout(() => {
+                if (lives <= 0) {
+                    lives = STARTING_LIVES;
+                    score = 0;
+                    statusLives.textContent = String(lives);
+                    statusScore.textContent = '0';
+                    backglass.state.lives = lives;
+                    backglass.state.score = score;
+                }
+                backglass.redraw();
+                resetBallToPlunger();
+            }, 1500);
+        }
+
+        mainBall.aggregate.body.setCollisionCallbackEnabled(true);
+        mainBall.aggregate.body.getCollisionObservable().add((event) => {
+            if (event.type !== 'COLLISION_STARTED') return;
+            handlePhysicalHit(event.collidedAgainst.transformNode);
+        });
+
+        hk.onTriggerCollisionObservable.add((event) => {
+            if (event.type !== 'TRIGGER_ENTERED') return;
+            const ballBody = mainBall.aggregate.body;
+            if (event.collider === ballBody) {
+                handleTriggerHit(event.collidedAgainst.transformNode);
+            } else if (event.collidedAgainst === ballBody) {
+                handleTriggerHit(event.collider.transformNode);
+            }
+            // Trigger hits from testBalls (Stage 2's debug drop tool) are intentionally ignored -
+            // scoring/drain only tracks the one canonical mainBall.
+        });
+
         engine.runRenderLoop(() => {
             const deltaMs = engine.getDeltaTime();
 
             updateBallPhysics(mainBall, deltaMs);
             testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
+            updateBallTrail(ballTrail, mainBall, highFidelity);
+
+            if (attractModeActive) {
+                attractCamera.alpha += deltaMs * 0.00015; // slow continuous orbit
+            } else {
+                updateCameraEffects(deltaMs);
+            }
 
             if (ccdTestActive) {
                 ccdTestElapsedMs += deltaMs;
@@ -763,11 +2139,23 @@
 
             statusStuckTimer.textContent = Math.round(mainBall.stuckTimeMs) + ' ms';
 
+            // Continuous charge-to-power curve, ported from updatePlunger() in ../index.js - no
+            // fixed tiers, power increases smoothly with hold duration up to PLUNGER_CHARGE_TIME_MS.
+            if (plungerCharging) {
+                plungerChargeElapsedMs += deltaMs;
+                const chargePercent = Math.min(plungerChargeElapsedMs / PLUNGER_CHARGE_TIME_MS, 1);
+                plungerPower = PLUNGER_MIN_POWER_MS + (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS) * chargePercent;
+                plunger.chargePercent = chargePercent;
+            }
+            updatePlungerVisual(plunger);
+            statusPlungerCharge.textContent = Math.round(plunger.chargePercent * 100) + '%';
+
             // Live flipper angle readout (degrees) - see createFlipper()'s comment on the
             // biggest unverified assumption in this stage; this is how a human confirms whether
-            // it held.
-            statusLeftFlipper.textContent = (leftFlipper.mesh.rotation.y * 180 / Math.PI).toFixed(1) + '°';
-            statusRightFlipper.textContent = (rightFlipper.mesh.rotation.y * 180 / Math.PI).toFixed(1) + '°';
+            // it held. Uses flipperAngleDegrees(), not raw mesh.rotation.y - see that function's
+            // comment for why the raw Euler property can't be trusted on a physics-driven mesh.
+            statusLeftFlipper.textContent = flipperAngleDegrees(leftFlipper.mesh).toFixed(1) + '°';
+            statusRightFlipper.textContent = flipperAngleDegrees(rightFlipper.mesh).toFixed(1) + '°';
 
             scene.render();
         });
@@ -776,5 +2164,17 @@
         console.log('[SPIRITBALL 3D] Flippers + obstacle layout initialized.');
     }
 
-    main().catch((err) => showFatalError('Failed to initialize SPIRITBALL 3D.', err));
+    main().catch((err) => {
+        // Reactive fallback for SIMD-incompatible browsers/devices the proactive iOS-version
+        // check above doesn't specifically name (e.g. an old desktop browser or unusual WebView)
+        // - any Havok init failure whose message mentions WASM/WebAssembly/SIMD is treated as a
+        // compatibility issue, not a generic/network failure, and gets the honest message +
+        // 2D-version link instead of the raw technical error.
+        const message = err && err.message ? err.message : String(err);
+        if (/wasm|webassembly|simd/i.test(message)) {
+            showUnsupportedMessage(message);
+        } else {
+            showFatalError('Failed to initialize SPIRITBALL 3D.', err);
+        }
+    });
 })();

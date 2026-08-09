@@ -1,8 +1,8 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stages 1–4 implemented (Stage 4 with an expanded scope — see below).
-Stage 1
+**Status (2026-08-09):** Stages 1–11 implemented (Stages 4-11 with expanded/adjusted scope — see
+below). Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
 (`babylon-game.html`/`babylon-game.js`) adds the real table boundary (7 walls, ported faithfully
@@ -25,7 +25,7 @@ obstacle-placement half of Stage 6 forward: a pop bumper cluster, mission target
 slingshots, and re-entry lanes now sit on the table in a fresh, Space-Cadet-inspired layout (not a
 raw port of the 2D game's coordinates) as real static colliders — physically present and
 bouncing correctly, but not yet wired to any scoring/mission logic, which stays Stage 6's job (see
-its forward-reference note). Stages 5, 7–13 are planned, not started.
+its forward-reference note).
 **Also on 2026-08-09, at the user's explicit request:** `babylon-game.html` was promoted to
 `index.html` so GitHub Pages serves the Babylon 3D build by default — the old Phaser game was
 renamed `phaser2d.html` (kept working, not deleted) rather than removed outright, since the 3D
@@ -36,6 +36,71 @@ flipper, multi-touch capable) were added at the same time, since none existed an
 can't be meaningfully played on a touchscreen without them — this is a stopgap, not Stage 11's
 real touch-zone UI. This pulls a piece of Stage 13 (file promotion) far ahead of schedule; see
 `babylon-prompts/13-*.md`'s forward-reference note for exactly what is and isn't done as a result.
+First real-device playtest (Android Chrome, on the now-live `index.html`) found two real bugs
+neither this sandbox nor a code-only review had caught: a `Physics6DoFConstraint` motor crash
+(motor setters were being called before `addConstraint()` bound the constraint to its bodies -
+fixed) and a misleading flipper-angle readout (Babylon resets a physics mesh's `.rotation` to zero
+the moment `rotationQuaternion` takes over, so the readout had to switch to decomposing
+`rotationQuaternion` instead - fixed; see `04-*.md`'s implementation note for both). Stage 5 adds
+the plunger/launch mechanic: a kinematic (non-physics) plunger mesh, the same charge-time/power
+curve as the 2D game re-derived into real-world units, and a dedicated mobile launch button
+(Pointer Events) since the flipper touch zones already claim the rest of the screen - see
+`05-*.md`'s implementation note, including a second real-wall-clearance bug caught via the same
+Node-verification habit before any testing. Stage 6 wires real collision/trigger detection
+(`PhysicsAggregate.shape.isTrigger`, confirmed against Babylon's source, not guessed) to a
+deliberately minimal scoring layer - point values, per-object hit cooldowns, and a real drain zone
+ending a ball's turn, all ported from `../index.js` and driving the dev status panel's new
+score/lives readout. The full mission FSM (select/start/complete/rank-up) is explicitly deferred:
+it's tied to Phaser UI (popups, HUD) that doesn't exist in this build yet, and porting it with
+nothing able to display it would be dead code - that's Stage 12's job once real screens exist. See
+`06-*.md`'s implementation note for the full physical-vs-trigger mapping (cross-checked against
+`setupCollisions()` in `../index.js` element-by-element) and why the 2D version's manual bumper/
+satellite/slingshot bounce-velocity code wasn't ported (real Havok contact response replaces it).
+Stage 7 replaces every placeholder flat color with real `PBRMaterial`s in SPIRITBALL's actual
+`CONFIG.colors` palette, a dim ambient + point-light rig, a `GlowLayer`, device-tier-gated bloom,
+and a procedural starfield skybox - see `07-*.md`'s implementation note, which is explicit that
+this stage (almost entirely subjective visual judgment) is the least verifiable of any stage so
+far in a sandbox that cannot render Babylon at all, more so than the physics-heavy stages before
+it. That note also documents a real, separately significant bug found while implementing this
+stage: **there was no playfield floor** - every ball since Stage 2 had actually been resting 0.15m
+below the flippers/walls/bumpers on a fallback safety-net plane, undetected because nothing built
+so far checks height (fixed as part of this stage, not a separate patch). A second instance of the
+Stage 4 top-level-`BABYLON`-reference bug (new palette constants calling `BABYLON.Color3` at
+module-parse time) was also caught and fixed via the same CDN-blocked headless-Chromium test used
+for every stage. Stage 8 adds particle VFX: a speed-driven ball trail, an always-on drain vortex,
+one-shot color-matched hit bursts, and reduced-motion-aware chakra sparkle, all sharing one
+procedurally-generated particle texture (no new asset) and gated by both Stage 7's device-tier
+boolean and a freshly re-declared `window.SPIRITBALL_reducedMotion` (this page no longer loads
+`index.js`, so nothing carries that flag over automatically). See `08-*.md`'s implementation note,
+including an honest check against the 2D codebase that found only the ball trail and drain vortex
+have real 2D equivalents to port - hit bursts and chakra sparkle are new, built to match the doc's
+intent. Stage 9 adds a real 3D-mounted backglass panel (a `DynamicTexture`-driven plane, not a DOM
+overlay) showing score, a new localStorage-persisted high score, lives, and transient messages -
+rank/mission/multiplier are deliberately not shown yet, consistent with Stage 6's mission-FSM
+deferral to Stage 12. See `09-*.md`'s implementation note, including Node-verified camera-frustum
+placement math and a last-message-wins approach to the popup system. Stage 10 adds camera
+shake/punch (a bounded, non-stacking offset added to the fixed camera's base position, Node-
+verified to stay small relative to the camera-to-table distance even in the worst realistic
+combined case) and a DOM-overlay screen flash, wired to every event with something to react to
+(wall/flipper contact, the Stage 6 hit types, launch, drain) using the 2D game's own duration/
+intensity hierarchy at each site, plus a new idle attract-mode `ArcRotateCamera` that orbits until
+the player's first launch input (this build has no menu/title screen yet for a literal "idle"
+state to attach to). See `10-*.md`'s implementation note for exactly which 2D shake call sites
+don't have anything to attach to yet (fuel lights, obstacles, inlanes/outlanes, bonus lane,
+launch ramp, mission-complete, rank-up - all still Stage 12 territory) and why flash uses a DOM
+overlay instead of the `DefaultRenderingPipeline` the doc suggested. Stage 11 replaces Stage 4's
+tap-canvas-half touch stopgap with the real arcade-style flipper zones and launch button ported
+directly from `release-prompts/14-*.md` (same markup/CSS, event pattern, `vibrate()`/
+`setLaunchReady()`/fullscreen-and-orientation-lock/rotate-prompt behavior - wired to this file's
+own `activateFlipper()`/`handleLaunchPress()` etc. instead of a Phaser scene's polling loop), and
+adds a proactive+reactive Havok/WASM-SIMD compatibility check (iOS below 16.4 is a known
+deterministic ceiling, checked via UA version sniffing before even attempting the CDN load;
+verified in this sandbox with spoofed user agents at the exact 15.4/16.4 boundary, real
+functional testing of the branch logic, not just a syntax check) that links to the already-working
+`phaser2d.html` as an explicit, documented fallback decision rather than leaving unsupported
+players with nothing. See `11-*.md`'s implementation note, including why performance-tier gating
+needed no new infrastructure (Stages 7-8 already cover the heavy effects). Stages 12-13 are
+planned, not started.
 
 ## The goal
 
