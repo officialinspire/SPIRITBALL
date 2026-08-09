@@ -10,21 +10,31 @@
 // Stage 7: real materials, lighting, glow/bloom, and a procedural skybox
 //          (babylon-prompts/07-*.md - see that file's implementation note, including a real
 //          playfield-floor bug fixed as part of this stage, not just a visual pass)
+// Stage 8: particle VFX - ball trail, drain vortex, per-hit bursts, chakra sparkle
+//          (babylon-prompts/08-*.md - see that file's implementation note)
 // See BABYLON_3D_OVERHAUL.md for the overall architecture.
 //
 // Scope so far: the static table boundary (now with a real playfield floor), the fixed gameplay
 // camera, one physics-driven ball, two motorized flippers, a plunger/launch lane, scored
 // obstacles (bumpers, mission targets, satellite, slingshots, re-entry lanes) with real
-// collision/trigger detection and a drain zone, and SPIRITBALL's actual DMT/cosmic/chakra visual
-// identity (PBR materials, glow layer, bloom, procedural starfield skybox) in place of Stages
-// 1-6's placeholder flat colors. The full mission FSM (select/start/complete/rank-up) remains
-// deferred to Stage 12, whose real UI it needs to be testable. This file supersedes
-// babylon-spike.js as the base for the real game; the spike file stays around as a disposable
-// physics-tuning sandbox (per its own stage doc), not because this file depends on it.
+// collision/trigger detection and a drain zone, SPIRITBALL's actual DMT/cosmic/chakra visual
+// identity (PBR materials, glow layer, bloom, procedural starfield skybox), and particle VFX (ball
+// trail, drain vortex, hit bursts, chakra sparkle) respecting both the device-tier and reduced-
+// motion gates. The full mission FSM (select/start/complete/rank-up) remains deferred to Stage 12,
+// whose real UI it needs to be testable. This file supersedes babylon-spike.js as the base for
+// the real game; the spike file stays around as a disposable physics-tuning sandbox (per its own
+// stage doc), not because this file depends on it.
 // ===================================
 
 (function () {
     'use strict';
+
+    // Reduced-motion detection, ported from the bottom of ../index.js
+    // (window.SPIRITBALL_reducedMotion) - re-declared here rather than assumed shared, since this
+    // is a separate page load (index.html no longer loads index.js at all; see
+    // babylon-prompts/13-*.md's forward-reference note) with its own fresh `window`. Plain
+    // browser API, no BABYLON reference, safe to run immediately at top level.
+    window.SPIRITBALL_reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
     // ===================================
     // Coordinate / scale conversion (the single source of truth every later stage must reuse)
@@ -647,6 +657,168 @@
         return skybox;
     }
 
+    // ===================================
+    // Particle VFX (babylon-prompts/08-*.md). One shared soft-dot texture (a DynamicTexture radial
+    // gradient, same self-contained-asset approach as Stage 7's starfield - no new external image
+    // dependency) reused/tinted across every particle system below via color1/color2, rather than
+    // loading a dedicated particle sprite.
+    //
+    // Honesty note: the doc frames ball trail and drain vortex as "direct port[s]" of existing 2D
+    // effects, which is accurate (setupParticles() in ../index.js has both, ported faithfully
+    // below). Hit-burst effects and chakra sparkle, however, do NOT actually exist in the current
+    // 2D codebase - grepped for other add.particles() calls and found none; hit feedback there is
+    // tween/tint-based only (Stage 7 already ported the tween-equivalent scale/emissive pulse).
+    // Built fresh here to match the doc's intent, not literally ported from anywhere.
+    // ===================================
+    function createParticleTexture(scene) {
+        const size = 32;
+        const texture = new BABYLON.DynamicTexture('particleTex', size, scene, false);
+        const ctx = texture.getContext();
+        const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+        gradient.addColorStop(0, 'rgba(255,255,255,1)');
+        gradient.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+        texture.update();
+        texture.hasAlpha = true;
+        return texture;
+    }
+
+    // Ball trail: emitter attached directly to the ball mesh (particles spawn at its current
+    // position every frame automatically), cyan/eyeball-tinted, additive - direct port of
+    // setupParticles()'s follow-the-ball ballTrail emitter. Started immediately but with emitRate
+    // driven every frame from the ball's actual speed (see updateBallTrail() in main()'s render
+    // loop) rather than a constant rate, so it reads as "the ball is moving fast" per the
+    // acceptance criteria instead of a trail that's equally visible at rest.
+    function buildBallTrail(scene, texture, ballMesh, highFidelity) {
+        const trail = new BABYLON.ParticleSystem('ballTrail', highFidelity ? 200 : 80, scene);
+        trail.particleTexture = texture;
+        trail.emitter = ballMesh;
+        trail.minEmitBox = new BABYLON.Vector3(0, 0, 0);
+        trail.maxEmitBox = new BABYLON.Vector3(0, 0, 0);
+        trail.color1 = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0.7);
+        trail.color2 = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0.4);
+        trail.colorDead = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0);
+        trail.minSize = 0.005;
+        trail.maxSize = 0.012;
+        trail.minLifeTime = 0.25;
+        trail.maxLifeTime = 0.4; // matches the 2D version's 400ms lifespan
+        trail.emitRate = 0; // driven per-frame by updateBallTrail() based on ball speed
+        trail.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        trail.direction1 = new BABYLON.Vector3(-0.05, 0, -0.05);
+        trail.direction2 = new BABYLON.Vector3(0.05, 0.05, 0.05);
+        trail.minEmitPower = 0.02;
+        trail.maxEmitPower = 0.08;
+        trail.start();
+        return trail;
+    }
+
+    // Continuously adjusts the ball trail's emit rate from its actual current speed - called once
+    // per frame from the render loop. Below the stuck-speed threshold it's effectively off; above
+    // MAX_BALL_SPEED_MS it's at full rate.
+    function updateBallTrail(trail, ball, highFidelity) {
+        const velocity = ball.aggregate.body.getLinearVelocity();
+        const speed = velocity.length();
+        const speedFraction = Math.min(speed / MAX_BALL_SPEED_MS, 1);
+        const maxRate = highFidelity ? 60 : 25; // ~40/sec at 2D's frequency:25ms was the baseline; scaled up a bit since this trail fades with speed instead of running constantly
+        trail.emitRate = speedFraction > 0.1 ? maxRate * speedFraction : 0;
+    }
+
+    // Drain vortex: ambient, always-running emitter at the drain zone, purple/black/indigo -
+    // direct port of setupParticles()'s drainParticles (continuous for the whole game in the 2D
+    // version too, not event-triggered). Simplification: Babylon's core ParticleSystem
+    // interpolates color1->color2 per particle rather than picking from a discrete tint array the
+    // way Phaser's `tint: [...]` does, and a true inward spiral needs a custom per-particle update
+    // function - approximated instead with a downward/inward direction cone, which reads as
+    // "falling into a void" without that added complexity in a stage that can't be visually
+    // checked anyway. Reduced-motion: this is decorative/ambient, not the "hit confirmed"
+    // feedback the doc says must stay intact, so it's significantly reduced (not fully removed -
+    // the drain zone should still read as *something*) rather than skipped outright.
+    function buildDrainVortex(scene, texture, highFidelity) {
+        const vortex = new BABYLON.ParticleSystem('drainVortex', highFidelity ? 150 : 60, scene);
+        vortex.particleTexture = texture;
+        vortex.emitter = new BABYLON.Vector3(0, 0.02, toWorldZ(DRAIN_ZONE_CENTER_Y_PX) + 0.06);
+        vortex.minEmitBox = new BABYLON.Vector3(-DRAIN_ZONE_WIDTH_M / 2, 0, -0.02);
+        vortex.maxEmitBox = new BABYLON.Vector3(DRAIN_ZONE_WIDTH_M / 2, 0, 0.02);
+        vortex.color1 = new BABYLON.Color4(0.58, 0, 0.83, 0.8); // 0x9400D3
+        vortex.color2 = new BABYLON.Color4(0.29, 0, 0.51, 0.6); // 0x4B0082
+        vortex.colorDead = new BABYLON.Color4(0, 0, 0, 0);
+        vortex.minSize = 0.006;
+        vortex.maxSize = 0.014;
+        vortex.minLifeTime = 1.0;
+        vortex.maxLifeTime = 1.5; // matches the 2D version's 1500ms
+        vortex.direction1 = new BABYLON.Vector3(-0.15, -0.1, -0.2);
+        vortex.direction2 = new BABYLON.Vector3(0.15, 0.05, -0.35); // net -Z/-Y bias = "into the void"
+        vortex.minEmitPower = 0.05;
+        vortex.maxEmitPower = 0.15;
+        const baseRate = highFidelity ? 20 : 8;
+        vortex.emitRate = window.SPIRITBALL_reducedMotion ? baseRate * 0.25 : baseRate;
+        vortex.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        vortex.start();
+        return vortex;
+    }
+
+    // Chakra sparkle: low-intensity ambient particles rising from each mission target, tinted to
+    // that target's own chakra color (reuses the mesh's current material color, so it stays
+    // correct even if the material changes later e.g. once mission-select visuals exist in Stage
+    // 12). Fully skipped under reduced-motion - purely decorative, no gameplay-feedback role.
+    function buildChakraSparkle(scene, texture, targetMesh, highFidelity) {
+        if (window.SPIRITBALL_reducedMotion) return null;
+        const color = targetMesh.material.albedoColor;
+        const sparkle = new BABYLON.ParticleSystem('chakraSparkle', highFidelity ? 40 : 15, scene);
+        sparkle.particleTexture = texture;
+        sparkle.emitter = targetMesh;
+        sparkle.minEmitBox = new BABYLON.Vector3(-0.01, 0, -0.005);
+        sparkle.maxEmitBox = new BABYLON.Vector3(0.01, 0.02, 0.005);
+        sparkle.color1 = new BABYLON.Color4(color.r, color.g, color.b, 0.6);
+        sparkle.color2 = new BABYLON.Color4(color.r, color.g, color.b, 0.3);
+        sparkle.colorDead = new BABYLON.Color4(color.r, color.g, color.b, 0);
+        sparkle.minSize = 0.003;
+        sparkle.maxSize = 0.007;
+        sparkle.minLifeTime = 0.6;
+        sparkle.maxLifeTime = 1.0;
+        sparkle.direction1 = new BABYLON.Vector3(-0.01, 0.03, -0.01);
+        sparkle.direction2 = new BABYLON.Vector3(0.01, 0.06, 0.01); // gentle upward drift
+        sparkle.minEmitPower = 0.01;
+        sparkle.maxEmitPower = 0.03;
+        sparkle.emitRate = highFidelity ? 8 : 3;
+        sparkle.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        sparkle.start();
+        return sparkle;
+    }
+
+    // One-shot hit-burst: color-matched to whatever the hit mesh's material currently shows
+    // (so it automatically matches e.g. a re-entry lane's persistent lit-green recolor from
+    // 07-*.md, not a separately-tracked color). Always fires regardless of reduced-motion - this
+    // IS the "hit confirmed" feedback the doc says must stay intact; only its particle COUNT is
+    // reduced on low-tier devices, which is a performance gate, not a motion gate.
+    // disposeOnStop cleans itself up automatically once its burst particles finish dying, so
+    // repeated hits don't accumulate leaked particle systems.
+    function spawnHitBurst(scene, texture, mesh, highFidelity) {
+        const color = mesh.material.albedoColor || mesh.material.diffuseColor;
+        const burst = new BABYLON.ParticleSystem('hitBurst', highFidelity ? 30 : 12, scene);
+        burst.particleTexture = texture;
+        burst.emitter = mesh.position.clone();
+        burst.minEmitBox = BABYLON.Vector3.Zero();
+        burst.maxEmitBox = BABYLON.Vector3.Zero();
+        burst.color1 = new BABYLON.Color4(color.r, color.g, color.b, 1);
+        burst.color2 = new BABYLON.Color4(1, 1, 1, 0.8);
+        burst.colorDead = new BABYLON.Color4(color.r, color.g, color.b, 0);
+        burst.minSize = 0.006;
+        burst.maxSize = 0.016;
+        burst.minLifeTime = 0.25;
+        burst.maxLifeTime = 0.45;
+        burst.direction1 = new BABYLON.Vector3(-1, -0.3, -1);
+        burst.direction2 = new BABYLON.Vector3(1, 0.6, 1);
+        burst.minEmitPower = 0.3;
+        burst.maxEmitPower = 0.7;
+        burst.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        burst.manualEmitCount = highFidelity ? 22 : 10;
+        burst.disposeOnStop = true;
+        burst.start();
+        burst.stop();
+    }
+
     // Creates one physics-driven ball at the given position. Shared by the main game ball and
     // the Stage 2 debug drop-tool below, so there's exactly one place that defines "what a
     // SPIRITBALL ball is" physically.
@@ -869,6 +1041,7 @@
             return mat;
         });
 
+        const missionTargetMeshes = [];
         MISSION_TARGET_BANK.forEach((pos, i) => {
             const mesh = BABYLON.MeshBuilder.CreateBox('missionTarget' + i, {
                 width: TARGET_RADIUS_M * 2,
@@ -882,6 +1055,7 @@
             // Trigger, not physical - detect-only per the doc (mission targets don't block the
             // ball in the 2D game either; they're an overlap, not a collider, in setupCollisions()).
             aggregate.shape.isTrigger = true;
+            missionTargetMeshes.push(mesh);
         });
 
         const satelliteMat = new BABYLON.PBRMaterial('satelliteMat', scene);
@@ -958,6 +1132,10 @@
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.5 }, scene);
             aggregate.shape.isTrigger = true; // overlap, not collider, in setupCollisions()
         });
+
+        // Returned so main() can attach Stage 8's chakra-sparkle particle systems - the only
+        // piece of obstacle geometry a later stage needs a direct mesh reference to.
+        return { missionTargetMeshes };
     }
 
     // Drain zone (Stage 6, babylon-prompts/06-*.md) - see the block comment above SCORE_ATTACK_
@@ -1018,7 +1196,7 @@
 
         buildTable(scene);
         const camera = buildCamera(scene);
-        buildObstacles(scene);
+        const obstacles = buildObstacles(scene);
         buildLaunchLane(scene);
         buildDrainZone(scene);
 
@@ -1137,6 +1315,12 @@
             new BABYLON.Vector3(plunger.baseX, 0.03, plunger.baseZ),
             ballMat
         );
+
+        // --- Particle VFX (Stage 8, babylon-prompts/08-*.md) ---
+        const particleTexture = createParticleTexture(scene);
+        const ballTrail = buildBallTrail(scene, particleTexture, mainBall.mesh, highFidelity);
+        buildDrainVortex(scene, particleTexture, highFidelity);
+        obstacles.missionTargetMeshes.forEach((mesh) => buildChakraSparkle(scene, particleTexture, mesh, highFidelity));
 
         // --- Debug drop-tool balls (from Stage 2), kept for repeatable boundary-gap testing -
         // now backed by the same createBall() factory as the main ball instead of duplicating
@@ -1370,14 +1554,17 @@
                 setCooldown(mesh, COOLDOWN_BUMPER_MS);
                 addScore(SCORE_ATTACK_BUMPER);
                 pulseMesh(mesh);
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
             } else if (meta.kind === 'satellite') {
                 setCooldown(mesh, COOLDOWN_SATELLITE_MS);
                 addScore(SCORE_SATELLITE);
                 pulseMesh(mesh);
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
             } else if (meta.kind === 'slingshot') {
                 setCooldown(mesh, COOLDOWN_SLINGSHOT_MS);
                 addScore(SCORE_SLINGSHOT);
                 pulseMesh(mesh);
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
             }
         }
 
@@ -1393,6 +1580,7 @@
                 setCooldown(mesh, COOLDOWN_MISSION_TARGET_MS);
                 addScore(SCORE_MISSION_TARGET);
                 pulseMesh(mesh);
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
             } else if (meta.kind === 'reentryLane') {
                 setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
                 addScore(SCORE_REENTRY_LANE);
@@ -1406,6 +1594,8 @@
                 mesh.material.albedoColor = COLOR_MISSION_ACTIVE;
                 mesh.material.emissiveColor = COLOR_MISSION_ACTIVE.scale(0.5);
                 pulseMesh(mesh);
+                // After the recolor, not before - the burst should match the new lit-green state.
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
             }
         }
 
@@ -1453,6 +1643,7 @@
 
             updateBallPhysics(mainBall, deltaMs);
             testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
+            updateBallTrail(ballTrail, mainBall, highFidelity);
 
             if (ccdTestActive) {
                 ccdTestElapsedMs += deltaMs;
