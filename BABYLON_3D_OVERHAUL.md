@@ -1,7 +1,7 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stages 1–6 implemented (Stages 4-6 with expanded/adjusted scope — see
+**Status (2026-08-09):** Stages 1–7 implemented (Stages 4-7 with expanded/adjusted scope — see
 below). Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
@@ -56,7 +56,18 @@ nothing able to display it would be dead code - that's Stage 12's job once real 
 `06-*.md`'s implementation note for the full physical-vs-trigger mapping (cross-checked against
 `setupCollisions()` in `../index.js` element-by-element) and why the 2D version's manual bumper/
 satellite/slingshot bounce-velocity code wasn't ported (real Havok contact response replaces it).
-Stages 7-13 are planned, not started.
+Stage 7 replaces every placeholder flat color with real `PBRMaterial`s in SPIRITBALL's actual
+`CONFIG.colors` palette, a dim ambient + point-light rig, a `GlowLayer`, device-tier-gated bloom,
+and a procedural starfield skybox - see `07-*.md`'s implementation note, which is explicit that
+this stage (almost entirely subjective visual judgment) is the least verifiable of any stage so
+far in a sandbox that cannot render Babylon at all, more so than the physics-heavy stages before
+it. That note also documents a real, separately significant bug found while implementing this
+stage: **there was no playfield floor** - every ball since Stage 2 had actually been resting 0.15m
+below the flippers/walls/bumpers on a fallback safety-net plane, undetected because nothing built
+so far checks height (fixed as part of this stage, not a separate patch). A second instance of the
+Stage 4 top-level-`BABYLON`-reference bug (new palette constants calling `BABYLON.Color3` at
+module-parse time) was also caught and fixed via the same CDN-blocked headless-Chromium test used
+for every stage. Stages 8-13 are planned, not started.
 
 ## The goal
 

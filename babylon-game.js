@@ -4,16 +4,23 @@
 // Stage 3: ball physics + anti-stuck logic (babylon-prompts/03-*.md)
 // Stage 4: motorized flippers + an authentic Space-Cadet-inspired obstacle layout
 //          (babylon-prompts/04-*.md, expanded scope - see that file's implementation note)
+// Stage 5: plunger and launch mechanic (babylon-prompts/05-*.md)
+// Stage 6: collision/trigger detection, scoring, drain zone (babylon-prompts/06-*.md, scoped -
+//          see that file's implementation note for what's deferred to Stage 12)
+// Stage 7: real materials, lighting, glow/bloom, and a procedural skybox
+//          (babylon-prompts/07-*.md - see that file's implementation note, including a real
+//          playfield-floor bug fixed as part of this stage, not just a visual pass)
 // See BABYLON_3D_OVERHAUL.md for the overall architecture.
 //
-// Scope so far: the static table BOUNDARY, the fixed gameplay camera, one physics-driven ball,
-// two motorized flippers, and PLACEHOLDER (unscored) geometry for the pop bumper cluster,
-// mission target bank, satellite, slingshots, and re-entry lanes - positioned per a fresh,
-// authentic pinball-cabinet-inspired layout rather than a raw port of the old 2D game's
-// coordinates. Full scoring/mission logic for those obstacles is still Stage 6's job; this stage
-// only establishes where things physically sit and how the ball bounces off them. This file
-// supersedes babylon-spike.js as the base for the real game; the spike file stays around as a
-// disposable physics-tuning sandbox (per its own stage doc), not because this file depends on it.
+// Scope so far: the static table boundary (now with a real playfield floor), the fixed gameplay
+// camera, one physics-driven ball, two motorized flippers, a plunger/launch lane, scored
+// obstacles (bumpers, mission targets, satellite, slingshots, re-entry lanes) with real
+// collision/trigger detection and a drain zone, and SPIRITBALL's actual DMT/cosmic/chakra visual
+// identity (PBR materials, glow layer, bloom, procedural starfield skybox) in place of Stages
+// 1-6's placeholder flat colors. The full mission FSM (select/start/complete/rank-up) remains
+// deferred to Stage 12, whose real UI it needs to be testable. This file supersedes
+// babylon-spike.js as the base for the real game; the spike file stays around as a disposable
+// physics-tuning sandbox (per its own stage doc), not because this file depends on it.
 // ===================================
 
 (function () {
@@ -332,14 +339,84 @@
     }
 
     // ===================================
+    // Visual identity (babylon-prompts/07-*.md) - SPIRITBALL's actual DMT/cosmic/chakra palette,
+    // ported directly from CONFIG.colors in ../index.js (hex -> BABYLON.Color3, /255 per
+    // channel), not redesigned. Used by every material below instead of the Stage 1-6 placeholder
+    // flat colors.
+    //
+    // The actual BABYLON.Color3 objects are NOT constructed here at top-level scope - only the
+    // raw hex numbers are (safe, no BABYLON reference). Every prior stage's top-level constants
+    // learned this the hard way (see 04-*.md's implementation note): a top-level `new
+    // BABYLON.Color3(...)` call evaluates at script-parse time, before the `typeof BABYLON ===
+    // 'undefined'` guard in main() ever runs, and would throw an unguarded ReferenceError if the
+    // CDN is blocked - defeating this file's entire CDN-failure error-handling effort before it
+    // even registers. The COLOR_* names are declared here (as `let`, unassigned) so every
+    // function below can close over them, but they're only actually populated inside main(),
+    // after the guard - see the "Populate deferred COLOR_* constants" block there.
+    // ===================================
+    function hexToColor3(hex) {
+        return new BABYLON.Color3(
+            ((hex >> 16) & 0xff) / 255,
+            ((hex >> 8) & 0xff) / 255,
+            (hex & 0xff) / 255
+        );
+    }
+
+    const HEX_BALL = 0xffffff;
+    const HEX_EYEBALL = 0x00ffff;
+    const HEX_FLIPPER = 0xff00ff;
+    const HEX_WALL = 0x00ccff;
+    const HEX_BUMPERS = [0xff0099, 0x00ffff, 0xff00ff, 0xffff00];
+    const HEX_CHAKRA = [0x9400d3, 0xff1493, 0xffff00, 0x00ff00, 0x00ffff, 0x0000ff, 0x8b00ff];
+    const HEX_SATURN = 0xffa500;
+    const HEX_SATURN_RING = 0xffd700;
+    const HEX_MISSION_ACTIVE = 0x00ff00;
+    const HEX_BACKGROUND = 0x1a0033;
+
+    let COLOR_BALL, COLOR_EYEBALL, COLOR_FLIPPER, COLOR_WALL, COLOR_BUMPERS, COLOR_CHAKRA,
+        COLOR_SATURN, COLOR_SATURN_RING, COLOR_MISSION_ACTIVE, COLOR_BACKGROUND;
+
+    // Device-tier gate, ported from PerformanceManager.detectPerformance() in ../index.js -
+    // simplified to the single boolean the doc asks for ("structured so they *can* be gated...
+    // behind a single 'high fidelity' boolean"), not the full 3-tier system, since Stage 11 owns
+    // real mobile performance tuning. Gates glow/bloom only - materials/colors/lighting stay the
+    // same on every device, only the heavier postprocessing is conditional.
+    function detectHighFidelity() {
+        const cores = navigator.hardwareConcurrency || 2;
+        const memory = navigator.deviceMemory || 2;
+        const isLowEnd = /Android\s[1-6]\.|iPhone\s[1-7]\.|iPad\s[1-5]\./i.test(navigator.userAgent);
+        let score = 0;
+        if (cores >= 8) score += 3;
+        else if (cores >= 4) score += 2;
+        else if (cores >= 2) score += 1;
+        if (memory >= 8) score += 3;
+        else if (memory >= 4) score += 2;
+        else if (memory >= 2) score += 1;
+        if (isLowEnd) score -= 2;
+        return score >= 3; // matches the 2D PerformanceManager's "medium" and "high" cutoff
+    }
+
+    // ===================================
     // Table geometry, ported from ../index.js GameScene.setupTable(). Boundary only (matches
     // this stage's scope) - the center divider post between the flippers is NOT included here;
     // it belongs conceptually with the flipper/obstacle work in later stages, not the outer
     // boundary this stage is responsible for.
     // ===================================
     function buildTable(scene) {
-        const wallMat = new BABYLON.StandardMaterial('wallMat', scene);
-        wallMat.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.55); // placeholder only - Stage 7 does real materials
+        // Chrome rails, per the doc's spec - PBR with no environment/reflection texture (a
+        // deliberate risk call: this project already depends on one fragile CDN load
+        // (Babylon/Havok itself); adding a second external texture fetch for IBL reflections
+        // wasn't worth the extra failure mode, especially since this whole stage can't be
+        // visually verified in this sandbox anyway). A true metallic=1 PBR material with no
+        // environment texture would read as nearly black (metals have almost no diffuse
+        // response, they rely on reflection) - kept metallic moderate and albedo bright enough
+        // that the walls stay clearly visible under direct light alone, at some cost to how
+        // convincingly "chrome" they read without real reflections.
+        const wallMat = new BABYLON.PBRMaterial('wallMat', scene);
+        wallMat.albedoColor = COLOR_WALL;
+        wallMat.metallic = 0.6;
+        wallMat.roughness = 0.3;
+        wallMat.emissiveColor = COLOR_WALL.scale(0.15);
 
         // [x2d, y2d, width2d, height2d, rotation2d] - lifted directly from setupTable() in
         // ../index.js so this stays a faithful port, not a redesign.
@@ -373,10 +450,40 @@
             return mesh;
         });
 
-        // A large, level base plane under everything, purely so a ball that somehow gets past a
-        // boundary gap is still visible resting somewhere instead of vanishing (a debugging aid
-        // for this stage, not a claim that the layout is gap-free - that still needs a real
-        // playtest with the drop-ball tool below). Not part of the "official" table geometry.
+        // ---------------------------------------------------------------------------------
+        // REAL BUG FIX, not just a visual pass: Stages 2-6 never built an actual playfield floor.
+        // The wall boxes above only span Y=[0, WALL_HEIGHT_M] (0 to 0.04) - there was nothing
+        // solid at Y=0 for the ball to rest ON. Every ball has actually been falling 0.15m past
+        // the walls' base down to the debugFloor below (added purely as an escaped-ball safety
+        // net, explicitly "not part of the official table geometry" per its own comment) and
+        // settling there - well below where the flippers/bumpers/walls visually and physically
+        // sit, with no lateral (X/Z) containment at that depth either, since the walls don't
+        // extend down that far. Nothing built so far would have caught this: the CCD test only
+        // checks Z position, the stuck-timer/ball-count readouts don't check height, and the
+        // camera's tilted long-distance framing could plausibly hide a 15cm vertical offset from
+        // a phone screen. Fixed here, discovered while implementing this stage's own "playfield
+        // surface" material requirement, which implies a floor mesh should exist to material -
+        // it didn't, so this had to be built before it could be materialed.
+        // ---------------------------------------------------------------------------------
+        const playfieldMat = new BABYLON.PBRMaterial('playfieldMat', scene);
+        playfieldMat.albedoColor = COLOR_BACKGROUND.scale(0.5);
+        playfieldMat.metallic = 0.3;
+        playfieldMat.roughness = 0.35; // glossy-varnished, not mirror-flat, per the doc
+        const playfield = BABYLON.MeshBuilder.CreateBox('playfield', {
+            width: TABLE_WIDTH_M,
+            height: 0.02,
+            depth: TABLE_LENGTH_M
+        }, scene);
+        playfield.position.set(0, -0.01, 0); // top face at Y=0, matching the walls' base
+        playfield.material = playfieldMat;
+        new BABYLON.PhysicsAggregate(playfield, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.2, friction: 0.5 }, scene);
+        // Deliberately does NOT extend into the drain zone's Z range (past FLIPPER_Z_M, see
+        // 06-*.md) - the ball needs to keep falling through there, that's the whole mechanic.
+
+        // Large safety-net plane well below the real playfield, purely so a ball that somehow
+        // gets past a boundary gap (or through the now-unreachable-in-normal-play drain zone) is
+        // still visible resting somewhere instead of vanishing into the void forever. Not part of
+        // the "official" table geometry.
         const floor = BABYLON.MeshBuilder.CreateBox('debugFloor', {
             width: TABLE_WIDTH_M * 2,
             height: 0.01,
@@ -396,8 +503,11 @@
     // plunger channel from the main playfield. rightWall (above) already forms the lane's outer
     // edge, so this is the only new physical geometry this stage needs beyond that.
     function buildLaunchLane(scene) {
-        const laneMat = new BABYLON.StandardMaterial('laneWallMat', scene);
-        laneMat.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.55);
+        const laneMat = new BABYLON.PBRMaterial('laneWallMat', scene); // same chrome treatment as buildTable()'s walls
+        laneMat.albedoColor = COLOR_WALL;
+        laneMat.metallic = 0.6;
+        laneMat.roughness = 0.3;
+        laneMat.emissiveColor = COLOR_WALL.scale(0.15);
 
         const wall = BABYLON.MeshBuilder.CreateBox('launchLaneWall', {
             width: 8 * PX_TO_M,
@@ -466,6 +576,75 @@
         camera.fov = BABYLON.Tools.ToRadians(50);
         camera.minZ = 0.01;
         return camera;
+    }
+
+    // Lighting rig (babylon-prompts/07-*.md): dim ambient fill + a couple of point lights for
+    // definition, deliberately NOT scene-wide flat illumination - "the emissive materials and
+    // glow layer should carry most of the visual energy," matching the reference image's mostly-
+    // dark cabinet interior lit by its own glowing elements.
+    function buildLighting(scene) {
+        const ambient = new BABYLON.HemisphericLight('ambientLight', new BABYLON.Vector3(0, 1, -0.3), scene);
+        ambient.intensity = 0.35;
+
+        const flipperLight = new BABYLON.PointLight('flipperLight', new BABYLON.Vector3(0, 0.15, FLIPPER_Z_M), scene);
+        flipperLight.diffuse = COLOR_FLIPPER;
+        flipperLight.intensity = 0.4;
+        flipperLight.range = TABLE_LENGTH_M * 0.6;
+
+        // Near the far/top wall, the re-entry lanes, and the satellite - the "backglass" end of
+        // the table conceptually, even though this build has no literal backglass panel yet.
+        const backLight = new BABYLON.PointLight('backLight', new BABYLON.Vector3(0, 0.15, TABLE_LENGTH_M * 0.4), scene);
+        backLight.diffuse = new BABYLON.Color3(0.6, 0.2, 1);
+        backLight.intensity = 0.35;
+        backLight.range = TABLE_LENGTH_M * 0.7;
+
+        return { ambient, flipperLight, backLight };
+    }
+
+    // Procedural starfield skybox - a DynamicTexture (canvas-drawn dots, the same technique
+    // BootScene.preload() uses for the 2D eyeball sprite in ../index.js, just applied here to a
+    // sphere instead of a flat sprite) rather than loading an external image. Deliberate: this
+    // project already depends on one fragile CDN load (Babylon/Havok itself), and the existing
+    // background.webp asset (release-prompts/09-*.md) was authored as a flat 2D portrait-game
+    // backdrop, not a projection suited to wrapping around a 3D sphere - reusing it as-is would
+    // look wrong, and re-authoring a proper equirectangular version wasn't worth doing sight-
+    // unseen in a sandbox that can't render the result either way.
+    function createStarfieldTexture(scene) {
+        const size = 512;
+        const texture = new BABYLON.DynamicTexture('starfieldTex', size, scene, false);
+        const ctx = texture.getContext();
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, size);
+        gradient.addColorStop(0, '#1a0033'); // CONFIG.colors.background
+        gradient.addColorStop(1, '#05000f');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+
+        for (let i = 0; i < 300; i++) {
+            const x = Math.random() * size;
+            const y = Math.random() * size;
+            const r = Math.random() * 1.4 + 0.3;
+            ctx.fillStyle = 'rgba(255,255,255,' + Math.random().toFixed(2) + ')';
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        texture.update();
+        return texture;
+    }
+
+    function buildSkybox(scene) {
+        const skyMat = new BABYLON.StandardMaterial('skyMat', scene);
+        skyMat.backFaceCulling = false; // render the inside of the sphere, camera sits inside it
+        skyMat.disableLighting = true; // unlit - it's a backdrop, not a lit surface
+        skyMat.emissiveTexture = createStarfieldTexture(scene);
+        skyMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+
+        const skybox = BABYLON.MeshBuilder.CreateSphere('skybox', { diameter: 20, sideOrientation: BABYLON.Mesh.BACKSIDE }, scene);
+        skybox.material = skyMat;
+        skybox.infiniteDistance = true;
+        return skybox;
     }
 
     // Creates one physics-driven ball at the given position. Shared by the main game ball and
@@ -655,23 +834,40 @@
     // note for why building real trigger/sensor detection wasn't taken on this turn).
     // ===================================
     function buildObstacles(scene) {
-        const bumperMat = new BABYLON.StandardMaterial('bumperMat', scene);
-        bumperMat.diffuseColor = new BABYLON.Color3(0, 1, 0.6);
-        bumperMat.emissiveColor = new BABYLON.Color3(0, 0.3, 0.2);
+        // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
+        // identity, not one shared color - each bumper is its own emissive-glass PBR material so
+        // it can be individually recolored/pulsed on hit (pulseMesh() in main()).
+        const bumperMats = COLOR_BUMPERS.map((color, i) => {
+            const mat = new BABYLON.PBRMaterial('bumperMat' + i, scene);
+            mat.albedoColor = color;
+            mat.metallic = 0.2;
+            mat.roughness = 0.3;
+            mat.alpha = 0.88; // "glass-or-crystal-like... moderate transparency" per the doc
+            mat.emissiveColor = color.scale(0.6);
+            return mat;
+        });
 
         BUMPER_CLUSTER.forEach((pos, i) => {
             const mesh = BABYLON.MeshBuilder.CreateSphere('bumper' + i, { diameter: BUMPER_RADIUS_M * 2 }, scene);
             mesh.position.set(pos.x, BUMPER_RADIUS_M, pos.z);
-            mesh.material = bumperMat;
+            mesh.material = bumperMats[i % bumperMats.length];
             mesh.metadata = { kind: 'bumper' };
             // Physical body, not a trigger - restitution alone gives the bounce; the ball's
             // collision observable (see main()) reports the hit for scoring on top of that.
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
         });
 
-        const targetMat = new BABYLON.StandardMaterial('targetMat', scene);
-        targetMat.diffuseColor = new BABYLON.Color3(1, 0, 0.8);
-        targetMat.emissiveColor = new BABYLON.Color3(0.3, 0, 0.25);
+        // CONFIG.colors.chakra (7 colors) - each mission target gets its own chakra color
+        // (targets 0-2 use chakra[0-2]: violet, pink, yellow) instead of one shared color.
+        const targetMats = COLOR_CHAKRA.map((color, i) => {
+            const mat = new BABYLON.PBRMaterial('targetMat' + i, scene);
+            mat.albedoColor = color;
+            mat.metallic = 0.15;
+            mat.roughness = 0.25;
+            mat.alpha = 0.85;
+            mat.emissiveColor = color.scale(0.55);
+            return mat;
+        });
 
         MISSION_TARGET_BANK.forEach((pos, i) => {
             const mesh = BABYLON.MeshBuilder.CreateBox('missionTarget' + i, {
@@ -680,7 +876,7 @@
                 depth: 0.008
             }, scene);
             mesh.position.set(pos.x, 0.015, pos.z);
-            mesh.material = targetMat;
+            mesh.material = targetMats[i % targetMats.length];
             mesh.metadata = { kind: 'missionTarget', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
             // Trigger, not physical - detect-only per the doc (mission targets don't block the
@@ -688,9 +884,11 @@
             aggregate.shape.isTrigger = true;
         });
 
-        const satelliteMat = new BABYLON.StandardMaterial('satelliteMat', scene);
-        satelliteMat.diffuseColor = new BABYLON.Color3(1, 0.65, 0);
-        satelliteMat.emissiveColor = new BABYLON.Color3(0.3, 0.2, 0);
+        const satelliteMat = new BABYLON.PBRMaterial('satelliteMat', scene);
+        satelliteMat.albedoColor = COLOR_SATURN;
+        satelliteMat.metallic = 0.5;
+        satelliteMat.roughness = 0.3;
+        satelliteMat.emissiveColor = COLOR_SATURN.scale(0.3);
         const satelliteMesh = BABYLON.MeshBuilder.CreateSphere('satellite', { diameter: SATELLITE_RADIUS_M * 2 }, scene);
         satelliteMesh.position.set(SATELLITE_POS.x, SATELLITE_RADIUS_M, SATELLITE_POS.z);
         satelliteMesh.material = satelliteMat;
@@ -699,9 +897,30 @@
         // stage's implementation note for the full physical-vs-trigger mapping ported from there.
         new BABYLON.PhysicsAggregate(satelliteMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.8, friction: 0.3 }, scene);
 
-        const slingshotMat = new BABYLON.StandardMaterial('slingshotMat', scene);
-        slingshotMat.diffuseColor = new BABYLON.Color3(1, 0, 1);
-        slingshotMat.emissiveColor = new BABYLON.Color3(0.3, 0, 0.3);
+        // Small ring, matching CONFIG.colors.saturnRing and the satellite's own "Saturn" naming/
+        // fiction in ../index.js - a cheap, self-contained addition (one flattened torus, no new
+        // asset dependency) beyond what the doc strictly asked for, purely decorative/non-physical.
+        const ringMat = new BABYLON.PBRMaterial('saturnRingMat', scene);
+        ringMat.albedoColor = COLOR_SATURN_RING;
+        ringMat.metallic = 0.6;
+        ringMat.roughness = 0.25;
+        ringMat.emissiveColor = COLOR_SATURN_RING.scale(0.3);
+        const ring = BABYLON.MeshBuilder.CreateTorus('satelliteRing', {
+            diameter: SATELLITE_RADIUS_M * 3.2,
+            thickness: SATELLITE_RADIUS_M * 0.25,
+            tessellation: 24
+        }, scene);
+        ring.position.set(SATELLITE_POS.x, SATELLITE_RADIUS_M, SATELLITE_POS.z);
+        ring.rotation.x = Math.PI / 2.4; // tilted, not flat, so it actually reads as a ring from the fixed camera angle
+        ring.material = ringMat;
+        // No physics body - purely decorative, would otherwise double the ball's satellite hit
+        // detection (this is exactly why it isn't just a bigger satellite sphere).
+
+        const slingshotMat = new BABYLON.PBRMaterial('slingshotMat', scene);
+        slingshotMat.albedoColor = new BABYLON.Color3(1, 0, 1); // no direct CONFIG.colors entry for slingshots - kept the existing magenta identity
+        slingshotMat.metallic = 0.3;
+        slingshotMat.roughness = 0.3;
+        slingshotMat.emissiveColor = new BABYLON.Color3(0.5, 0, 0.5);
 
         SLINGSHOTS.forEach((def, i) => {
             const mesh = BABYLON.MeshBuilder.CreateBox('slingshot' + i, {
@@ -716,11 +935,18 @@
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
         });
 
-        const laneMat = new BABYLON.StandardMaterial('laneMat', scene);
-        laneMat.diffuseColor = new BABYLON.Color3(1, 1, 0);
-        laneMat.alpha = 0.6;
-
+        // Unlit state: dim yellow-ish neutral (no direct 2D equivalent - the 2D lanes start
+        // unlit/grey and only take on a color once hit). Lit state (CONFIG.colors.missionActive,
+        // green) is applied per-lane in handleTriggerHit() in main(), matching hitReentryLane()'s
+        // persistent lane.setFillStyle() recoloring in ../index.js, not just a brief pulse.
         REENTRY_LANES.forEach((pos, i) => {
+            const laneMat = new BABYLON.PBRMaterial('laneMat' + i, scene);
+            laneMat.albedoColor = new BABYLON.Color3(0.5, 0.5, 0.15);
+            laneMat.metallic = 0.1;
+            laneMat.roughness = 0.4;
+            laneMat.alpha = 0.6;
+            laneMat.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.05);
+
             const mesh = BABYLON.MeshBuilder.CreateBox('reentryLane' + i, {
                 width: REENTRY_LANE_RADIUS_M * 2,
                 height: 0.02,
@@ -761,6 +987,19 @@
             throw new Error('window.HavokPhysics is undefined - check network access to cdn.babylonjs.com.');
         }
 
+        // Populate deferred COLOR_* constants (see the "Visual identity" block comment above) -
+        // now safe, since BABYLON is confirmed defined past this point.
+        COLOR_BALL = hexToColor3(HEX_BALL);
+        COLOR_EYEBALL = hexToColor3(HEX_EYEBALL);
+        COLOR_FLIPPER = hexToColor3(HEX_FLIPPER);
+        COLOR_WALL = hexToColor3(HEX_WALL);
+        COLOR_BUMPERS = HEX_BUMPERS.map(hexToColor3);
+        COLOR_CHAKRA = HEX_CHAKRA.map(hexToColor3);
+        COLOR_SATURN = hexToColor3(HEX_SATURN);
+        COLOR_SATURN_RING = hexToColor3(HEX_SATURN_RING);
+        COLOR_MISSION_ACTIVE = hexToColor3(HEX_MISSION_ACTIVE);
+        COLOR_BACKGROUND = hexToColor3(HEX_BACKGROUND);
+
         const engine = new BABYLON.Engine(canvas, true);
         const scene = new BABYLON.Scene(engine);
         scene.clearColor = new BABYLON.Color4(0.02, 0.0, 0.06, 1);
@@ -774,23 +1013,47 @@
         statusHavok.textContent = 'OK';
         statusHavok.className = 'ok';
 
-        const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, -0.3), scene);
-        light.intensity = 0.9;
+        buildLighting(scene);
+        buildSkybox(scene);
 
         buildTable(scene);
-        buildCamera(scene);
+        const camera = buildCamera(scene);
         buildObstacles(scene);
         buildLaunchLane(scene);
         buildDrainZone(scene);
 
-        const plungerMat = new BABYLON.StandardMaterial('plungerMat', scene);
-        plungerMat.diffuseColor = new BABYLON.Color3(0.7, 0.7, 0.7);
+        // Glow layer picks up every emissive material already assigned above/below automatically
+        // - no per-mesh registration needed. Bloom is gated behind detectHighFidelity() per the
+        // doc ("structured so they *can* be gated... behind a single 'high fidelity' boolean");
+        // materials/colors/lighting stay identical on every device, only this postprocessing pass
+        // is conditional. Full mobile performance tuning remains Stage 11's job.
+        const highFidelity = detectHighFidelity();
+        const glowLayer = new BABYLON.GlowLayer('glow', scene);
+        glowLayer.intensity = highFidelity ? 0.8 : 0.5;
+
+        if (highFidelity) {
+            const pipeline = new BABYLON.DefaultRenderingPipeline('defaultPipeline', true, scene, [camera]);
+            pipeline.bloomEnabled = true;
+            pipeline.bloomThreshold = 0.6;
+            pipeline.bloomWeight = 0.5;
+            pipeline.bloomKernel = 64;
+            pipeline.bloomScale = 0.5;
+        }
+
+        const plungerMat = new BABYLON.PBRMaterial('plungerMat', scene); // metal piston
+        plungerMat.albedoColor = new BABYLON.Color3(0.7, 0.7, 0.7);
+        plungerMat.metallic = 0.7;
+        plungerMat.roughness = 0.35;
         plungerMat.emissiveColor = new BABYLON.Color3(0, 0.2, 0.2);
         const plunger = createPlunger(scene, plungerMat);
 
-        const flipperMat = new BABYLON.StandardMaterial('flipperMat', scene);
-        flipperMat.diffuseColor = new BABYLON.Color3(1, 0, 1);
-        flipperMat.emissiveColor = new BABYLON.Color3(0.35, 0, 0.35);
+        // CONFIG.colors.flipper (0xff00ff) - already an exact match for the placeholder color
+        // used since Stage 4, now upgraded to a proper emissive-glass PBR material.
+        const flipperMat = new BABYLON.PBRMaterial('flipperMat', scene);
+        flipperMat.albedoColor = COLOR_FLIPPER;
+        flipperMat.metallic = 0.4;
+        flipperMat.roughness = 0.4;
+        flipperMat.emissiveColor = COLOR_FLIPPER.scale(0.5);
 
         const leftFlipper = createFlipper(
             scene, 'leftFlipper',
@@ -853,9 +1116,18 @@
 
         const flipperDropBtn = document.getElementById('flipper-drop-btn');
 
-        const ballMat = new BABYLON.StandardMaterial('ballMat', scene);
-        ballMat.diffuseColor = new BABYLON.Color3(0, 1, 1);
-        ballMat.emissiveColor = new BABYLON.Color3(0, 0.3, 0.3);
+        // "Cosmic eyeball" ball, simplified: the doc allows a plain glowing emissive sphere
+        // instead of a painted DynamicTexture eyeball "if the eyeball detail doesn't read well
+        // at pinball-ball scale... judge by how it actually looks once placed" - this sandbox
+        // cannot render anything, so there is no way to make that visual judgment call here.
+        // Took the simpler, lower-risk option the doc explicitly allows for exactly this
+        // situation, using CONFIG.colors.ball (white) + CONFIG.colors.eyeball (cyan) as the base/
+        // emissive pair rather than attempting unverifiable texture work.
+        const ballMat = new BABYLON.PBRMaterial('ballMat', scene);
+        ballMat.albedoColor = COLOR_BALL;
+        ballMat.metallic = 0.1;
+        ballMat.roughness = 0.25;
+        ballMat.emissiveColor = COLOR_EYEBALL.scale(0.4);
 
         // --- The main game ball (Stage 3): one canonical ball, physics-maintained every frame
         // via updateBallPhysics(). Now spawned resting on the plunger (Stage 5), matching
@@ -1068,8 +1340,19 @@
         function pulseMesh(mesh) {
             const original = mesh.scaling.clone();
             mesh.scaling.scaleInPlace(1.3);
+            // Emissive flash to near-white on top of the scale pulse - the doc's "briefly
+            // intensify... the object's emissive color" hit-reactivity spec, mirroring the 2D
+            // version's setTint(0xffffff) flash in hitAttackBumper() etc. Only meshes with a
+            // material exposing emissiveColor get this (all of this stage's PBR materials do).
+            const mat = mesh.material;
+            const originalEmissive = mat && mat.emissiveColor ? mat.emissiveColor.clone() : null;
+            if (originalEmissive) {
+                mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+            }
             setTimeout(() => {
-                if (!mesh.isDisposed()) mesh.scaling.copyFrom(original);
+                if (mesh.isDisposed()) return;
+                mesh.scaling.copyFrom(original);
+                if (originalEmissive) mat.emissiveColor.copyFrom(originalEmissive);
             }, 100);
         }
 
@@ -1113,6 +1396,15 @@
             } else if (meta.kind === 'reentryLane') {
                 setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
                 addScore(SCORE_REENTRY_LANE);
+                // Persistent recolor to "lit" green MUST happen before pulseMesh(), not after -
+                // pulseMesh() captures whatever emissiveColor is current when it's called and
+                // restores exactly that after its 100ms flash, so recoloring afterward would get
+                // silently clobbered back to the old unlit color by that restore. Matches
+                // hitReentryLane()'s lane.setFillStyle(CONFIG.colors.missionActive, ...) in
+                // ../index.js - stays lit, not just a brief pulse like the other obstacle types
+                // (07-*.md's new touch, since Stages 4-6 only had the unlit placeholder color).
+                mesh.material.albedoColor = COLOR_MISSION_ACTIVE;
+                mesh.material.emissiveColor = COLOR_MISSION_ACTIVE.scale(0.5);
                 pulseMesh(mesh);
             }
         }
