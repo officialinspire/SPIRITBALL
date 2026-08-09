@@ -128,8 +128,8 @@
 
         /* This debug panel was sized for desktop; on a phone-width viewport it otherwise eats
            most of the screen and sits on top of the table. Shrink it down rather than remove it -
-           it's still useful for mobile playtesting (Havok status, CCD test, flipper angle
-           readout) until Stage 7+ replaces it with real game UI. */
+           it's still useful for mobile playtesting (Havok status, tunneling test, flipper angle
+           readout), and hidden by default anyway (see #status-panel's own comment). */
         @media (max-width: 480px) {
             #status-panel {
                 min-width: 0;
@@ -549,7 +549,7 @@
         <div class="row"><span>Havok: </span><span id="status-havok">loading…</span></div>
         <div class="row"><span>Balls in scene: </span><span id="status-balls">0</span></div>
         <div class="row"><span>Main ball stuck timer: </span><span id="status-stuck-timer">0 ms</span></div>
-        <div class="row"><span>CCD test: </span><span id="status-ccd">not run</span></div>
+        <div class="row"><span>Tunneling test: </span><span id="status-ccd">not run</span></div>
         <div class="row"><span>Left flipper angle: </span><span id="status-left-flipper">—</span></div>
         <div class="row"><span>Right flipper angle: </span><span id="status-right-flipper">—</span></div>
         <div class="row"><span>Plunger charge: </span><span id="status-plunger-charge">0%</span></div>
@@ -559,7 +559,7 @@
         </div>
         <button id="drop-btn">DROP TEST BALL (random pos)</button>
         <button id="clear-btn">CLEAR EXTRA TEST BALLS</button>
-        <button id="ccd-test-btn">LAUNCH MAIN BALL AT WALL (CCD TEST)</button>
+        <button id="ccd-test-btn">LAUNCH MAIN BALL AT WALL (TUNNELING TEST)</button>
         <button id="stuck-test-btn">FREEZE MAIN BALL (STUCK TEST)</button>
         <button id="flipper-drop-btn">DROP BALL ON LEFT FLIPPER</button>
         <button id="reset-plunger-btn">RESET BALL TO PLUNGER</button>

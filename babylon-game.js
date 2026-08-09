@@ -280,10 +280,29 @@
     const BALL_MASS_KG = 0.08;
 
     // Converted from CONFIG.ballMaxVelocity: 1800 (px/s) in ../index.js, using the same PX_TO_M
-    // scale as everything else - a second line of defense against tunneling/instability behind
-    // Havok's CCD, same spirit as the old Arcade Physics safety net. See archive/release-prompts/13-*.md
-    // for the original 2D value's history.
+    // scale as everything else - the primary defense against tunneling/instability, same spirit
+    // as the old Arcade Physics safety net. See archive/release-prompts/13-*.md for the original
+    // 2D value's history.
+    //
+    // NOT "a second line of defense behind Havok's CCD" (an earlier version of this comment's
+    // claim) - improvement-prompts/01-*.md's investigation found this vendored Havok build (grep
+    // of both vendor/babylonjs/babylon.js and the compiled HavokPhysics.wasm's own string table)
+    // exposes no continuous-collision-detection or "motion quality" API at all, at any level
+    // (JS wrapper or native HP_* function). createBall() previously called two methods
+    // (setCcdMotionThreshold/setCcdSweptSphereRadius) that don't exist on this PhysicsBody build -
+    // dead code, now removed. This per-frame JS clamp is genuinely the only per-body defense.
     const MAX_BALL_SPEED_MS = 1800 * PX_TO_M; // ~1.7 m/s
+
+    // Real Havok API found in the same investigation (HavokPlugin.setVelocityLimits(), backed by
+    // the native HP_World_SetSpeedLimit/GetSpeedLimit functions - confirmed present via the same
+    // WASM string-table grep, and confirmed live via a temporary debug hook: this build's default
+    // is 200 m/s linear / 100 rad/s angular, both far looser than this game's actual scale needs).
+    // A world-level clamp Havok enforces inside its own solver every physics substep, not just
+    // once per rendered frame the way MAX_BALL_SPEED_MS above is - a genuine second line of
+    // defense against a velocity spike happening and causing a tunnel-through in the gap between
+    // two JS-side checks. Deliberately looser than MAX_BALL_SPEED_MS (a safety ceiling, not the
+    // real gameplay tuning knob, which stays MAX_BALL_SPEED_MS) so it never affects normal play.
+    const WORLD_MAX_LINEAR_SPEED_MS = MAX_BALL_SPEED_MS * 3;
 
     // Anti-stuck thresholds, converted from checkBallStuck() in ../index.js (revamped in
     // archive/release-prompts/13-*.md): speed threshold 40px/s -> m/s, kick components 400/380px/s ->
@@ -1134,20 +1153,12 @@
         );
         aggregate.shape.filterMembershipMask = COLLISION_CATEGORY_BALL;
 
-        // Continuous collision detection - confirmed real Havok/Babylon method names (see
-        // BABYLON_3D_OVERHAUL.md); defensively checked rather than assumed, same as Stage 1/2.
-        if (aggregate.body && typeof aggregate.body.setCcdMotionThreshold === 'function') {
-            aggregate.body.setCcdMotionThreshold(BALL_DIAMETER_M * 0.5);
-            aggregate.body.setCcdSweptSphereRadius(BALL_DIAMETER_M * 0.5);
-        } else {
-            console.warn('CCD methods not found on this Havok PhysicsBody build - tunneling protection may be reduced to the manual max-speed clamp only.');
-        }
-
         return { mesh, aggregate, stuckTimeMs: 0 };
     }
 
-    // Per-frame ball physics maintenance: max-speed clamp (defense #2 behind Havok's CCD) and
-    // the anti-stuck recovery, ported from checkBallStuck() in ../index.js. Deliberately mirrors
+    // Per-frame ball physics maintenance: max-speed clamp (see MAX_BALL_SPEED_MS's comment for
+    // why this - not Havok CCD, which this build doesn't have - is the real defense) and the
+    // anti-stuck recovery, ported from checkBallStuck() in ../index.js. Deliberately mirrors
     // that function's "accumulate, then one decisive kick" design rather than the per-frame
     // nudge it replaced - see the STUCK_* constants' comment for why that matters. `ball` is one
     // of the {mesh, aggregate, stuckTimeMs} objects created by createBall().
@@ -1508,6 +1519,11 @@
         setStatus('initializing physics world…');
         const hk = new BABYLON.HavokPlugin(true, havokInstance);
         scene.enablePhysics(GRAVITY_VECTOR_FN(), hk);
+        // World-level speed ceiling - see WORLD_MAX_LINEAR_SPEED_MS's comment. Angular limit left
+        // at Havok's own default (confirmed 100 rad/s on this build, comfortably above the
+        // flipper's 26 rad/s activation speed) - no reason to touch it, this improvement is only
+        // about linear ball speed.
+        hk.setVelocityLimits(WORLD_MAX_LINEAR_SPEED_MS, hk.getMaxAngularVelocity());
         statusHavok.textContent = 'OK';
         statusHavok.className = 'ok';
 
@@ -1755,15 +1771,24 @@
         //
         // This sandbox cannot load the Babylon/Havok CDN (see BABYLON_3D_OVERHAUL.md's risk
         // section), so the acceptance criteria that need visual judgment (does rolling/settling
-        // "look" physically plausible) can only be checked by a human. But the CCD/tunneling
-        // check is a factual pass/fail that doesn't require judgment - self-verifying rather
-        // than eyeballing a single fast frame.
+        // "look" physically plausible) can only be checked by a human. But the tunneling check is
+        // a factual pass/fail that doesn't require judgment - self-verifying rather than
+        // eyeballing a single fast frame.
 
-        // CCD / anti-tunneling test: reposition the main ball near the flipper end and fire it
-        // at extreme velocity (well beyond MAX_BALL_SPEED_MS, deliberately - this tests whether
-        // a single physics step can outrun collision detection, which is exactly the scenario
-        // CCD exists for) straight at the thin top wall, then watch for a couple of seconds
-        // whether it ever ends up beyond that wall's far edge.
+        // Anti-tunneling test - NOT a "CCD test" (an earlier version of this comment/the button's
+        // own label called it that; improvement-prompts/01-*.md's investigation found this
+        // vendored Havok build has no continuous-collision-detection API at all - see
+        // MAX_BALL_SPEED_MS's comment). What's actually being tested: reposition the main ball
+        // near the flipper end and fire it at extreme velocity (well beyond MAX_BALL_SPEED_MS,
+        // deliberately, to exercise the per-frame JS clamp and the Havok-level
+        // WORLD_MAX_LINEAR_SPEED_MS world speed limit under stress) straight at the thin top
+        // wall, then watch for a couple of seconds whether it ever ends up beyond that wall's far
+        // edge. A real, separate stress test (temporarily setting CCD_TEST_SPEED_MS far higher
+        // than gameplay ever reaches, with both clamps disabled) found tunneling only starts
+        // somewhere between 50-70 m/s on this table's geometry - roughly 30-40x faster than
+        // MAX_BALL_SPEED_MS (~1.7 m/s) and 10-14x faster than WORLD_MAX_LINEAR_SPEED_MS
+        // (~5.1 m/s), a wide safety margin for both real defenses. See that improvement prompt's
+        // implementation note for the full methodology.
         let ccdTestActive = false;
         let ccdTestElapsedMs = 0;
         const CCD_TEST_DURATION_MS = 2500;
