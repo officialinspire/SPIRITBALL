@@ -1,7 +1,8 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stages 1–3 implemented. Stage 1
+**Status (2026-08-09):** Stages 1–4 implemented (Stage 4 with an expanded scope — see below).
+Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
 (`babylon-game.html`/`babylon-game.js`) adds the real table boundary (7 walls, ported faithfully
@@ -16,7 +17,15 @@ button, since this sandbox can't be used to eyeball a single ~90ms fast-moving f
 `babylon-prompts/03-*.md`. Geometry and physics-constant math was sanity-checked with standalone
 Node scripts throughout; actual rendering, physics feel, and camera framing still need a real
 browser — this sandbox's Babylon/Havok CDN access is blocked, same limitation as Phaser's was in
-earlier sessions. Stages 4–13 are planned, not started.
+earlier sessions. Stage 4 adds two motorized `Physics6DoFConstraint` flippers (rest angle, sweep
+limits, and motor direction each individually derived and Node-verified for true left/right mirror
+symmetry — an earlier naive "just negate the angle" draft was geometrically wrong and caught before
+any testing, see `babylon-prompts/04-*.md`) and, at the user's explicit request, pulls the
+obstacle-placement half of Stage 6 forward: a pop bumper cluster, mission target bank, satellite,
+slingshots, and re-entry lanes now sit on the table in a fresh, Space-Cadet-inspired layout (not a
+raw port of the 2D game's coordinates) as real static colliders — physically present and
+bouncing correctly, but not yet wired to any scoring/mission logic, which stays Stage 6's job (see
+its forward-reference note). Stages 5, 7–13 are planned, not started.
 
 ## The goal
 

@@ -70,3 +70,72 @@ and the existing touch-zone controls (mobile, wiring happens in Stage 11).
   it's actually true here rather than assuming the new engine automatically solves it.
 - No physics instability (flippers vibrating, snapping to extreme angles, or launching the ball
   at absurd unphysical speeds) during normal play.
+
+---
+
+## Implementation note (2026-08-09)
+
+**Scope expanded at the user's request**: this stage now also includes obstacle placement
+(bumper cluster, mission target bank, satellite, slingshots, re-entry lanes) that was originally
+`06-bumpers-targets-lanes.md`'s job, pulled forward so flippers and obstacles could be laid out
+together as one authentic, Space-Cadet-inspired table rather than flippers alone against an empty
+boundary. `06-*.md` has a forward-reference note pointing here for the placement geometry; it
+still owns the real scoring/mission-trigger logic for these objects (currently placeholder,
+static, non-scoring colliders - see `babylon-game.js`'s obstacle-section comment).
+
+**Motor API, confirmed** (the open question this stage doc flagged as unresolved at write-time):
+`Physics6DoFConstraint` exposes `setAxisMotorType(axis, PhysicsConstraintMotorType.VELOCITY)`,
+`setAxisMotorTarget(axis, radiansPerSecond)`, and `setAxisMotorMaxForce(axis, maxForce)` on the
+constrained angular axis, verified against Babylon's actual source (not guessed). Used
+`ANGULAR_Y` as the swing axis, matching this project's "tilted gravity, level geometry" convention
+from `02-*.md` (the table is level in local space, so a flipper's vertical swing plane is the
+horizontal Y-axis rotation, not X or Z).
+
+**Flipper geometry bug found and fixed before any testing, via Node.js math verification (not
+user feedback)**: the first version reused the old 2D game's flipper rest angles (20°/-50°)
+mirrored naively. A standalone script computing the flipper *tip* position (not just the mesh
+center) showed this put the left flipper's tip at rest on the wrong side of the table centerline
+- the two flippers would start overlapping instead of leaving the classic center gap. Rederived
+rest angles from scratch by solving for "tip points outward at rest, sweeps inward-and-up-table
+when active" directly: `FLIPPER_LEFT_REST_RAD = -100°`, `FLIPPER_RIGHT_REST_RAD = -80°` (these are
+**not** simple negations of each other). Also discovered that mirroring a *rotating* constrained
+body isn't just mirroring its rest angle - the right flipper additionally needs its constraint
+limit range flipped (`[-SWEEP, 0]` instead of the left's `[0, +SWEEP]`) and its motor driven in the
+opposite sign, or the two flippers sweep toward the same absolute direction instead of mirroring
+each other. Verified the final values numerically: rest tips are exact mirror images
+(`leftTip.x + rightTip.x === 0` to float precision) and both flippers' active tips move toward the
+center and up-table symmetrically.
+
+**Values used**: `FLIPPER_LENGTH_M = 0.075`, sweep `70°`, motor activate speed `26 rad/s` (fast
+"punch," stopped by the angle limit like a real solenoid hitting a mechanical stop), return speed
+`9 rad/s` (slower, controlled fall). Flipper mass `0.03kg`, restitution `0.3` against the ball
+(lower than the table's general bounce, since a flipper should grip and fling, not just bounce).
+These are starting points per the stage doc's own acceptance criteria ("tune by feel") - not
+claimed as final.
+
+**Obstacle layout**: positioned fresh (not ported from 2D pixel coordinates) directly in
+real-world meters, inspired by Space Cadet's actual table geography rather than SPIRITBALL's old
+top-down layout: pop bumper cluster mid-table, mission target bank up the left lane, satellite
+upper-right, a slingshot pair just above each flipper (angled 20° inward, mirrored), and three
+re-entry lanes across the very top. All positions checked to sit within the table's physical
+bounds (`TABLE_WIDTH_M`/`TABLE_LENGTH_M` from `02-*.md`) with no wall overlap.
+
+**Verified in this sandbox**: `node --check`; the mirror-symmetry and tip-position math above via
+standalone Node scripts (no Babylon dependency); the CDN-blocked failure-path re-tested in
+headless Chromium after this stage's changes, confirming no unguarded parse-time error was
+introduced (a real risk here, since an earlier draft of this stage briefly had a top-level
+`BABYLON.Tools.ToRadians()` call that would have thrown before the CDN-failure error handling
+could register - caught and fixed before it shipped; see the file's inline comments for why plain
+math is used instead of Babylon helpers anywhere evaluated outside a function body).
+
+**Not verified** (needs a real browser, same CDN-block limitation as every prior stage): the
+single biggest open assumption is that `Physics6DoFConstraint`'s angular limits are measured
+relative to each flipper's own creation-time pose, not some absolute world reference - the code is
+built entirely around that assumption and it could not be confirmed empirically here. The on-page
+live flipper-angle readout exists specifically so a human tester can immediately tell if it's
+wrong (flipper doesn't move, moves backwards, or both flippers rotate the same absolute
+direction). Also unverified: actual swing feel/speed, whether a ball resting mid-swing gets flung
+correctly (this stage's most important acceptance criterion), whether the tuned mass/restitution/
+motor-force values feel right, and whether the new obstacle layout plays well or just looks
+plausible on paper. The `DROP BALL ON LEFT FLIPPER` button exists as the single most important
+manual test for exactly this.

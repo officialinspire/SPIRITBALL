@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPIRITBALL — Babylon.js 3D (Stage 3: Ball Physics)</title>
+    <title>SPIRITBALL — Babylon.js 3D (Stage 4: Flippers + Layout)</title>
     <style>
         html, body {
             margin: 0;
@@ -98,15 +98,21 @@
     <canvas id="renderCanvas"></canvas>
 
     <div id="status-panel">
-        <h1>SPIRITBALL 3D — Stage 3: Ball Physics</h1>
+        <h1>SPIRITBALL 3D — Stage 4: Flippers + Layout</h1>
         <div class="row"><span>Havok: </span><span id="status-havok">loading…</span></div>
         <div class="row"><span>Balls in scene: </span><span id="status-balls">0</span></div>
         <div class="row"><span>Main ball stuck timer: </span><span id="status-stuck-timer">0 ms</span></div>
         <div class="row"><span>CCD test: </span><span id="status-ccd">not run</span></div>
+        <div class="row"><span>Left flipper angle: </span><span id="status-left-flipper">—</span></div>
+        <div class="row"><span>Right flipper angle: </span><span id="status-right-flipper">—</span></div>
+        <div class="row" style="color:#888; font-size:11px; margin-top:4px;">
+            Controls: LEFT/RIGHT arrows = flippers (works anywhere on the page).
+        </div>
         <button id="drop-btn">DROP TEST BALL (random pos)</button>
         <button id="clear-btn">CLEAR EXTRA TEST BALLS</button>
         <button id="ccd-test-btn">LAUNCH MAIN BALL AT WALL (CCD TEST)</button>
         <button id="stuck-test-btn">FREEZE MAIN BALL (STUCK TEST)</button>
+        <button id="flipper-drop-btn">DROP BALL ON LEFT FLIPPER</button>
     </div>
 
     <div id="error-panel">
