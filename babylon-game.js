@@ -413,6 +413,14 @@
     // resetBall()'s ball-rest position in ../index.js (2D CONFIG-space pixels), not redesigned.
     const BALL_REST_X_PX = 470; // matches resetBall()'s (CONFIG.width-70, CONFIG.height-220) exactly
     const BALL_REST_Z_PX = 740;
+    // The ball's actual rest position in world space - used directly for its spawn/reset
+    // position, NOT plunger.baseZ (see PLUNGER_REST_Z_M's comment for why those two used to be,
+    // wrongly, the same value). Y is the ball's radius plus a small clearance above the playfield
+    // floor (Y=0, see buildTable()'s playfield comment), same clearance reasoning as the
+    // flipper's FLIPPER_PLAYFIELD_CLEARANCE_M - previously a hardcoded 0.03, floating the ball
+    // ~1.65cm above where it actually needed to rest.
+    const BALL_REST_Z_M = toWorldZ(BALL_REST_Z_PX);
+    const BALL_REST_Y_M = BALL_DIAMETER_M / 2 + 0.002;
     // The lane's only wall that didn't already exist: rightWall (see buildTable()) already forms
     // the lane's outer edge, but nothing separated it from the main playfield on the inner side.
     // NOT derived from setupPlunger()'s launchPort rectangle (center 495, width 50, "inner edge"
@@ -440,7 +448,18 @@
     const PLUNGER_HORIZONTAL_BASE_MS = 150 * PX_TO_M;
     const PLUNGER_HORIZONTAL_RATIO = 0.08;
 
-    const PLUNGER_REST_Z_M = -0.02; // new 3D-only visual detail: how far the plunger tip sits
+    // How far the plunger tip sits behind the ball's true rest spot (toWorldZ(BALL_REST_Z_PX),
+    // used directly for the ball's own spawn/reset position - NOT plunger.baseZ, which used to be
+    // the same value and meant the ball spawned inside the plunger's own collision volume once
+    // the plunger got real physics - see createPlunger()'s comment and
+    // improvement-prompts/02-*.md's investigation). Needs >= the plunger cylinder's own
+    // half-length (0.015m) + the ball's radius (0.0135m) =~0.0285m of clearance so the two don't
+    // overlap at rest; picked -0.035 for a small safety margin beyond that minimum (same
+    // reasoning as LANE_INNER_WALL_X_PX's margin above) - the ball settles the last ~6.5mm onto
+    // the plunger's tip under gravity after spawning, rather than needing to spawn flush against
+    // it (which would risk a spawn-time overlap explosion, the same failure mode the flipper
+    // investigation found with FLIPPER_PLAYFIELD_CLEARANCE_M).
+    const PLUNGER_REST_Z_M = -0.035;
     const PLUNGER_TRAVEL_M = 0.045; // from the ball at rest, and how far it pulls back at full charge
 
     // ===================================
@@ -730,10 +749,21 @@
         return wall;
     }
 
-    // Kinematic-animated plunger mesh (no physics body - see the "Plunger / launch lane" block
-    // comment above). chargePercent (0-1) directly drives its Z position between rest and
-    // fully-pulled-back; main() reads/writes .chargePercent every frame, this function only
-    // builds the mesh and applies whatever chargePercent currently holds.
+    // Kinematic-animated plunger mesh, WITH real collision (see improvement-prompts/02-*.md's
+    // investigation) - an earlier version of this function had no physics body at all ("Kinematic-
+    // animated plunger mesh (no physics body...)" this comment used to say), which meant nothing
+    // ever actually held the ball in place while it rested waiting to be launched: gravity's -Z
+    // tilt component (GRAVITY_VECTOR_FN's whole intended purpose - "the ball rolls toward the
+    // flipper end") kept accelerating the resting ball down-table, unopposed, until it rolled off
+    // the playfield entirely. A real plunger has a mechanical stop the ball rests against; this
+    // one now does too, using the same PhysicsMotionType.ANIMATED kinematic pattern the flippers
+    // use (Stage 13) - the plunger still isn't simulated, its position is still driven directly by
+    // chargePercent below, but Havok now uses that position for real collision response against
+    // the ball, both at rest and during the charge-pullback motion.
+    //
+    // chargePercent (0-1) directly drives its Z position between rest and fully-pulled-back;
+    // main() reads/writes .chargePercent every frame, this function only builds the mesh and
+    // applies whatever chargePercent currently holds.
     function createPlunger(scene, mat) {
         const mesh = BABYLON.MeshBuilder.CreateCylinder('plunger', {
             diameter: 8 * PX_TO_M,
@@ -751,6 +781,18 @@
             baseZ: toWorldZ(BALL_REST_Z_PX) + PLUNGER_REST_Z_M
         };
         plunger.mesh.position.set(plunger.baseX, plunger.baseY, plunger.baseZ);
+
+        const aggregate = new BABYLON.PhysicsAggregate(
+            mesh,
+            BABYLON.PhysicsShapeType.CYLINDER,
+            { mass: 0.05, restitution: 0.2, friction: 0.5 },
+            scene
+        );
+        aggregate.body.setMotionType(BABYLON.PhysicsMotionType.ANIMATED);
+        aggregate.body.disablePreStep = false; // same reasoning as the flippers - Havok needs to read this mesh's transform every step, not just once
+        aggregate.shape.filterCollideMask = COLLISION_CATEGORY_BALL; // only the ball needs to collide with the plunger
+        plunger.aggregate = aggregate;
+
         return plunger;
     }
 
@@ -1733,7 +1775,7 @@
         // resetBall()'s ball-rest position in ../index.js, instead of Stage 3's placeholder spot. ---
         const mainBall = createBall(
             scene,
-            new BABYLON.Vector3(plunger.baseX, 0.03, plunger.baseZ),
+            new BABYLON.Vector3(plunger.baseX, BALL_REST_Y_M, BALL_REST_Z_M),
             ballMat
         );
         // --- Particle VFX (Stage 8, babylon-prompts/08-*.md) ---
@@ -1848,7 +1890,7 @@
         }
 
         function resetBallToPlunger() {
-            mainBall.mesh.position.set(plunger.baseX, 0.03, plunger.baseZ);
+            mainBall.mesh.position.set(plunger.baseX, BALL_REST_Y_M, BALL_REST_Z_M);
             mainBall.aggregate.body.setLinearVelocity(BABYLON.Vector3.Zero());
             mainBall.aggregate.body.setAngularVelocity(BABYLON.Vector3.Zero());
             mainBall.stuckTimeMs = 0;

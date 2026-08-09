@@ -66,8 +66,6 @@ each of these:
   hands-on play across real devices.
 - Obstacle geometry (bumpers, targets, lanes, slingshots) is simple primitive shapes, not
   pinball-shaped models.
-- The ball has been observed drifting off the plunger under gravity shortly after load in
-  automated testing; real-device behavior hasn't been confirmed.
 
 ## Contributing / continuing development
 

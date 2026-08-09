@@ -49,3 +49,64 @@ Two working theories, neither confirmed:
   no input, verified via Playwright position sampling.
 - The root cause (not just a symptom) is identified and documented, whether the fix was geometric,
   a physics-material tuning issue, or a confirmed sandbox-only artifact.
+
+## Implementation note
+
+Reproduced first (per step 1), confirming the bug was still present, then investigated via a
+temporary `window.__DEBUG_MAIN_BALL`/`window.__DEBUG_PLUNGER` hook and direct mesh bounding-box
+queries against the plunger, playfield floor, and launch-lane wall.
+
+**Root cause, confirmed (theory 2 from this prompt's own context, not theory 1 - this is not a
+sandbox-only artifact)**: `createPlunger()`'s own header comment used to read "Kinematic-animated
+plunger mesh (**no physics body**...)" - the plunger has never had any collision shape at all,
+purely a visual mesh. Meanwhile `GRAVITY_VECTOR_FN` (Stage 2's own deliberate "tilted gravity,
+level geometry" design) gives gravity a real -Z component specifically so balls roll toward the
+flipper end - genuinely correct, intended physics for actual gameplay. With nothing physically
+blocking the ball at rest, that same intended tilt just kept accelerating the resting ball down
+the table, unopposed, until it rolled off the playfield's floor bounds entirely and fell to the
+debug safety net. A real pinball plunger has a mechanical stop the ball rests against; this one
+didn't.
+
+A second, smaller bug in the same area: the ball's spawn/reset position was hardcoded to
+`plunger.baseZ` directly - the exact same Z coordinate the plunger mesh itself sits at. Once the
+plunger gets real collision, spawning the ball at that identical position would put it dead center
+inside the plunger's own solid geometry (the plunger cylinder, laid along Z, spans
+`plunger.baseZ +/- 0.015`, well inside the ball's own 0.0135m radius from that same point) - a
+guaranteed spawn-time overlap. A third, minor issue: the ball spawned at a hardcoded Y of `0.03`,
+about 1.65cm above where it should actually rest (`BALL_DIAMETER_M / 2` above the playfield
+floor's Y=0 top surface, per Stage 7's playfield-floor fix), so it fell that gap before ever
+touching anything, however briefly.
+
+**Fix**: `createPlunger()` now builds a real `PhysicsAggregate` on the plunger mesh
+(`PhysicsShapeType.CYLINDER`, matching its own visual geometry) and switches it to
+`PhysicsMotionType.ANIMATED` with `disablePreStep = false` - the exact same kinematic pattern
+Stage 13 established for the flippers, for the same reason (a player/game-driven mechanism that
+needs to physically interact with the ball, not be simulated by Havok itself). Decoupled the
+ball's true rest position from the plunger's: a new `BALL_REST_Z_M` (`toWorldZ(BALL_REST_Z_PX)`,
+the ball's own actual intended spot) replaces every `plunger.baseZ` reference used for the ball's
+position, and `PLUNGER_REST_Z_M` (the offset between that spot and where the plunger itself sits)
+was tightened from -0.02 to -0.035 - enough clearance (plunger half-length 0.015m + ball radius
+0.0135m =~0.0285m minimum, plus a small margin) that the ball never spawns overlapping the
+plunger's new collision volume, but close enough that it settles onto the plunger's tip almost
+immediately under gravity rather than needing to spawn flush against it (spawning flush was the
+exact failure mode the flipper investigation already found explosive - see
+`babylon-prompts/13-*.md`'s implementation note). Also introduced `BALL_REST_Y_M`
+(`BALL_DIAMETER_M / 2 + 0.002`) replacing the old hardcoded `0.03`, so the ball starts essentially
+already resting on the floor instead of falling onto it first.
+
+**Verified via Playwright**:
+- Reproduction of the original bug, confirmed present before the fix (drifting from spawn to
+  falling off the floor bounds within ~250ms in the worst observed case).
+- Post-fix: the ball settles from its spawn position onto the plunger's tip within about 5-6
+  seconds (a gentle creep, not a fast drop - rolling friction against the floor dominates the
+  small residual gravity component over that short a distance, slower than a naive frictionless
+  estimate would suggest, but not a bug), covering a total drift of ~8mm before stopping - then
+  holds completely stable. Sampled every 500ms for a full 10 seconds post-settling: position
+  unchanging, velocity reporting only numerical noise (0.00-0.03, never sustained).
+- The actual launch mechanic (full charge-and-release, matching real player interaction) still
+  works correctly with the plunger's new collision in place - the ball launches forward at the
+  expected velocity and arcs back down under gravity exactly as before, no interference or
+  blocking from the new plunger collision shape during the charge-pullback motion.
+- No console warnings/errors introduced.
+- Full regression pass (flipper rest/sweep angles, the tunneling-protection test, HUD/dev-panel
+  gating) all unaffected.
