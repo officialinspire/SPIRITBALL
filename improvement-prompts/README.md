@@ -23,8 +23,8 @@ work on next, not this order:
 
 | # | File | Fixes / delivers |
 |---|------|-------------------|
-| 1 | `01-real-continuous-collision-detection.md` | Dead CCD API call silently degrades ball-tunneling protection to a weaker fallback. |
-| 2 | `02-ball-plunger-resting-stability.md` | Ball observed drifting off the plunger under gravity shortly after load. |
+| 1 | `01-real-continuous-collision-detection.md` | ✅ Done — dead CCD API call removed, replaced with a real Havok world-level speed limit; stress-tested. |
+| 2 | `02-ball-plunger-resting-stability.md` | ✅ Done — plunger now has real kinematic collision (it had none at all); ball rests stably instead of rolling off the table. |
 | 3 | `03-real-device-parity-and-visual-qa-pass.md` | The feature-parity checklist Stage 13 never built, now actually achievable via real browser testing. |
 | 4 | `04-basic-audio.md` | The game currently has no sound or music at all. |
 | 5 | `05-mission-fsm-and-rank-system.md` | The mission/rank progression system, deferred since Stage 6, still doesn't exist. |
