@@ -62,3 +62,30 @@ throughout this project (`../BABYLON_3D_OVERHAUL.md`'s risk section).
   open question in a comment.
 - A fresh visitor loading the game (desktop or a supported mobile browser) gets the full 3D
   SPIRITBALL experience with no dependency on the old Phaser implementation at all.
+
+---
+
+## Forward reference (2026-08-09)
+
+**The URL-level part of item 2 above happened early, at the user's explicit request**, well
+before this stage's actual parity work: `babylon-game.html` was renamed to `index.html` (so
+GitHub Pages serves the Babylon build by default) and the old Phaser `index.html` was renamed to
+`phaser2d.html` (not deleted — kept as a working fallback/reference, since Stage 4's Babylon build
+is still an unverified WIP with no real scoring, materials, or full mobile UI yet). `index.js` and
+`styles.css` (Phaser's script/styles) were **not** renamed or touched — `phaser2d.html` still
+references them by their original names, so the 2D game keeps working exactly as before at its
+new URL. `babylon-game.js` also kept its name (only the `.html` entry point moved) to avoid a
+naming collision with the still-live Phaser `index.js`.
+
+This explicitly does **not** satisfy the rest of item 2 (Phaser removal), item 1 (the parity
+checklist), item 3 (the CDN-for-production decision), or item 4 (PWA icon refresh) — those remain
+this stage's job, done for real once the 3D build has actual feature parity. Doing the URL swap
+early was a deliberate, explicit user decision to prioritize being able to playtest the 3D build
+on a real device over following the originally planned stage order; it is not a signal that Stage
+13 is otherwise underway.
+
+Minimal mobile touch controls were also added directly to `babylon-game.js` at the same time
+(tap left/right half of the canvas to activate the matching flipper, multi-touch via a
+touch-identifier map) — a stripped-down placeholder, not the real touch-zone UI Stage 11 still
+owns, but necessary since a pinball game genuinely cannot be played at all on a touchscreen
+without some way to fire the flippers.

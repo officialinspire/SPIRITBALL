@@ -26,6 +26,16 @@ slingshots, and re-entry lanes now sit on the table in a fresh, Space-Cadet-insp
 raw port of the 2D game's coordinates) as real static colliders — physically present and
 bouncing correctly, but not yet wired to any scoring/mission logic, which stays Stage 6's job (see
 its forward-reference note). Stages 5, 7–13 are planned, not started.
+**Also on 2026-08-09, at the user's explicit request:** `babylon-game.html` was promoted to
+`index.html` so GitHub Pages serves the Babylon 3D build by default — the old Phaser game was
+renamed `phaser2d.html` (kept working, not deleted) rather than removed outright, since the 3D
+build is still an early WIP with no scoring, final materials, or full mobile UI. `babylon-game.js`
+kept its filename (only the `.html` entry point moved) to avoid colliding with the Phaser build's
+still-live `index.js`. Minimal mobile touch controls (tap left/right half of the canvas = matching
+flipper, multi-touch capable) were added at the same time, since none existed and a pinball game
+can't be meaningfully played on a touchscreen without them — this is a stopgap, not Stage 11's
+real touch-zone UI. This pulls a piece of Stage 13 (file promotion) far ahead of schedule; see
+`babylon-prompts/13-*.md`'s forward-reference note for exactly what is and isn't done as a result.
 
 ## The goal
 

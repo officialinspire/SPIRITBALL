@@ -2,109 +2,150 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <!-- Pinch-zoom is intentionally left enabled (user-scalable, higher maximum-scale) for
-         low-vision players; touch-action: manipulation in styles.css already prevents this
-         from causing double-tap-zoom on the game's own buttons. See release-prompts/12-*.md. -->
-    <!-- viewport-fit=cover lets the CSS env(safe-area-inset-*) values used by the mobile
-         overlay controls resolve to real numbers on notched/home-indicator phones instead of
-         0; see release-prompts/14-*.md. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
-    <meta name="theme-color" content="#000000">
-    <meta name="mobile-web-app-capable" content="yes">
+    <!-- Same mobile meta-tag set proven out on the Phaser build (phaser2d.html) - viewport-fit=cover
+         for safe-area insets, no pinch-zoom since this is a full-screen game, PWA/homescreen hints. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#05010f">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="description" content="SPIRITBALL - DMT-inspired psychedelic pinball game">
-    <title>SPIRITBALL - Vision Quest Pinball</title>
-
-    <!-- PWA manifest + icons, so "Add to Home Screen" gets a real name/icon instead of a
-         blank/default one; see release-prompts/10-*.md -->
+    <title>SPIRITBALL — 3D Pinball</title>
     <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-
-    <!-- Phaser 3 from CDN, with an automatic fallback CDN and a visible message if both fail
-         to load (e.g. blocked network, offline, ad-blocker false positive) instead of a
-         silent blank canvas; see release-prompts/10-*.md. The handler functions are defined
-         BEFORE the CDN <script> tag below (not after) so onerror can never fire before
-         SPIRITBALL_loadPhaserFallback exists - relying on "the network request will always be
-         slower than parsing the next tag" would work in practice but isn't guaranteed. -->
-    <script>
-        function SPIRITBALL_loadPhaserFallback() {
-            var fallback = document.createElement('script');
-            fallback.src = 'https://unpkg.com/phaser@3.60.0/dist/phaser.min.js';
-            fallback.async = false; // keep it load-blocking so window 'load' waits for it
-            fallback.onerror = SPIRITBALL_showEngineLoadError;
-            document.head.appendChild(fallback);
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #05010f;
+            font-family: 'Courier New', monospace;
         }
 
-        function SPIRITBALL_showEngineLoadError() {
-            var container = document.getElementById('game-container');
-            if (container) {
-                container.innerHTML =
-                    '<div style="color:#00ffff;font-family:Arial,sans-serif;text-align:center;' +
-                    'padding:24px;max-width:320px;line-height:1.5;">' +
-                    'Failed to load the game engine.<br>Check your connection and reload the page.' +
-                    '</div>';
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            touch-action: none;
+        }
+
+        #status-panel {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            z-index: 10;
+            background: rgba(10, 0, 25, 0.85);
+            border: 2px solid #00ffff;
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #00ffff;
+            font-size: 13px;
+            line-height: 1.6;
+            min-width: 260px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+        }
+
+        #status-panel h1 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #ff00ff;
+        }
+
+        #status-panel .row span:first-child {
+            color: #888;
+        }
+
+        #status-panel .ok { color: #00ff88; }
+        #status-panel .bad { color: #ff3355; }
+
+        #status-panel button {
+            margin-top: 6px;
+            width: 100%;
+            padding: 8px;
+            background: linear-gradient(135deg, rgba(138, 43, 226, 0.6), rgba(75, 0, 130, 0.7));
+            border: 2px solid #00ffff;
+            border-radius: 6px;
+            color: #00ffff;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        #status-panel button:active {
+            background: linear-gradient(135deg, rgba(138, 43, 226, 0.9), rgba(75, 0, 130, 1));
+        }
+
+        /* This debug panel was sized for desktop; on a phone-width viewport it otherwise eats
+           most of the screen and sits on top of the table. Shrink it down rather than remove it -
+           it's still useful for mobile playtesting (Havok status, CCD test, flipper angle
+           readout) until Stage 7+ replaces it with real game UI. */
+        @media (max-width: 480px) {
+            #status-panel {
+                min-width: 0;
+                width: calc(100% - 24px);
+                font-size: 11px;
+                padding: 8px 10px;
+            }
+
+            #status-panel h1 {
+                font-size: 12px;
             }
         }
 
-        window.addEventListener('load', function () {
-            if (typeof Phaser === 'undefined') {
-                SPIRITBALL_showEngineLoadError();
-            }
-        });
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"
-            onerror="SPIRITBALL_loadPhaserFallback()"></script>
+        #error-panel {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 20;
+            background: rgba(20, 0, 0, 0.95);
+            color: #ff5566;
+            padding: 40px;
+            box-sizing: border-box;
+            font-size: 15px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            overflow: auto;
+        }
 
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Audiowide&family=Righteous&family=Bungee+Shade&family=Monoton&family=Permanent+Marker&display=swap" rel="stylesheet">
+        #error-panel h1 {
+            color: #ff3355;
+            margin-top: 0;
+        }
+    </style>
 
-    <!-- Game Styles -->
-    <link rel="stylesheet" href="styles.css">
+    <!-- Confirmed CDN URLs and load order (Havok before core) - see BABYLON_3D_OVERHAUL.md. -->
+    <script src="https://cdn.babylonjs.com/havok/HavokPhysics_umd.js"></script>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-    <div id="app-container">
-        <!-- Shown on mobile devices held in landscape, where the portrait playfield has no
-             room to render controls; see release-prompts/02-*.md -->
-        <div id="rotate-overlay" class="rotate-overlay">
-            <div class="rotate-overlay-content">
-                <span class="rotate-icon">&#8635;</span>
-                <p>Rotate your device to portrait to play SPIRITBALL</p>
-            </div>
+    <canvas id="renderCanvas"></canvas>
+
+    <div id="status-panel">
+        <h1>SPIRITBALL 3D (dev build)</h1>
+        <div class="row"><span>Havok: </span><span id="status-havok">loading…</span></div>
+        <div class="row"><span>Balls in scene: </span><span id="status-balls">0</span></div>
+        <div class="row"><span>Main ball stuck timer: </span><span id="status-stuck-timer">0 ms</span></div>
+        <div class="row"><span>CCD test: </span><span id="status-ccd">not run</span></div>
+        <div class="row"><span>Left flipper angle: </span><span id="status-left-flipper">—</span></div>
+        <div class="row"><span>Right flipper angle: </span><span id="status-right-flipper">—</span></div>
+        <div class="row" style="color:#888; font-size:11px; margin-top:4px;">
+            Controls: LEFT/RIGHT arrow keys (desktop) or tap the left/right half of the screen
+            (mobile) = flippers.
         </div>
-
-        <div id="game-wrapper">
-            <div id="game-container"></div>
-
-            <!-- Pause Button - always available, desktop and mobile -->
-            <button id="pause-btn" class="pause-btn" aria-label="Pause Game">
-                <span>⏸</span>
-            </button>
-
-            <!-- Arcade-style mobile overlay controls: full-height edge zones for the flippers
-                 (tap anywhere along the side, like the flipper buttons on a real cabinet) plus
-                 a discrete launch button, floating on top of a full-bleed canvas rather than
-                 reserving a separate bottom bar - see release-prompts/14-*.md. Shown/hidden by
-                 InputManager based on device detection. -->
-            <div id="mobile-controls">
-                <div id="flipper-zone-left" class="flipper-zone left" role="button" aria-label="Left Flipper">
-                    <span class="flipper-zone-icon">◀</span>
-                </div>
-                <div id="flipper-zone-right" class="flipper-zone right" role="button" aria-label="Right Flipper">
-                    <span class="flipper-zone-icon">▶</span>
-                </div>
-                <button id="launch-btn" class="launch-btn" aria-label="Launch Ball: hold to charge, release to fire">
-                    <span class="launch-btn-icon">⚡</span>
-                    <span class="launch-btn-label">LAUNCH</span>
-                </button>
-            </div>
-        </div>
+        <button id="drop-btn">DROP TEST BALL (random pos)</button>
+        <button id="clear-btn">CLEAR EXTRA TEST BALLS</button>
+        <button id="ccd-test-btn">LAUNCH MAIN BALL AT WALL (CCD TEST)</button>
+        <button id="stuck-test-btn">FREEZE MAIN BALL (STUCK TEST)</button>
+        <button id="flipper-drop-btn">DROP BALL ON LEFT FLIPPER</button>
     </div>
 
-    <!-- Game Script -->
-    <script src="index.js"></script>
+    <div id="error-panel">
+        <h1>Failed to start</h1>
+        <div id="error-message"></div>
+    </div>
+
+    <script src="babylon-game.js"></script>
 </body>
 </html>
