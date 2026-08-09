@@ -6,6 +6,12 @@ the corresponding `release-prompts/NN-*.md` files, which now double as a record 
 changed and why. Item 11 was reviewed via geometric/physics analysis (live in-browser playtesting
 wasn't possible in the sandbox this work was done in — see its entry below and
 `release-prompts/11-*.md` for details and what's still recommended before shipping).
+**Later same day:** a much larger initiative began — rebuilding SPIRITBALL's rendering and
+physics on Babylon.js/Havok as a true 3D pinball game. See `../BABYLON_3D_OVERHAUL.md` and
+`../babylon-prompts/01-13-*.md`. This document and `release-prompts/` remain the historical
+record of the Phaser/2D-era bug fixes — the mission/scoring/rank *logic* they hardened carries
+forward into the 3D rewrite unchanged; the physics/rendering code they fixed is being replaced
+wholesale.
 **Scope:** `index.html`, `index.js`, `styles.css` (current XP-Pinball-mechanics build, v5.0)
 **Supersedes:** `CODE_REVIEW_REPORT.md` (Dec 5 2025), which reviewed an older chakra/combo-based
 build and concluded "no blocking bugs." That build no longer matches the code — the game has
