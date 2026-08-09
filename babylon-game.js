@@ -216,8 +216,13 @@
     function showFatalError(title, err) {
         console.error(title, err);
         errorPanel.style.display = 'block';
-        statusHavok.textContent = 'FAILED';
-        statusHavok.className = 'bad';
+        // Only stomp the Havok status to FAILED if it wasn't already confirmed OK - otherwise a
+        // later, unrelated failure (e.g. flipper/constraint setup) misleadingly reads as "Havok
+        // is broken" when Havok itself loaded and initialized fine.
+        if (statusHavok.textContent !== 'OK') {
+            statusHavok.textContent = 'FAILED';
+            statusHavok.className = 'bad';
+        }
         const detail = err && err.stack ? err.stack : String(err);
         errorMessage.textContent = title + '\n\n' + detail;
     }
@@ -440,11 +445,18 @@
             { axis: BABYLON.PhysicsConstraintAxis.ANGULAR_Y, minLimit: minLimit, maxLimit: maxLimit }
         ], scene);
 
+        // Constraint must be attached to the bodies BEFORE any setAxisMotor*() call - Havok only
+        // allocates constraint._pluginData (an array the plugin iterates over internally) inside
+        // addConstraint()/initConstraint(). Calling a motor setter first hits an empty/undefined
+        // _pluginData and throws "not iterable". Confirmed against Babylon's actual source
+        // (havokPlugin.ts's own initConstraint comment even calls this ordering "real weird").
+        // This was caught via a real Android Chrome playtest, not caught in this sandbox, since
+        // this sandbox cannot load the Havok/Babylon CDN to exercise this code path at all.
+        anchorAggregate.body.addConstraint(aggregate.body, constraint);
+
         constraint.setAxisMotorType(BABYLON.PhysicsConstraintAxis.ANGULAR_Y, BABYLON.PhysicsConstraintMotorType.VELOCITY);
         constraint.setAxisMotorMaxForce(BABYLON.PhysicsConstraintAxis.ANGULAR_Y, FLIPPER_MOTOR_MAX_FORCE);
         constraint.setAxisMotorTarget(BABYLON.PhysicsConstraintAxis.ANGULAR_Y, 0);
-
-        anchorAggregate.body.addConstraint(aggregate.body, constraint);
 
         // motorSign: left activates toward +maxLimit (positive motor target), right activates
         // toward -maxLimit/minLimit (negative motor target) - see the limit range above.
