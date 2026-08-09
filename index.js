@@ -1727,7 +1727,17 @@ class GameScene extends Phaser.Scene {
         // circular collider centered on the flipper's pivot, sized to cover the full swept
         // arc (rest angle to fully-up angle) so the ball reliably touches "the flipper" for
         // its whole swing, not just its resting pose. See release-prompts/01-*.md.
-        this.flipperColliderRadius = 62;
+        //
+        // IMPORTANT: this radius was originally 62 (sized to the old rectangular body's
+        // half-diagonal), but a full disk of radius 62 covers ~6x the area of the thin
+        // 120x16 flipper it was replacing - a huge zone of empty space around the visual
+        // paddle that still counted as "touching the flipper." Combined with the 150ms
+        // power-reapply cooldown in updateFlipperPower(), a ball resting near a held flipper
+        // could still be inside that oversized zone after being launched, get re-flipped
+        // again within 150ms, and again - a runaway relaunch loop that pins the ball at
+        // CONFIG.ballMaxVelocity and sends it careening unpredictably ("flying everywhere").
+        // Shrunk to 40 and the cooldown lengthened (see updateFlipperPower()) to fix this.
+        this.flipperColliderRadius = 40;
 
         // Left cosmic energy wing flipper - at bottom left
         this.leftFlipper = this.add.sprite(CONFIG.width / 2 - flipperGap, flipperY, 'flipper-left');
@@ -2594,10 +2604,14 @@ class GameScene extends Phaser.Scene {
                 this.cameraShake(150, 0.008);
             }
 
-            // Cooldown here is longer than a single frame so a ball still inside the (larger)
-            // flipper collider right after being launched doesn't get re-flipped every frame
-            // before it clears the hitbox ("machine-gunning").
-            this.time.delayedCall(150, () => {
+            // Cooldown here is longer than a single frame so a ball still inside the flipper
+            // collider right after being launched doesn't get re-flipped every frame before it
+            // clears the hitbox ("machine-gunning"). 150ms was too short relative to the
+            // collider's radius - a held flipper could keep re-triggering a full-power launch
+            // on a ball that hadn't actually left the zone yet, producing a runaway feedback
+            // loop. 320ms gives a launched ball time to clearly exit the (now smaller, 40px)
+            // collider before it's eligible to be flipped again. See setupFlippers().
+            this.time.delayedCall(320, () => {
                 this.leftFlipperCooldown = false;
             });
         }
@@ -2627,7 +2641,8 @@ class GameScene extends Phaser.Scene {
                 this.cameraShake(150, 0.008);
             }
 
-            this.time.delayedCall(150, () => {
+            // See the matching comment above in the left-flipper block.
+            this.time.delayedCall(320, () => {
                 this.rightFlipperCooldown = false;
             });
         }
