@@ -12,18 +12,21 @@
 //          playfield-floor bug fixed as part of this stage, not just a visual pass)
 // Stage 8: particle VFX - ball trail, drain vortex, per-hit bursts, chakra sparkle
 //          (babylon-prompts/08-*.md - see that file's implementation note)
+// Stage 9: 3D-mounted backglass/dot-matrix display (babylon-prompts/09-*.md - see that file's
+//          implementation note)
 // See BABYLON_3D_OVERHAUL.md for the overall architecture.
 //
 // Scope so far: the static table boundary (now with a real playfield floor), the fixed gameplay
 // camera, one physics-driven ball, two motorized flippers, a plunger/launch lane, scored
 // obstacles (bumpers, mission targets, satellite, slingshots, re-entry lanes) with real
 // collision/trigger detection and a drain zone, SPIRITBALL's actual DMT/cosmic/chakra visual
-// identity (PBR materials, glow layer, bloom, procedural starfield skybox), and particle VFX (ball
+// identity (PBR materials, glow layer, bloom, procedural starfield skybox), particle VFX (ball
 // trail, drain vortex, hit bursts, chakra sparkle) respecting both the device-tier and reduced-
-// motion gates. The full mission FSM (select/start/complete/rank-up) remains deferred to Stage 12,
-// whose real UI it needs to be testable. This file supersedes babylon-spike.js as the base for
-// the real game; the spike file stays around as a disposable physics-tuning sandbox (per its own
-// stage doc), not because this file depends on it.
+// motion gates, and a real 3D-mounted backglass panel showing score/high-score/lives/messages.
+// The full mission FSM (select/start/complete/rank-up) remains deferred to Stage 12, whose real
+// UI it needs to be testable. This file supersedes babylon-spike.js as the base for the real
+// game; the spike file stays around as a disposable physics-tuning sandbox (per its own stage
+// doc), not because this file depends on it.
 // ===================================
 
 (function () {
@@ -658,6 +661,107 @@
     }
 
     // ===================================
+    // Backglass / dot-matrix display (babylon-prompts/09-*.md) - a real mounted 3D panel, not a
+    // flat DOM/canvas overlay, per the doc's explicit point that a floating UI layer wouldn't
+    // read as "part of the cabinet." Driven by one DynamicTexture, redrawn from scratch on every
+    // change (simplest and most robust option - no partial-clear bugs to chase in a sandbox that
+    // can't watch it render). A faint dot-grid overlay evokes the "dot-matrix" look without
+    // rasterizing actual per-character dot glyphs, which would be a lot of unverifiable-by-me
+    // complexity for a first pass. DOUBLESIDE so it's visible from the fixed camera regardless of
+    // which way Babylon's default plane-facing convention turns out to be - another place this
+    // sandbox can't confirm visually, so the safer option was taken over guessing the correct sign.
+    //
+    // Scope note: the doc asks for rank/mission/multiplier alongside score/lives - none of that
+    // state exists yet, deliberately (Stage 6's scope decision: the full mission FSM is deferred
+    // to Stage 12, since it needs real UI to be worth porting, and this panel doesn't change that
+    // - it's a renderer, not a new source of state). Only score, a new high-score (localStorage,
+    // separate key from the 2D game's so the two builds don't cross-contaminate during parallel
+    // development), lives, and the message line are wired up; rank/mission/multiplier will slot
+    // into this same panel once Stage 12 gives them real values to show.
+    // ===================================
+    function buildBackglass(scene) {
+        const width = 512;
+        const height = 256;
+        const texture = new BABYLON.DynamicTexture('backglassTex', { width, height }, scene, false);
+        const ctx = texture.getContext();
+
+        const mat = new BABYLON.StandardMaterial('backglassMat', scene);
+        mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        mat.disableLighting = true; // unlit - the DynamicTexture IS the display's own light source
+        mat.emissiveTexture = texture;
+        mat.backFaceCulling = false;
+
+        const mesh = BABYLON.MeshBuilder.CreatePlane('backglass', {
+            width: 0.32,
+            height: 0.15,
+            sideOrientation: BABYLON.Mesh.DOUBLESIDE
+        }, scene);
+        // Mounted above/behind the playfield at the far end (+Z, opposite the flippers), tilted
+        // to face back down toward the camera - the real-cabinet backglass position.
+        mesh.position.set(0, 0.28, TABLE_LENGTH_M / 2 + 0.06);
+        mesh.rotation.x = 0.4;
+        mesh.material = mat;
+
+        const state = { score: 0, highScore: 0, lives: STARTING_LIVES, message: '', messageTimer: null };
+
+        function redraw() {
+            ctx.fillStyle = '#05000f';
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.05)';
+            for (let y = 6; y < height; y += 8) {
+                for (let x = 6; x < width; x += 8) {
+                    ctx.fillRect(x, y, 2, 2);
+                }
+            }
+
+            ctx.textBaseline = 'top';
+            ctx.textAlign = 'left';
+            ctx.font = 'bold 30px monospace';
+            ctx.fillStyle = '#00ffff';
+            ctx.fillText('SCORE ' + state.score, 16, 16);
+
+            ctx.font = 'bold 20px monospace';
+            ctx.fillStyle = '#ffd700';
+            ctx.fillText('HI ' + state.highScore, 16, 58);
+
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#ff0099';
+            ctx.fillText('BALLS ' + state.lives, width - 16, 58);
+            ctx.textAlign = 'left';
+
+            if (state.message) {
+                ctx.font = 'bold 32px monospace';
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.fillText(state.message, width / 2, height - 76);
+                ctx.textAlign = 'left';
+            }
+
+            texture.update();
+        }
+
+        // Last-message-wins: a new call cancels any pending clear from the previous one instead
+        // of queuing, so rapid-fire hits replace rather than stack illegibly (per the doc's
+        // acceptance criteria) - the tradeoff is a very quick second hit can cut the first
+        // message's dwell time short, judged an acceptable simplification over building a real
+        // message queue for a stage whose actual on-screen legibility can't be checked here.
+        function showMessage(text, durationMs) {
+            if (state.messageTimer) clearTimeout(state.messageTimer);
+            state.message = text;
+            redraw();
+            state.messageTimer = setTimeout(() => {
+                state.message = '';
+                state.messageTimer = null;
+                redraw();
+            }, durationMs || 1100); // 1100ms matches showPopup()'s tween duration in ../index.js
+        }
+
+        redraw();
+        return { mesh, state, redraw, showMessage };
+    }
+
+    // ===================================
     // Particle VFX (babylon-prompts/08-*.md). One shared soft-dot texture (a DynamicTexture radial
     // gradient, same self-contained-asset approach as Stage 7's starfield - no new external image
     // dependency) reused/tinted across every particle system below via color1/color2, rather than
@@ -1199,6 +1303,10 @@
         const obstacles = buildObstacles(scene);
         buildLaunchLane(scene);
         buildDrainZone(scene);
+        const backglass = buildBackglass(scene);
+        const highScoreKey = 'spiritball3d-highscore'; // separate from the 2D game's 'spiritball-highscore'
+        backglass.state.highScore = parseInt(localStorage.getItem(highScoreKey), 10) || 0;
+        backglass.redraw();
 
         // Glow layer picks up every emissive material already assigned above/below automatically
         // - no per-mesh registration needed. Bloom is gated behind detectHighFidelity() per the
@@ -1448,6 +1556,7 @@
             ballInPlay = true;
             plungerCharging = false;
             plunger.chargePercent = 0;
+            backglass.showMessage('LAUNCH!', 600);
         }
 
         window.addEventListener('keydown', (e) => {
@@ -1505,6 +1614,12 @@
         function addScore(points) {
             score += points;
             statusScore.textContent = String(score);
+            backglass.state.score = score;
+            if (score > backglass.state.highScore) {
+                backglass.state.highScore = score;
+                localStorage.setItem(highScoreKey, String(score));
+            }
+            backglass.redraw();
         }
 
         // Per-object hit cooldown, ported from isOnCooldown()/setCooldown() in ../index.js
@@ -1555,16 +1670,19 @@
                 addScore(SCORE_ATTACK_BUMPER);
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage('+' + SCORE_ATTACK_BUMPER, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
             } else if (meta.kind === 'satellite') {
                 setCooldown(mesh, COOLDOWN_SATELLITE_MS);
                 addScore(SCORE_SATELLITE);
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage('SATELLITE!', 900);
             } else if (meta.kind === 'slingshot') {
                 setCooldown(mesh, COOLDOWN_SLINGSHOT_MS);
                 addScore(SCORE_SLINGSHOT);
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage('+' + SCORE_SLINGSHOT, 600);
             }
         }
 
@@ -1581,6 +1699,10 @@
                 addScore(SCORE_MISSION_TARGET);
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                // hitMissionTarget() in ../index.js shows "Selected: {missionName}" here - no
+                // mission-select state exists yet (Stage 6's scope decision), so a generic
+                // acknowledgement stands in until Stage 12 gives this a real mission to name.
+                backglass.showMessage('TARGET!', 700);
             } else if (meta.kind === 'reentryLane') {
                 setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
                 addScore(SCORE_REENTRY_LANE);
@@ -1596,6 +1718,7 @@
                 pulseMesh(mesh);
                 // After the recolor, not before - the burst should match the new lit-green state.
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage('RE-ENTRY!', 800);
             }
         }
 
@@ -1609,13 +1732,18 @@
             ballInPlay = false;
             lives--;
             statusLives.textContent = String(lives);
+            backglass.state.lives = lives;
+            backglass.showMessage('DRAINED!', 1400); // no Grim Reaper visual yet (Stage 12) - this is the stand-in
             setTimeout(() => {
                 if (lives <= 0) {
                     lives = STARTING_LIVES;
                     score = 0;
                     statusLives.textContent = String(lives);
                     statusScore.textContent = '0';
+                    backglass.state.lives = lives;
+                    backglass.state.score = score;
                 }
+                backglass.redraw();
                 resetBallToPlunger();
             }, 1500);
         }

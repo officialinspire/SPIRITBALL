@@ -1,7 +1,7 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stages 1–8 implemented (Stages 4-8 with expanded/adjusted scope — see
+**Status (2026-08-09):** Stages 1–9 implemented (Stages 4-9 with expanded/adjusted scope — see
 below). Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
@@ -74,7 +74,12 @@ boolean and a freshly re-declared `window.SPIRITBALL_reducedMotion` (this page n
 `index.js`, so nothing carries that flag over automatically). See `08-*.md`'s implementation note,
 including an honest check against the 2D codebase that found only the ball trail and drain vortex
 have real 2D equivalents to port - hit bursts and chakra sparkle are new, built to match the doc's
-intent. Stages 9-13 are planned, not started.
+intent. Stage 9 adds a real 3D-mounted backglass panel (a `DynamicTexture`-driven plane, not a DOM
+overlay) showing score, a new localStorage-persisted high score, lives, and transient messages -
+rank/mission/multiplier are deliberately not shown yet, consistent with Stage 6's mission-FSM
+deferral to Stage 12. See `09-*.md`'s implementation note, including Node-verified camera-frustum
+placement math and a last-message-wins approach to the popup system. Stages 10-13 are planned, not
+started.
 
 ## The goal
 
