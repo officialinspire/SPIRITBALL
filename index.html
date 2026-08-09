@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <!-- Same mobile meta-tag set proven out on the Phaser build (phaser2d.html) - viewport-fit=cover
-         for safe-area insets, no pinch-zoom since this is a full-screen game, PWA/homescreen hints. -->
+    <!-- viewport-fit=cover for safe-area insets, no pinch-zoom since this is a full-screen game,
+         PWA/homescreen hints. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05010f">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -30,7 +30,56 @@
             touch-action: none;
         }
 
+        /* Player-facing HUD - score/lives only, always visible. Separate from #status-panel
+           (the dev/debug panel below): until this was added, the ONLY place score/lives were
+           ever shown was inside that dev panel, alongside test buttons - not acceptable for a
+           real playable build. Small and out of the way (top-right, opposite the dev panel's
+           top-left corner) so it never blocks the table. */
+        #player-hud {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 10;
+            display: flex;
+            gap: 16px;
+            background: rgba(10, 0, 25, 0.55);
+            border: 1px solid rgba(0, 255, 255, 0.4);
+            border-radius: 8px;
+            padding: 6px 14px;
+            color: #00ffff;
+            font-size: 14px;
+            line-height: 1.4;
+            text-shadow: 0 0 6px rgba(0, 255, 255, 0.6);
+        }
+
+        #player-hud .hud-label {
+            color: #888;
+            font-size: 10px;
+            display: block;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        #player-hud .hud-value {
+            font-weight: bold;
+        }
+
+        @media (max-width: 480px) {
+            #player-hud {
+                top: 8px;
+                right: 8px;
+                padding: 5px 10px;
+                font-size: 12px;
+                gap: 10px;
+            }
+        }
+
+        /* Dev/debug panel - hidden by default (see #player-hud's comment above for why this used
+           to be the only place score/lives showed at all). Shown by appending ?dev=1 to the URL
+           - toggled in babylon-game.js, not here, since it also needs to persist across the
+           menu/pause screens. */
         #status-panel {
+            display: none;
             position: fixed;
             top: 12px;
             left: 12px;
@@ -96,14 +145,10 @@
 
         /* ===================================
            MOBILE TOUCH CONTROLS - ARCADE STYLE (Stage 11, babylon-prompts/11-*.md)
-           Ported from styles.css/phaser2d.html's already-designed-and-tuned controls
-           (release-prompts/14-*.md) rather than redesigned - per that stage doc's own
-           constraint, this file's job is rewiring event handlers to the new 3D flipper/plunger
-           functions, not re-styling. Copied inline (not a <link> to styles.css) since that
-           file also carries a lot of 2D-game-specific canvas/HUD/menu/pause-button CSS that
-           doesn't apply here and would risk selector collisions with this page's own
-           #status-panel/#error-panel/#flash-overlay - not worth the DRY-ness given neither file
-           is expected to change often once each is stable.
+           Originally ported from the now-removed 2D Phaser build's already-tuned touch-control
+           styling (archive/release-prompts/14-*.md), then adapted for this page's own
+           3D flipper/plunger event handlers. Kept as inline styles (not a separate stylesheet)
+           since this is the only front-end this project has now.
            =================================== */
         #mobile-controls {
             display: none; /* toggled by updateMobileControlsVisibility() in babylon-game.js */
@@ -492,8 +537,13 @@
     <canvas id="renderCanvas"></canvas>
     <div id="flash-overlay"></div>
 
+    <div id="player-hud">
+        <div><span class="hud-label">Score</span><span class="hud-value" id="hud-score">0</span></div>
+        <div><span class="hud-label">Lives</span><span class="hud-value" id="hud-lives">3</span></div>
+    </div>
+
     <div id="status-panel">
-        <h1>SPIRITBALL 3D (dev build)</h1>
+        <h1>SPIRITBALL (dev build)</h1>
         <div class="row"><span>Score: </span><span id="status-score">0</span></div>
         <div class="row"><span>Lives: </span><span id="status-lives">3</span></div>
         <div class="row"><span>Havok: </span><span id="status-havok">loading…</span></div>
@@ -515,9 +565,8 @@
         <button id="reset-plunger-btn">RESET BALL TO PLUNGER</button>
     </div>
 
-    <!-- Arcade-style mobile overlay controls, ported from phaser2d.html/styles.css
-         (release-prompts/14-*.md) - see this file's <style> block comment. Shown/hidden by
-         updateMobileControlsVisibility() in babylon-game.js. -->
+    <!-- Arcade-style mobile overlay controls - see this file's <style> block comment.
+         Shown/hidden by updateMobileControlsVisibility() in babylon-game.js. -->
     <div id="mobile-controls">
         <div id="flipper-zone-left" class="flipper-zone left" role="button" aria-label="Left Flipper">
             <span class="flipper-zone-icon">◀</span>
@@ -578,12 +627,12 @@
     </div>
 
     <div id="unsupported-panel">
-        <h1>3D Not Supported On This Device</h1>
+        <h1>Not Supported On This Device</h1>
         <p id="unsupported-message">
-            SPIRITBALL 3D needs a browser with WebAssembly SIMD support (e.g. iOS 16.4+, recent
-            Chrome/Firefox/Edge/Android). Your browser doesn't appear to support it.
+            SPIRITBALL needs a browser with WebAssembly SIMD support (e.g. iOS 16.4+, recent
+            Chrome/Firefox/Edge/Android). Your browser doesn't appear to support it - try updating
+            your browser or OS, or opening this page on a different device.
         </p>
-        <p><a href="phaser2d.html">Try the 2D version instead →</a></p>
     </div>
 
     <script src="babylon-game.js"></script>

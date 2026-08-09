@@ -46,7 +46,7 @@ space theme.
    makes emissive neon materials actually read as glowing rather than just brightly colored.
 4. **Skybox/backdrop**: replace the flat background with either a procedural starfield/nebula
    skybox or a large backdrop plane using a cosmic texture (the existing `background.webp` asset
-   from `../release-prompts/09-*.md` could be reused/adapted here, or a new procedural approach
+   from `../archive/release-prompts/09-*.md` could be reused/adapted here, or a new procedural approach
    built directly in Babylon).
 5. Performance-gate the heavier effects (glow layer, bloom, reflection probes) behind the device-
    tier detection already established in `../index.js`'s `PerformanceManager` - port that concept

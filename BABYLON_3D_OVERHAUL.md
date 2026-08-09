@@ -3,12 +3,15 @@
 **Date:** 2026-08-08
 **Status (2026-08-09):** Stages 1–12 implemented (Stages 4-12 with expanded/adjusted scope — see
 below); Stage 13 in progress — CDN-vs-bundler decision made and implemented (self-hosted under
-`vendor/babylonjs/`, see `VENDORING.md`), and a severe, previously-invisible flipper physics bug
-found and fixed via this project's first real interactive browser testing (the flipper constraint
-was rewritten from a `Physics6DoFConstraint` hinge to a kinematic `PhysicsMotionType.ANIMATED`
-body — see `babylon-prompts/13-*.md`'s implementation note for the full debugging history). The
-feature-parity checklist, Phaser-removal decision, PWA/manifest check, and README update — the
-rest of Stage 13 — remain undone. Stage 1
+`vendor/babylonjs/`, see `VENDORING.md`), a severe, previously-invisible flipper physics bug found
+and fixed via this project's first real interactive browser testing (the flipper constraint was
+rewritten from a `Physics6DoFConstraint` hinge to a kinematic `PhysicsMotionType.ANIMATED` body —
+see `babylon-prompts/13-*.md`'s implementation note for the full debugging history), and Phaser
+removed from the repository entirely at the user's explicit request (`phaser2d.html`/`index.js`/
+`styles.css` and its image assets deleted, `README.md` added, historical 2D-era docs moved to
+`archive/`) — see `README.md` for current project status and `improvement-prompts/` for what's
+next. The full feature-parity checklist and PWA/icon refresh — the rest of Stage 13 — remain
+undone. Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
 (`babylon-game.html`/`babylon-game.js`) adds the real table boundary (7 walls, ported faithfully
@@ -96,7 +99,7 @@ don't have anything to attach to yet (fuel lights, obstacles, inlanes/outlanes, 
 launch ramp, mission-complete, rank-up - all still Stage 12 territory) and why flash uses a DOM
 overlay instead of the `DefaultRenderingPipeline` the doc suggested. Stage 11 replaces Stage 4's
 tap-canvas-half touch stopgap with the real arcade-style flipper zones and launch button ported
-directly from `release-prompts/14-*.md` (same markup/CSS, event pattern, `vibrate()`/
+directly from `archive/release-prompts/14-*.md` (same markup/CSS, event pattern, `vibrate()`/
 `setLaunchReady()`/fullscreen-and-orientation-lock/rotate-prompt behavior - wired to this file's
 own `activateFlipper()`/`handleLaunchPress()` etc. instead of a Phaser scene's polling loop), and
 adds a proactive+reactive Havok/WASM-SIMD compatibility check (iOS below 16.4 is a known
@@ -139,7 +142,7 @@ fixed isometric perspective, the same trick SPIRITBALL already uses today. There
 paths:
 
 1. **3D visuals only** — keep the current, already-tuned 2D Arcade Physics simulation
-   (`release-prompts/01-*.md`, `13-*.md`) and use Babylon.js purely as a renderer on top.
+   (`archive/release-prompts/01-*.md`, `13-*.md`) and use Babylon.js purely as a renderer on top.
    Lower risk, ships fast, every mission/scoring/flipper-feel decision already made stays intact.
 2. **Full 3D physics rewrite** — replace the 2D physics with a true 3D rigid-body simulation
    (tilted table, real gravity vector, 3D collision meshes, motorized hinge-jointed flippers,
@@ -159,11 +162,11 @@ rather than one enormous rewrite commit.
   `completeMission()`, `rankUp()`, `abortMission()`, `depleteFuel()`.
 - Game state shape and persistence: `gameState.statistics`, `spiritball-highscore` in
   `localStorage`, the fuel/multiplier/lane/bumper tracking fields.
-- The DOM-overlay approach for mobile touch controls (`release-prompts/14-*.md`) and menus/HUD
+- The DOM-overlay approach for mobile touch controls (`archive/release-prompts/14-*.md`) and menus/HUD
   text — these are independent of the rendering engine and don't need to become 3D meshes.
   (Confirmed as a deliberate choice below, not an oversight.)
-- The reduced-motion / accessibility hooks (`release-prompts/12-*.md`) and PWA/manifest/CDN
-  fallback pattern (`release-prompts/10-*.md`) — adapted, not discarded.
+- The reduced-motion / accessibility hooks (`archive/release-prompts/12-*.md`) and PWA/manifest/CDN
+  fallback pattern (`archive/release-prompts/10-*.md`) — adapted, not discarded.
 
 **Rewritten from scratch:**
 - All physics: ball, flippers, plunger, bumpers, obstacles, lanes, drain — every collision body
@@ -242,7 +245,7 @@ names. Key confirmed facts:
 
 Each `babylon-prompts/NN-*.md` file is self-contained (context, goal, concrete steps,
 constraints, acceptance criteria) and can be handed to a fresh coding session — but unlike
-`release-prompts/`, **these are sequential, not independent**: each stage builds physically on
+`archive/release-prompts/`, **these are sequential, not independent**: each stage builds physically on
 the last, so apply them in order.
 
 | # | File | What it delivers | Depends on |
@@ -251,7 +254,7 @@ the last, so apply them in order.
 | 2 | `02-3d-table-and-camera.md` | Real-world-scale 3D table geometry (walls/slants/guides as static rigid bodies) ported from the current 2D layout, table tilt, fixed pinball-cabinet camera. | 1 |
 | 3 | `03-ball-physics.md` | 3D ball rigid body, CCD/tunneling verification, anti-stuck logic ported to 3D. | 2 |
 | 4 | `04-motorized-flippers.md` | Flippers as `Physics6DoFConstraint` limited+motorized hinges, keyboard/touch activation, first real feel-tuning pass. | 3 |
-| 5 | `05-plunger.md` | 3D plunger/launch mechanic, charge-and-release power curve ported from `release-prompts/13-*.md`. | 3 |
+| 5 | `05-plunger.md` | 3D plunger/launch mechanic, charge-and-release power curve ported from `archive/release-prompts/13-*.md`. | 3 |
 | 6 | `06-bumpers-targets-lanes.md` | All remaining table elements (attack bumpers, satellite, mission targets, fuel lights, obstacles, slingshots, lanes, ramp, drain) as 3D physical/trigger bodies wired to the existing mission/scoring logic. | 2, 4 |
 | 7 | `07-materials-lighting.md` | PBR materials, lighting rig, glow/bloom postprocessing, skybox — the core "make it look cooler" visual identity pass. | 2 |
 | 8 | `08-particles-and-vfx.md` | Ball trail, drain vortex, hit bursts, chakra sparkle ported to Babylon particle systems. | 6, 7 |
@@ -276,5 +279,5 @@ Beyond that:
 - **iOS < 16.4 cannot run Havok at all.** Decide (Stage 11) whether that's an acceptable
   platform floor or whether a 2D fallback path needs to be kept alive for older devices.
 - **The Babylon CDN is not meant for production.** Decide (Stage 13) whether to self-host the
-  engine files (in the spirit of the asset-optimization work in `release-prompts/09-*.md`) or
+  engine files (in the spirit of the asset-optimization work in `archive/release-prompts/09-*.md`) or
   adopt a build step before calling this shippable.

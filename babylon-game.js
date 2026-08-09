@@ -17,7 +17,7 @@
 // Stage 10: camera shake/punch/flash juice + an idle attract-mode orbit camera
 //           (babylon-prompts/10-*.md - see that file's implementation note)
 // Stage 11: real mobile touch controls (arcade edge zones + launch button, ported from
-//           release-prompts/14-*.md), Havok/WASM-SIMD compatibility detection with an honest
+//           archive/release-prompts/14-*.md), Havok/WASM-SIMD compatibility detection with an honest
 //           fallback message, and performance-tier gating (babylon-prompts/11-*.md - see that
 //           file's implementation note)
 // Stage 12: Menu/Pause/Controls/Game-Over DOM-overlay screens, real pause (scene.physicsEnabled),
@@ -31,9 +31,11 @@
 //           immediately found a severe flipper physics bug: createFlipper() is now a kinematic
 //           PhysicsMotionType.ANIMATED body driven by plain JS arithmetic, not a
 //           Physics6DoFConstraint hinge (see createFlipper()'s comment for the full debugging
-//           history). babylon-prompts/13-*.md's parity checklist, Phaser-removal decision,
-//           PWA/manifest check, and README update are not done yet.
-// See BABYLON_3D_OVERHAUL.md for the overall architecture.
+//           history). Phaser (phaser2d.html/index.js/styles.css and its image assets) has since
+//           been removed entirely, along with the now-superseded babylon-spike.*; see README.md
+//           for current status and improvement-prompts/ for what's next. babylon-prompts/13-*.md's
+//           full feature-parity checklist and PWA/manifest check are still not done.
+// See BABYLON_3D_OVERHAUL.md for the overall architecture and README.md for project status.
 //
 // Scope so far: the static table boundary (now with a real playfield floor), the fixed gameplay
 // camera (plus an idle attract-mode orbit camera active until the first launch), one physics-
@@ -63,7 +65,7 @@
 
     // ===================================
     // Mobile device detection, fullscreen/orientation-lock, vibration (Stage 11,
-    // babylon-prompts/11-*.md) - ported from InputManager in ../index.js (release-prompts/
+    // babylon-prompts/11-*.md) - ported from InputManager in ../index.js (archive/release-prompts/
     // 02-*.md, 14-*.md), same detection logic/thresholds, not redesigned. Plain browser APIs,
     // no BABYLON references, safe at top level/immediately. The actual DOM element wiring
     // (flipper zones, launch button) happens inside main(), since it needs the flipper/plunger
@@ -158,10 +160,9 @@
     // (before even attempting to load the CDN scripts) via UA version sniffing for the one
     // specific, known-deterministic case; main()'s outer catch handler also treats any
     // WASM/SIMD-flavored error message reactively the same way, covering other unknown
-    // SIMD-incompatible browsers this version check doesn't name. Decision, made explicitly per
-    // the doc's own prompt: yes, there is a fallback - phaser2d.html (the 2D build) already
-    // exists and works, so the message links to it rather than leaving an unsupported player
-    // with nothing playable at all.
+    // SIMD-incompatible browsers this version check doesn't name. No 2D fallback exists anymore
+    // (the Phaser build was removed once the 3D build became the only supported version) - an
+    // unsupported device gets an honest "not supported" message instead of a broken game.
     // ===================================
     function detectLikelyUnsupportedIOS() {
         const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -182,6 +183,17 @@
         const mobileControlsEl = document.getElementById('mobile-controls');
         if (mobileControlsEl) mobileControlsEl.style.display = 'none';
     }
+
+    // Dev/debug panel (#status-panel - score/lives/Havok status/CCD test/flipper-angle readouts
+    // and the manual test buttons) is hidden by default so a real player just sees the game and
+    // the small #player-hud. Append ?dev=1 to the URL to show it - runs immediately, outside
+    // main(), so it still works even if Havok/Babylon fail to load entirely. Not persisted
+    // (no localStorage) - deliberately explicit per-load, so it can't get silently left on.
+    function setDevPanelVisible(visible) {
+        const panel = document.getElementById('status-panel');
+        if (panel) panel.style.display = visible ? 'block' : 'none';
+    }
+    setDevPanelVisible(new URLSearchParams(window.location.search).has('dev'));
 
     // ===================================
     // Coordinate / scale conversion (the single source of truth every later stage must reuse)
@@ -269,12 +281,12 @@
 
     // Converted from CONFIG.ballMaxVelocity: 1800 (px/s) in ../index.js, using the same PX_TO_M
     // scale as everything else - a second line of defense against tunneling/instability behind
-    // Havok's CCD, same spirit as the old Arcade Physics safety net. See release-prompts/13-*.md
+    // Havok's CCD, same spirit as the old Arcade Physics safety net. See archive/release-prompts/13-*.md
     // for the original 2D value's history.
     const MAX_BALL_SPEED_MS = 1800 * PX_TO_M; // ~1.7 m/s
 
     // Anti-stuck thresholds, converted from checkBallStuck() in ../index.js (revamped in
-    // release-prompts/13-*.md): speed threshold 40px/s -> m/s, kick components 400/380px/s ->
+    // archive/release-prompts/13-*.md): speed threshold 40px/s -> m/s, kick components 400/380px/s ->
     // m/s. Time values (ms) don't need conversion. "Downhill" in this stage's tilt convention is
     // -Z (see the GRAVITY_VECTOR_FN comment above), replacing the 2D version's "+Y" (toward the
     // bottom of the screen).
@@ -316,7 +328,7 @@
     // listeners further down even get registered.
     //
     // The 70-degree sweep magnitude reuses the OLD 2D game's already-tuned value (20deg rest to
-    // -50deg active - see release-prompts/01-*.md) but the actual REST ANGLES below are NOT
+    // -50deg active - see archive/release-prompts/01-*.md) but the actual REST ANGLES below are NOT
     // reused from 2D - flippers are a brand-new 3D mechanism (motorized hinge constraint, not a
     // velocity-injection formula), and naively reusing the 2D angle numbers via this file's
     // toWorldRotationY() wall-conversion helper produced physically wrong geometry (paddle tips
@@ -375,7 +387,7 @@
     // is a kinematic-animated plunger mesh (no physics body of its own) plus a directly-set ball
     // velocity on release - not a simulated spring - for the same determinism reasons the 2D
     // version (CONFIG.plungerMinPower/plungerMaxPower, updatePlunger()/launchBall() in
-    // ../index.js, hardened in release-prompts/13-*.md) kept its launch mechanic simple.
+    // ../index.js, hardened in archive/release-prompts/13-*.md) kept its launch mechanic simple.
     // ===================================
 
     // Launch lane position/size, ported from setupPlunger()'s launchPort rectangle and
@@ -725,7 +737,7 @@
 
     function updatePlungerVisual(plunger) {
         // Pulls back along -Z (toward the near/camera end) as charge increases, matching the 2D
-        // plunger sprite's tween-back-then-snap-forward motion - see release-prompts/13-*.md.
+        // plunger sprite's tween-back-then-snap-forward motion - see archive/release-prompts/13-*.md.
         plunger.mesh.position.z = plunger.baseZ - plunger.chargePercent * PLUNGER_TRAVEL_M;
         // Simple color pulse at max charge in place of a particle effect (Stage 8's job) - the
         // stage doc explicitly allows this as the minimum viable max-charge feedback for now.
@@ -801,7 +813,7 @@
     // BootScene.preload() uses for the 2D eyeball sprite in ../index.js, just applied here to a
     // sphere instead of a flat sprite) rather than loading an external image. Deliberate: this
     // project already depends on one fragile CDN load (Babylon/Havok itself), and the existing
-    // background.webp asset (release-prompts/09-*.md) was authored as a flat 2D portrait-game
+    // background.webp asset (archive/release-prompts/09-*.md) was authored as a flat 2D portrait-game
     // backdrop, not a projection suited to wrapping around a 3D sphere - reusing it as-is would
     // look wrong, and re-authoring a proper equirectangular version wasn't worth doing sight-
     // unseen in a sandbox that can't render the result either way.
@@ -1511,13 +1523,10 @@
         buildDrainZone(scene);
         const backglass = buildBackglass(scene);
         // Stage 9 originally used a separate 'spiritball3d-highscore' key to avoid cross-
-        // contaminating the 2D build's scores during parallel development. Stage 12's doc
-        // explicitly asks to reuse the 2D game's key instead ("so high scores aren't lost in the
-        // transition for anyone who played the 2D version") - now that phaser2d.html is a
-        // permanent, intentional fallback (not just a transitional artifact, per 11-*.md), this
-        // explicit instruction supersedes that earlier reasoning. Switched here; the tradeoff
-        // (scores are now shared between the 2D and 3D builds in the same browser) is the doc's
-        // own explicit intent, not an oversight.
+        // contaminating the 2D build's scores during parallel development. Stage 12's doc asked
+        // to reuse the 2D game's key instead so high scores carried over for returning players -
+        // kept even after the 2D build's own removal, since it's still just "the" high-score key
+        // now, and changing it again would silently reset everyone's saved score for no reason.
         const highScoreKey = 'spiritball-highscore';
         backglass.state.highScore = parseInt(localStorage.getItem(highScoreKey), 10) || 0;
         backglass.redraw();
@@ -1666,7 +1675,7 @@
             false, flipperMat
         );
         // Desktop controls: LEFT/RIGHT arrows, matching the existing 2D game's control scheme
-        // (release-prompts/14-*.md documents the equivalent touch controls for mobile, which get
+        // (archive/release-prompts/14-*.md documents the equivalent touch controls for mobile, which get
         // reconnected to whatever the final flipper API looks like in Stage 11 - keyboard first
         // here since it's needed just to test flippers at all). window-level listeners, not
         // canvas-focused, so no click-to-focus step is needed first.
@@ -1829,7 +1838,7 @@
         // Mirrors handleLaunchPress()/handleLaunchRelease() in ../index.js: power is purely a
         // continuous function of hold duration (see the render loop below), and release always
         // tries to launch if the ball is ready - no separate "did we see a press" bookkeeping,
-        // which is what makes "release immediately after a reset" reliable (release-prompts/13-
+        // which is what makes "release immediately after a reset" reliable (archive/release-prompts/13-
         // *.md's desktop-launch-after-death fix, ported here since Stage 5's acceptance criteria
         // calls out the exact same scenario).
         function handleLaunchPress() {
@@ -1870,7 +1879,7 @@
         }
 
         // SPACE has multiple jobs depending on screen state, matching the 2D game's single-
-        // persistent-listener approach (release-prompts/07-*.md's lesson: check state each time,
+        // persistent-listener approach (archive/release-prompts/07-*.md's lesson: check state each time,
         // don't re-register a listener per screen-open) - dismiss the menu and start, resume from
         // pause, restart from game over, or (the normal case) charge/launch the plunger. All of
         // isPaused/gameOverActive/menuOverlay/resumeGame()/startNewGame() are declared later in
@@ -1901,7 +1910,7 @@
         // --- Mobile controls (Stage 11, babylon-prompts/11-*.md) ---
         //
         // DOM elements/CSS and event pattern ported directly from InputManager.setupMobileControls()
-        // in ../index.js (release-prompts/14-*.md) - full-height arcade-style edge zones (tap
+        // in ../index.js (archive/release-prompts/14-*.md) - full-height arcade-style edge zones (tap
         // ANYWHERE along the side, not a small button) plus a discrete round launch button, both
         // wired with the same touchstart/touchend/touchcancel + mousedown/mouseup/mouseleave
         // pattern for touch AND desktop-mouse testing. What changed from the 2D version: press/
@@ -1998,12 +2007,25 @@
         const stats = { bumperHits: 0, satelliteHits: 0, targetHits: 0, laneHits: 0 };
         const statusScore = document.getElementById('status-score');
         const statusLives = document.getElementById('status-lives');
-        statusScore.textContent = '0';
-        statusLives.textContent = String(lives);
+        const hudScore = document.getElementById('hud-score');
+        const hudLives = document.getElementById('hud-lives');
+        // Two displays share every score/lives update: #status-panel's dev readout (hidden by
+        // default, see setDevPanelVisible()) and #player-hud, the actual player-facing display -
+        // see index.html's #player-hud comment for why a second element was needed at all.
+        function setScore(value) {
+            statusScore.textContent = String(value);
+            hudScore.textContent = String(value);
+        }
+        function setLives(value) {
+            statusLives.textContent = String(value);
+            hudLives.textContent = String(value);
+        }
+        setScore(0);
+        setLives(lives);
 
         function addScore(points) {
             score += points;
-            statusScore.textContent = String(score);
+            setScore(score);
             backglass.state.score = score;
             if (score > backglass.state.highScore) {
                 backglass.state.highScore = score;
@@ -2143,7 +2165,7 @@
             // without this guard every frame it stays there would count as a separate drain.
             ballInPlay = false;
             lives--;
-            statusLives.textContent = String(lives);
+            setLives(lives);
             backglass.state.lives = lives;
             backglass.showMessage('DRAINED!', 1400); // no Grim Reaper visual yet (Stage 12) - this is the stand-in
             triggerCameraShake(400, 0.008); // matches checkDrain()'s cameraShake(400, 0.008)
@@ -2226,7 +2248,7 @@
             handleLaunchPress(); // also ends attract mode internally
         });
 
-        // --- Controls reference content, platform-aware (release-prompts/04-*.md's content -
+        // --- Controls reference content, platform-aware (archive/release-prompts/04-*.md's content -
         // this already-replaced the old non-functional sound/music toggle with a real controls
         // reference; that decision carries over unchanged, just re-rendered as DOM). ---
         function renderControlsRows() {
@@ -2294,8 +2316,8 @@
             stats.satelliteHits = 0;
             stats.targetHits = 0;
             stats.laneHits = 0;
-            statusScore.textContent = '0';
-            statusLives.textContent = String(lives);
+            setScore(0);
+            setLives(lives);
             backglass.state.score = 0;
             backglass.state.lives = lives;
             backglass.redraw();
@@ -2324,7 +2346,7 @@
         pauseBtn.addEventListener('click', togglePauseFromButton);
         pauseBtn.addEventListener('touchstart', togglePauseFromButton, { passive: false });
 
-        // ESC: single persistent listener (release-prompts/07-*.md's lesson - check state each
+        // ESC: single persistent listener (archive/release-prompts/07-*.md's lesson - check state each
         // time a key event fires, don't re-register a resume/back shortcut every time a screen
         // opens, which is what caused the original listener-leak bug this ports the fix from).
         // Backs out of the Controls submenu to the pause menu instead of resuming outright when

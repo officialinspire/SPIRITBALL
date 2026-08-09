@@ -13,7 +13,7 @@ controls reference) from the already-correct 2D versions.
 
 ## What to do
 1. **Build these as DOM/CSS overlays, not 3D meshes or Babylon GUI**, deliberately mirroring the
-   decision already made for mobile touch controls (`release-prompts/14-*.md`): these are
+   decision already made for mobile touch controls (`archive/release-prompts/14-*.md`): these are
    text-heavy, infrequently-changing, accessibility-sensitive screens, and HTML/CSS remains easier
    to get right (font rendering, focus states, screen-reader friendliness) than recreating a text
    layout system in a 3D scene. Reserve the 3D-mounted-panel treatment for the in-gameplay
@@ -24,13 +24,13 @@ controls reference) from the already-correct 2D versions.
    shown before gameplay starts, with the idle attract-mode camera from `10-*.md` visible behind
    it through the canvas.
 3. **Game Over screen**: port `GameOverScene`'s content (final score, high score comparison, final
-   rank, mission/bumper/satellite/lane stats from `release-prompts/06-game-over-stats.md`) to a
+   rank, mission/bumper/satellite/lane stats from `archive/release-prompts/06-game-over-stats.md`) to a
    DOM overlay shown when a run ends.
 4. **Pause menu / Controls reference**: port `pauseGame()`'s resume/new-game/controls-reference
-   flow and the controls-reference content from `release-prompts/04-audio-system-or-remove-toggle.md`
+   flow and the controls-reference content from `archive/release-prompts/04-audio-system-or-remove-toggle.md`
    (which already replaced the old non-functional sound/music toggle with a real controls
    reference - keep that decision, just re-render it as DOM instead of in-canvas text) and the
-   listener-leak-safe pause/resume input handling from `release-prompts/07-pause-menu-listener-leak.md`
+   listener-leak-safe pause/resume input handling from `archive/release-prompts/07-pause-menu-listener-leak.md`
    - the *lesson* from that fix (single persistent listeners, not per-open `once()` registrations)
    applies just as much to whatever new input wiring drives DOM-overlay show/hide here.
 5. Ensure pausing correctly halts the Havok physics simulation (Babylon's physics step needs an
@@ -63,7 +63,7 @@ controls reference) from the already-correct 2D versions.
 from `MenuScene`/`GameOverScene`/`pauseGame()`/`showSettingsMenu()` in `../index.js` - same
 platform-aware instructions ("TAP ⚡" vs "PRESS SPACE"), same button labels/icons, same
 tap-anywhere-to-start/restart behavior, same single-persistent-ESC-listener pattern (the exact
-lesson from `release-prompts/07-*.md`'s listener-leak fix, applied here since it's just as
+lesson from `archive/release-prompts/07-*.md`'s listener-leak fix, applied here since it's just as
 relevant to DOM-overlay show/hide as it was to Phaser `once()` registrations). One deliberate
 styling difference: kept this page's existing `'Courier New'` font stack rather than also loading
 the 2D game's Google Fonts (Righteous/Monoton/Orbitron) - a new external CDN dependency this

@@ -3,7 +3,7 @@
 ## Context
 Builds on the table/camera from `02-*.md`. Adds the actual ball as a real dynamic rigid body and
 carries forward the anti-stuck design already proven out in the 2D version
-(`../release-prompts/13-plunger-ball-mechanics-revamp.md`), adapted to 3D.
+(`../archive/release-prompts/13-plunger-ball-mechanics-revamp.md`), adapted to 3D.
 
 ## Goal
 A ball that rolls, bounces, and settles convincingly on the tilted 3D table, at real pinball
@@ -29,7 +29,7 @@ scale, with no tunneling at realistic pinball speeds, and a 3D equivalent of the
    second line of defense against tunneling/instability, same spirit as the old Arcade Physics
    safety net.
 4. Port the anti-stuck design from `checkBallStuck()` (`../index.js`, revamped in
-   `../release-prompts/13-*.md`): accumulate how long the ball's linear velocity magnitude has
+   `../archive/release-prompts/13-*.md`): accumulate how long the ball's linear velocity magnitude has
    stayed below a low threshold; after it's been stuck for a real moment (not one slow physics
    step), apply one decisive corrective impulse (a randomized small horizontal component plus a
    push along the table's downhill direction) and reset the timer. Do **not** reintroduce the old
@@ -68,7 +68,7 @@ existed between them) and `updateBallPhysics()`, called every frame from the ren
 **Values used**, all converted from the 2D game's tuned constants via the same `PX_TO_M` scale
 established in Stage 2 (not re-derived from scratch): `MAX_BALL_SPEED_MS` ≈ 1.7 m/s (from
 `CONFIG.ballMaxVelocity: 1800`), stuck-speed threshold ≈ 0.038 m/s and kick components ≈ 0.19/0.36
-m/s (from `checkBallStuck()`'s 40/400/380 px/s in `release-prompts/13-*.md`). Stuck-time
+m/s (from `checkBallStuck()`'s 40/400/380 px/s in `archive/release-prompts/13-*.md`). Stuck-time
 threshold (450ms) is a duration and didn't need conversion. Added one new, 3D-only component with
 no 2D equivalent: a small +Y hop (0.15 m/s) layered into the anti-stuck kick, to help the ball
 clear resting *contact* against a surface (a concept that doesn't really exist the same way in a

@@ -6,7 +6,7 @@ than redesigned. The mission/rank/scoring system in `../index.js` (`CONFIG.missi
 `hitAttackBumper()`, `hitSatellite()`, `hitMissionTarget()`, `hitFuelLight()`, `hitReentryLane()`,
 `hitLaunchRamp()`, `hitBonusLane()`, `hitObstacle()`, `hitSlingshot()`, `hitInlane()`,
 `hitOutlane()`, `checkDrain()`, and the mission-progress plumbing) is correct and tuned - the
-`release-prompts/` fixes already hardened it (broken flag-rotation missions fixed, mission
+`archive/release-prompts/` fixes already hardened it (broken flag-rotation missions fixed, mission
 auto-select bug fixed, etc.). None of that needs to change. What changes is *how the ball's
 presence at each of these elements gets detected* - from Phaser Arcade Physics overlap/collider
 callbacks to Havok collision observables.
@@ -52,7 +52,7 @@ scoring/mission-progress functions.
   (`CONFIG.scores`, `CONFIG.missions`, the body of each `hit*()`/`check*()` function) - port the
   calling mechanism, not the design.
 - Keep the mission-target-selects-mission / launch-ramp-starts-mission flow
-  (`../release-prompts/05-mission-selection-default.md`) intact and correctly triggered.
+  (`../archive/release-prompts/05-mission-selection-default.md`) intact and correctly triggered.
 
 ## Acceptance criteria
 - Every element from the 2D table has a working 3D counterpart in roughly the same relative

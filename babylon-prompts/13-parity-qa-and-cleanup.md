@@ -8,25 +8,25 @@ throughout this project (`../BABYLON_3D_OVERHAUL.md`'s risk section).
 
 ## What to do
 1. **Build a feature-parity checklist** directly from the current game and the full
-   `release-prompts/01-14` history (every bug fix and revamp that's already been done represents
+   `archive/release-prompts/01-14` history (every bug fix and revamp that's already been done represents
    a piece of intended behavior that must not silently regress), and manually verify each item
    against the new Babylon version:
    - Both flippers respond reliably to keyboard and touch, including mid-swing ball arrival
-     (`release-prompts/01-*.md`, `babylon-prompts/04-*.md`).
+     (`archive/release-prompts/01-*.md`, `babylon-prompts/04-*.md`).
    - Mobile controls show/hide correctly (portrait/landscape/rotate-prompt), full-screen and
-     orientation-lock behave as designed (`release-prompts/02-*.md`, `14-*.md`,
+     orientation-lock behave as designed (`archive/release-prompts/02-*.md`, `14-*.md`,
      `babylon-prompts/11-*.md`).
    - Every mission type is genuinely completable through real play, mission selection requires an
-     explicit target hit (`release-prompts/03-*.md`, `05-*.md`).
+     explicit target hit (`archive/release-prompts/03-*.md`, `05-*.md`).
    - Game Over stats, fuel-light visuals, and the pause menu's controls reference all show
-     correct, live information (`release-prompts/06-*.md`, `08-*.md`, `04-*.md`).
+     correct, live information (`archive/release-prompts/06-*.md`, `08-*.md`, `04-*.md`).
    - No listener leaks or pause-state corruption from repeated pause/resume cycles
-     (`release-prompts/07-*.md`, `babylon-prompts/12-*.md`).
-   - Reduced-motion is respected for camera and particle effects (`release-prompts/12-*.md`,
+     (`archive/release-prompts/07-*.md`, `babylon-prompts/12-*.md`).
+   - Reduced-motion is respected for camera and particle effects (`archive/release-prompts/12-*.md`,
      `babylon-prompts/10-*.md`, `08-*.md`).
    - High scores and statistics persist correctly across sessions.
 2. **Remove Phaser entirely**: delete the Phaser CDN `<script>` tags and fallback-loader code from
-   `index.html` (`release-prompts/10-*.md`'s CDN-resilience work), remove `index.js`'s Phaser-based
+   `index.html` (`archive/release-prompts/10-*.md`'s CDN-resilience work), remove `index.js`'s Phaser-based
    implementation (or replace its contents with the new Babylon implementation, retiring the old
    file), and rename the Babylon spike/game files (`babylon-spike.*`/`babylon-game.*` from earlier
    stages) to be the real `index.html`/`index.js` if they weren't already. Grep the final codebase
@@ -34,13 +34,13 @@ throughout this project (`../BABYLON_3D_OVERHAUL.md`'s risk section).
 3. **Resolve the CDN-for-production question flagged in `../BABYLON_3D_OVERHAUL.md`**: Babylon's
    own documentation states its CDN isn't intended for production use. Decide and implement one
    of: (a) download and self-host the specific Babylon.js core + Havok build files in the repo
-   (same spirit as the asset-optimization work in `release-prompts/09-*.md`, keeping the
+   (same spirit as the asset-optimization work in `archive/release-prompts/09-*.md`, keeping the
    zero-build-step static-file deployment model this project has used throughout), or
    (b) introduce a minimal bundler (e.g. Vite) and adopt npm packages (`@babylonjs/core`,
    `@babylonjs/havok`) with a build step. Document which was chosen and why - this is a real
    architecture decision, not busywork, since it affects every future deploy of this project.
 4. **PWA/manifest/icon check**: confirm `manifest.json` and the icon set from
-   `release-prompts/10-*.md` still make sense for the new visual identity (the icon was generated
+   `archive/release-prompts/10-*.md` still make sense for the new visual identity (the icon was generated
    to match the 2D "cosmic eyeball" sprite - decide whether it still represents the game well, or
    needs a refresh to reflect the new 3D look).
 5. Update `README`/project docs (or add one if none exists) to reflect that SPIRITBALL is now a
@@ -50,7 +50,7 @@ throughout this project (`../BABYLON_3D_OVERHAUL.md`'s risk section).
 ## Constraints
 - Don't remove Phaser until the parity checklist genuinely passes - a half-finished 3D version
   replacing a fully-working 2D one is a regression, not a shipment.
-- Keep `KNOWN_ISSUES.md` and `release-prompts/01-14-*.md` in the repo as historical record (same
+- Keep `KNOWN_ISSUES.md` and `archive/release-prompts/01-14-*.md` in the repo as historical record (same
   treatment given to the superseded `CODE_REVIEW_REPORT.md` earlier in this project's history) -
   add a note at the top of `KNOWN_ISSUES.md` pointing at this document and the `babylon-prompts/`
   series as the current state, rather than deleting the history.
@@ -185,14 +185,39 @@ and not a regression introduced here.
   from source) — scoring, drain/lives/Game-Over flow, pause/resume, reduced-motion, and a visual
   pass on materials/lighting/particles/backglass legibility (Stages 7-9, still never actually
   seen rendered) are all now testable via Playwright screenshots and DOM/state assertions.
-- **Item 2** (Phaser removal decision): not made. The "Forward reference" note above already
-  established that `phaser2d.html`/`index.js` are an intentional, permanent compatibility
-  fallback for unsupported iOS devices (Stage 11), not a transitional scaffold — so "removal" may
-  mean something narrower than deleting those files outright (e.g. confirming no *duplicate* code
-  paths or dead references remain). Needs a decision, not just an assumption.
 - **Item 4** (PWA/manifest/icon check): not started.
-- **Item 5** (README/docs update): not started.
 
-The `Phaser.` reference sweep (this stage's acceptance criterion) also hasn't been run yet — it
-needs the same reinterpretation as item 2, since `phaser2d.html`/`index.js` referencing `Phaser.`
-is intentional and permanent, not something to delete.
+Items 2 and 5 were completed in a later pass, at the user's explicit request (see the
+"Phaser removal" note below) — the "reinterpret rather than delete" reasoning above was overtaken
+by that direct instruction.
+
+## Phaser removal and cleanup pass (2026-08-09, later same day)
+
+At the user's explicit request ("remove phaser based code since it's no longer necessary"),
+overriding this stage doc's earlier "keep as a permanent fallback" framing (Stage 11's own
+decision, itself already superseding this stage's original constraint) — Phaser was removed
+entirely, completing item 2 and the `Phaser.`-reference acceptance criterion for real:
+
+- Deleted `phaser2d.html`, `index.js` (the Phaser game logic), `styles.css`, and the three image
+  assets only the Phaser build loaded (`background.webp`, `saturn_example.webp`,
+  `grimreaper_example.webp`). Also deleted `babylon-spike.html`/`babylon-spike.js` (the Stage 1
+  spike, superseded by `index.html`/`babylon-game.js` since Stage 2 and referenced nowhere live).
+- `index.html`'s unsupported-device panel no longer links to a 2D fallback that doesn't exist -
+  it now gives an honest "not supported" message with no dead link.
+- Remaining `Phaser`-word occurrences in `babylon-game.js`/`index.html` are historical comments
+  explaining conversion math or design history (e.g. "Phaser's Y-down rotation convention") - not
+  functional references, not a violation of the acceptance criterion.
+- Moved `KNOWN_ISSUES.md`, `CODE_REVIEW_REPORT.md`, and `release-prompts/` into `archive/` (item
+  5's spirit: keep history, but stop it cluttering the root or reading as current). Added pointer
+  notes.
+- **Completes item 5** (README): added a root `README.md` covering what the project is, how to
+  run it, current status, and where to find ongoing work.
+- Also fixed a real, separate UX gap found in the same pass: the dev/debug panel (`#status-panel`)
+  was the *only* place score/lives were ever shown - not acceptable for a real playable build. It
+  now defaults to hidden (shown via `?dev=1`), and a small always-visible `#player-hud` shows
+  score/lives to actual players. See `improvement-prompts/` for the scoped, ongoing improvement
+  list this pass produced (audio, mission FSM, CCD API fix, ball/plunger stability, real-device QA,
+  obstacle geometry, PWA icon, accessibility).
+
+Item 1 (the full feature-parity checklist) and item 4 (PWA/icon refresh) remain open - see
+`improvement-prompts/`.
