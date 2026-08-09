@@ -2,7 +2,13 @@
 
 **Date:** 2026-08-08
 **Status (2026-08-09):** Stages 1–12 implemented (Stages 4-12 with expanded/adjusted scope — see
-below). Stage 1
+below); Stage 13 in progress — CDN-vs-bundler decision made and implemented (self-hosted under
+`vendor/babylonjs/`, see `VENDORING.md`), and a severe, previously-invisible flipper physics bug
+found and fixed via this project's first real interactive browser testing (the flipper constraint
+was rewritten from a `Physics6DoFConstraint` hinge to a kinematic `PhysicsMotionType.ANIMATED`
+body — see `babylon-prompts/13-*.md`'s implementation note for the full debugging history). The
+feature-parity checklist, Phaser-removal decision, PWA/manifest check, and README update — the
+rest of Stage 13 — remain undone. Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
 (`babylon-game.html`/`babylon-game.js`) adds the real table boundary (7 walls, ported faithfully

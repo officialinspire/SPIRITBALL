@@ -89,3 +89,110 @@ Minimal mobile touch controls were also added directly to `babylon-game.js` at t
 touch-identifier map) — a stripped-down placeholder, not the real touch-zone UI Stage 11 still
 owns, but necessary since a pinball game genuinely cannot be played at all on a touchscreen
 without some way to fire the flippers.
+
+## Implementation note (2026-08-09, first real pass at this stage)
+
+This turn finally satisfies **item 3** (the CDN-for-production decision) and, along the way,
+fixed a severe, previously-invisible bug in the flipper physics that item 1's parity checklist
+would eventually have caught anyway. Items 1 (parity checklist), 2 (Phaser removal), 4
+(PWA/manifest check), and 5 (README update) are **not** done yet — see "What's left" below.
+
+### Item 3: self-hosted, not a bundler
+
+`cdn.babylonjs.com` was confirmed genuinely blocked at this sandbox's network-policy level (a
+403 `connect_rejected` on the CONNECT tunnel, not a transient failure) — which, per Babylon's own
+docs ("this CDN isn't intended for production use"), is exactly the situation item 3 asks to be
+resolved regardless. `registry.npmjs.org` turned out to be reachable, so the *exact* official
+build artifacts (not a substitute) were pulled via npm tarballs (`babylonjs@9.20.0`,
+`@babylonjs/havok@1.3.14`) and committed under `vendor/babylonjs/` — see `VENDORING.md` for the
+full provenance, the reproducible update recipe, and the self-host-vs-bundler reasoning (bundler
+would mean a build step or a committed `dist/`, giving up the zero-build-step static deploy this
+project has used since Stage 1; a real decision for later if npm-ecosystem deps become necessary,
+not a side effect of fixing this). `index.html`'s two `<script>` tags now point at
+`vendor/babylonjs/...` instead of the CDN.
+
+This unlocked something item 3 wasn't asked to unlock but turned out to matter enormously: **real
+Havok/WebGL execution in this sandbox**, for the first time in this entire project. Headless
+Chromium needed extra flags beyond the usual headless set
+(`--use-gl=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist --enable-webgl`) to get
+`new BABYLON.Engine(canvas, true)` to succeed under software rendering, and Playwright needed
+`executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'` (the pre-installed browser,
+not Playwright's own bundled one) plus the same flags. With those two pieces in place, this
+became the first point in the whole project where actual interactive testing — button clicks,
+keyboard input, screenshots, live physics-state inspection — was possible against the real
+running game, rather than only static syntax/structure checks or CDN-blocked-path tests.
+
+### The flipper bug this unlocked, and why the fix is a full rewrite
+
+The very first thing this new capability caught: the flipper's angle readout gave three
+different, mutually-inconsistent values across repeated observations with **zero player input**
+in between — physically impossible if the pivot constraint were holding correctly. What followed
+was an extensive real-browser debugging pass (not guesswork — every claim below was confirmed
+either against Babylon/Havok's actual TypeScript source, obtained via the same npm route, or
+against live physics state read through a temporary `window.__DEBUG_FLIPPERS`/`__DEBUG_MAIN_BALL`
+hook):
+
+1. **Missing axis locks**: `Physics6DoFConstraint` (used since Stage 4) only ever listed
+   `ANGULAR_Y` in its limits array. Havok requires every DOF to be listed explicitly — anything
+   omitted defaults to FREE, not LOCKED (confirmed against `havokPlugin.ts`'s
+   `initConstraint()`/`_nativeToLimitMode()`). The flipper's linear position and two of its three
+   rotation axes had been completely unconstrained since Stage 4.
+2. **A degenerate constraint frame**: `axisA`/`axisB` were never set, defaulting to the same
+   vector as the explicitly-passed `perpAxisA`/`perpAxisB` — an undefined (zero) cross-product
+   axis, and neither vector was even the flipper's real pivot axis (world/local Y).
+3. **Flipper/playfield collision fighting the newly-real LOCK axes**: the flipper box's bottom
+   face sat flush (Y=0) against the playfield's top face; once position was actually LOCKED,
+   ordinary resting contact with the playfield fought the constraint every step. Fixed via a
+   small clearance plus a Havok collision-filter category (`COLLISION_CATEGORY_BALL`) restricting
+   flippers to only ever collide with the ball.
+4. **A ~90-degree branch-cut in Havok's own relative-angle computation**: even after fixing 1-3,
+   only the LEFT flipper (rest angle -100°, past -90°) remained unstable; the RIGHT flipper
+   (-80°, short of -90°) was fine. Direct quaternion comparison (not just the Euler-angle readout,
+   ruling out a decomposition artifact) confirmed the settled rest angle was tens of degrees off
+   from where it should have been — a real physical deviation, not a display bug.
+
+Each fix (axis locks, frame correction, collision filtering, several different motor-force and
+reference-frame adjustments chasing the branch-cut) measurably changed the symptom without fully
+resolving it, and every attempt to keep the motor force high enough to be gameplay-responsive
+reintroduced instability (angular velocities up to Havok's own ~99 rad/s safety clamp). Rather
+than keep chasing undocumented Havok SIX_DOF solver internals, **the flipper was rewritten from a
+physics constraint to a kinematic body** (`PhysicsMotionType.ANIMATED`, per Babylon's own doc
+comment: "they behave like dynamic bodies, but they won't be affected by other bodies, but still
+push other bodies out of the way"). The flipper's rotation is now driven by plain, deterministic
+JS arithmetic (`updateFlipperMotor()` steps `currentAngleRad` toward a target each frame, clamped
+so it can't overshoot either the swept limit or the rest position) instead of a Havok motor —
+fully immune to constraint-solver instability, while the ball still collides with it correctly
+(Havok reads the kinematic body's transform every step via `disablePreStep = false`). This is a
+standard technique for player-controlled physics mechanisms, not a workaround.
+
+Verified via repeated Playwright runs against the real running game: both flippers hold their
+exact designed rest angle indefinitely with zero input (-100.0°/-80.0°, unchanging across a
+10-second observation window); activating sweeps each flipper to its exact designed limit
+(-30.0° left, -150.0° right — `restAngleRad ± FLIPPER_SWEEP_RAD`, mirrored correctly); releasing
+returns each flipper to its exact rest angle. The pre-existing CCD/ball-tunneling dev test still
+passes. A tempting but unrelated finding was ruled out via an A/B test against the pre-Stage-13
+commit (`git stash`): the main ball drifting off the plunger and falling within ~1 second of load
+in this headless sandbox is **pre-existing behavior, unrelated to this stage's changes** —
+reproduced identically on the original Stage 12 code. Worth investigating at some point (possibly
+a resting-contact/friction precision difference specific to this sandbox's software-rendered
+Havok build, or a genuine gap in the plunger's support geometry), but out of this session's scope
+and not a regression introduced here.
+
+### What's left
+
+- **Item 1** (feature-parity checklist): not built. The new real-browser testing capability makes
+  this genuinely achievable now (unlike every earlier stage, where it could only be reasoned about
+  from source) — scoring, drain/lives/Game-Over flow, pause/resume, reduced-motion, and a visual
+  pass on materials/lighting/particles/backglass legibility (Stages 7-9, still never actually
+  seen rendered) are all now testable via Playwright screenshots and DOM/state assertions.
+- **Item 2** (Phaser removal decision): not made. The "Forward reference" note above already
+  established that `phaser2d.html`/`index.js` are an intentional, permanent compatibility
+  fallback for unsupported iOS devices (Stage 11), not a transitional scaffold — so "removal" may
+  mean something narrower than deleting those files outright (e.g. confirming no *duplicate* code
+  paths or dead references remain). Needs a decision, not just an assumption.
+- **Item 4** (PWA/manifest/icon check): not started.
+- **Item 5** (README/docs update): not started.
+
+The `Phaser.` reference sweep (this stage's acceptance criterion) also hasn't been run yet — it
+needs the same reinterpretation as item 2, since `phaser2d.html`/`index.js` referencing `Phaser.`
+is intentional and permanent, not something to delete.

@@ -25,6 +25,14 @@
 //           note, including why the full mission FSM still isn't built even now - no stage in
 //           this 13-stage plan actually assigns building it, only deferred to "whenever real UI
 //           exists," which this stage's screens now do)
+// Stage 13 (in progress): self-hosted Babylon/Havok under vendor/babylonjs/ (see VENDORING.md),
+//           replacing the CDN <script> tags per Babylon's own "not for production" guidance -
+//           this unlocked this project's first real interactive browser testing, which
+//           immediately found a severe flipper physics bug: createFlipper() is now a kinematic
+//           PhysicsMotionType.ANIMATED body driven by plain JS arithmetic, not a
+//           Physics6DoFConstraint hinge (see createFlipper()'s comment for the full debugging
+//           history). babylon-prompts/13-*.md's parity checklist, Phaser-removal decision,
+//           PWA/manifest check, and README update are not done yet.
 // See BABYLON_3D_OVERHAUL.md for the overall architecture.
 //
 // Scope so far: the static table boundary (now with a real playfield floor), the fixed gameplay
@@ -201,6 +209,16 @@
     const TABLE_LENGTH_M = 960 * PX_TO_M; // ~0.9067
     const WALL_HEIGHT_M = 0.04; // new 3D-only dimension - taller than the ball so it can't hop out
 
+    // Havok collision filtering category for the ball (see PhysicsShape.filterMembershipMask/
+    // filterCollideMask - confirmed real API against physicsShape.ts). Everything else keeps
+    // Havok's own default membership/collide masks (unrestricted - collides with everything), so
+    // this alone changes nothing about existing ball-vs-playfield/wall/bumper/etc. collision. It
+    // exists purely so the flipper (see createFlipper()) can restrict ITS collide mask to "ball
+    // only" - flippers were exploding on contact with the playfield/nearby scenery once their
+    // position became rigidly LOCKED (Stage 13's flipper-constraint fix), and a flipper has no
+    // gameplay reason to physically collide with anything but the ball anyway.
+    const COLLISION_CATEGORY_BALL = 2;
+
     // Converts a 2D CONFIG-space X (0..540) to 3D world X, centered on the table.
     function toWorldX(x2d) {
         return (x2d - 540 / 2) * PX_TO_M;
@@ -289,6 +307,7 @@
     const FLIPPER_MASS_KG = 0.03;
     const FLIPPER_GAP_HALF_M = 0.045; // each pivot sits this far from table center X=0
     const FLIPPER_Z_M = -0.36; // near the flipper/near-camera end of the table
+    const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s comment - avoids flipper/playfield contact fighting the LOCKED constraint
 
     // Sweep angle in radians, converted with plain math, not BABYLON.Tools.ToRadians() - this
     // file's constants are evaluated at script-parse time, before the CDN-load checks inside
@@ -313,11 +332,10 @@
     const FLIPPER_RIGHT_REST_RAD = (-80 * Math.PI) / 180;
 
     // Motor tuning - NOT ported from anything (flippers are an entirely new mechanism in this
-    // 3D rewrite; the 2D version's velocity-injection formula has no equivalent here). Starting
-    // points reasoned from the flipper's own mass/size, not verified by play - see this stage's
-    // implementation note for why, and expect to retune once this can actually be tested.
-    const FLIPPER_MOTOR_MAX_FORCE = 4; // N*m - generous relative to the flipper's small mass/inertia
-    const FLIPPER_ACTIVATE_SPEED_RAD_S = 26; // fast "punch" - the angle limit stops it, like a real solenoid slamming into a mechanical stop
+    // 3D rewrite; the 2D version's velocity-injection formula has no equivalent here). These are
+    // angle-per-second rates consumed directly by updateFlipperMotor()'s kinematic stepping (see
+    // createFlipper()'s comment for why this isn't a physics-constraint motor).
+    const FLIPPER_ACTIVATE_SPEED_RAD_S = 26; // fast "punch" - clamped exactly at the sweep limit, like a real solenoid slamming into a mechanical stop
     const FLIPPER_RETURN_SPEED_RAD_S = 9; // slower, controlled return (magnitude only - direction is per-flipper, see createFlipper())
 
     // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
@@ -1102,6 +1120,7 @@
             { mass: BALL_MASS_KG, restitution: 0.65, friction: 0.35 },
             scene
         );
+        aggregate.shape.filterMembershipMask = COLLISION_CATEGORY_BALL;
 
         // Continuous collision detection - confirmed real Havok/Babylon method names (see
         // BABYLON_3D_OVERHAUL.md); defensively checked rather than assumed, same as Stage 1/2.
@@ -1144,47 +1163,54 @@
     }
 
     // ===================================
-    // Flippers: motorized, limited Physics6DoFConstraint hinges. Uses BABYLON.Physics6DoFConstraint
-    // rather than the simpler HingeConstraint, and setAxisMotorType/setAxisMotorTarget/
-    // setAxisMotorMaxForce for the motor - all confirmed real, current Babylon.js API (checked
-    // directly against Babylon's source/docs before writing this, not guessed - see
-    // BABYLON_3D_OVERHAUL.md and babylon-prompts/04-*.md's implementation note).
-    //
-    // BIGGEST UNVERIFIED ASSUMPTION IN THIS STAGE: that a Physics6DoFConstraint's angular limits
-    // (minLimit/maxLimit) are measured relative to the two bodies' RELATIVE orientation at the
-    // moment the constraint is created, not some absolute world reference. This code is built
-    // entirely around that assumption (each flipper is created already posed at its own rest
-    // angle, then limited to [0, FLIPPER_SWEEP_RAD] "from there"). If this sandbox's CDN weren't
-    // blocked this would have been confirmed empirically before writing the rest of this file;
-    // instead, the on-page flipper-angle readout (see main()) exists specifically so a human can
-    // immediately see whether this assumption held - if a flipper doesn't move, moves the wrong
-    // way, or both flippers move the same absolute direction instead of mirroring, this is where
-    // to look first. (First real playtest showed both flippers reading a static 0.0deg even at
-    // rest - that turned out to be a separate bug in the readout itself, not this assumption; see
-    // flipperAngleDegrees()'s comment. This assumption is still unconfirmed pending a retest with
-    // the fixed readout.)
+    // Flippers: KINEMATIC (PhysicsMotionType.ANIMATED) meshes, not a physics constraint. This is
+    // a deliberate rewrite, not the original design - every earlier version of this function used
+    // BABYLON.Physics6DoFConstraint (a motorized, limited hinge pinning a dynamic flipper body to
+    // a static anchor). That approach went through an extensive real Playwright/headless-Chromium
+    // debugging pass this stage (Stage 13) chasing a genuine, reproducible instability: even after
+    // fixing (a) missing axis locks (Havok's SIX_DOF requires every DOF listed explicitly or it
+    // defaults to FREE, not LOCKED - confirmed against havokPlugin.ts's
+    // initConstraint()/_nativeToLimitMode()), (b) a degenerate constraint frame (axisA/axisB
+    // defaulted to the same vector as perpAxisA/perpAxisB, an undefined cross-product axis, and
+    // neither was even the flipper's real pivot axis), and (c) a flipper/playfield collision
+    // fighting the LOCKED axes every step (fixed via COLLISION_CATEGORY_BALL, kept below since
+    // it's still useful) - the constraint remained unstable in a way that tracked disturbingly
+    // closely with which flipper's rest angle happened to be more extreme (-100 degrees vs -80
+    // degrees, straddling a suspected ~90-degree branch-cut in Havok's own relative-angle
+    // computation for LIMITED axes): real angular velocities up to Havok's own ~99 rad/s safety
+    // clamp with ZERO player input, and even once "stable" (motionless), the settled rest angle
+    // was tens of degrees off from where it was supposed to be (confirmed via direct quaternion
+    // comparison, not just the Euler-angle readout, ruling out a decomposition artifact - real
+    // physical deviation). Multiple targeted fixes (motor force retuning, axis reference-frame
+    // changes, hand-derived compensating vectors) each shifted the symptom without resolving it.
+    // Rather than continue chasing undocumented Havok solver internals, this is a standard game-
+    // physics technique: a kinematic body's transform is set directly by ordinary JS/game logic
+    // (fully deterministic, immune to constraint-solver instability) while Havok still uses it for
+    // collision response against DYNAMIC bodies - "they behave like dynamic bodies, but they won't
+    // be affected by other bodies, but still push other bodies out of the way" (Babylon's own
+    // PhysicsBody doc comment for PhysicsMotionType.ANIMATED). The ball still bounces off flippers
+    // correctly; the flipper itself just isn't simulated anymore, it's animated - exactly right
+    // for a player-controlled mechanism whose motion is fully specified by input state anyway.
     // ===================================
     function createFlipper(scene, name, pivotWorldPos, isLeft, mat) {
-        const anchor = BABYLON.MeshBuilder.CreateBox(name + 'Anchor', { size: 0.006 }, scene);
-        anchor.position.copyFrom(pivotWorldPos);
-        anchor.isVisible = false;
-        const anchorAggregate = new BABYLON.PhysicsAggregate(anchor, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
+        // Clearance above the playfield: the playfield's top face sits at exactly Y=0 (see its
+        // own comment), and pivotWorldPos.y (FLIPPER_HEIGHT_M / 2) would put the flipper box's
+        // bottom face flush against it. Kept from the constraint-based version even though a
+        // kinematic body can't "fight" a LOCK constraint anymore - real flippers don't drag
+        // directly on the playfield surface either, and it costs nothing.
+        const pivot = new BABYLON.Vector3(pivotWorldPos.x, pivotWorldPos.y + FLIPPER_PLAYFIELD_CLEARANCE_M, pivotWorldPos.z);
 
         // Rest angle and mirroring: see FLIPPER_LEFT_REST_RAD/FLIPPER_RIGHT_REST_RAD's comment -
         // these are NOT simple negations of each other, because mirroring a rotating object
         // requires flipping both the angle AND the direction it sweeps in, not just the angle.
         const restAngleRad = isLeft ? FLIPPER_LEFT_REST_RAD : FLIPPER_RIGHT_REST_RAD;
         const halfLength = FLIPPER_LENGTH_M / 2;
-        const offsetX = halfLength * Math.cos(restAngleRad);
-        const offsetZ = halfLength * Math.sin(restAngleRad);
 
         const mesh = BABYLON.MeshBuilder.CreateBox(name, {
             width: FLIPPER_LENGTH_M,
             height: FLIPPER_HEIGHT_M,
             depth: FLIPPER_THICKNESS_M
         }, scene);
-        mesh.position.set(pivotWorldPos.x + offsetX, pivotWorldPos.y, pivotWorldPos.z + offsetZ);
-        mesh.rotation.y = restAngleRad;
         mesh.material = mat;
         mesh.metadata = { kind: 'flipper' }; // Stage 10's flipper-contact camera shake
 
@@ -1194,75 +1220,82 @@
             { mass: FLIPPER_MASS_KG, restitution: 0.3, friction: 0.4 },
             scene
         );
+        // PhysicsAggregate only offers STATIC (mass 0) or DYNAMIC (mass > 0) directly - ANIMATED
+        // (kinematic) requires an explicit setMotionType() call after construction. Confirmed
+        // real API against physicsBody.ts/IPhysicsEnginePlugin.ts.
+        aggregate.body.setMotionType(BABYLON.PhysicsMotionType.ANIMATED);
+        // disablePreStep defaults to true (Havok's own default, for performance, since most
+        // bodies are STATIC or DYNAMIC and never need it) - an ANIMATED body needs it OFF so
+        // Havok reads this mesh's transform every step instead of ignoring it. Confirmed real
+        // property against physicsBody.ts.
+        aggregate.body.disablePreStep = false;
+        // Only the ball should ever physically collide with a flipper - see
+        // COLLISION_CATEGORY_BALL's comment. No longer needed for LOCK-vs-collision fighting
+        // (there's no LOCK constraint anymore), but still correct: flippers have no gameplay
+        // reason to push against the playfield, walls, or other scenery.
+        aggregate.shape.filterCollideMask = COLLISION_CATEGORY_BALL;
 
-        // Limit range: left sweeps from the creation pose (0) toward +SWEEP; right sweeps from
-        // the creation pose (0) toward -SWEEP - the mirrored motor direction that makes the
-        // right flipper a true mirror image of the left, not just a mirrored rest angle with the
-        // same rotation direction (verified numerically - see the constants' comment).
-        const minLimit = isLeft ? 0 : -FLIPPER_SWEEP_RAD;
-        const maxLimit = isLeft ? FLIPPER_SWEEP_RAD : 0;
-
-        const constraint = new BABYLON.Physics6DoFConstraint({
-            pivotA: BABYLON.Vector3.Zero(),
-            pivotB: new BABYLON.Vector3(-halfLength, 0, 0),
-            perpAxisA: new BABYLON.Vector3(1, 0, 0),
-            perpAxisB: new BABYLON.Vector3(1, 0, 0)
-        }, [
-            { axis: BABYLON.PhysicsConstraintAxis.ANGULAR_Y, minLimit: minLimit, maxLimit: maxLimit }
-        ], scene);
-
-        // Constraint must be attached to the bodies BEFORE any setAxisMotor*() call - Havok only
-        // allocates constraint._pluginData (an array the plugin iterates over internally) inside
-        // addConstraint()/initConstraint(). Calling a motor setter first hits an empty/undefined
-        // _pluginData and throws "not iterable". Confirmed against Babylon's actual source
-        // (havokPlugin.ts's own initConstraint comment even calls this ordering "real weird").
-        // This was caught via a real Android Chrome playtest, not caught in this sandbox, since
-        // this sandbox cannot load the Havok/Babylon CDN to exercise this code path at all.
-        anchorAggregate.body.addConstraint(aggregate.body, constraint);
-
-        constraint.setAxisMotorType(BABYLON.PhysicsConstraintAxis.ANGULAR_Y, BABYLON.PhysicsConstraintMotorType.VELOCITY);
-        constraint.setAxisMotorMaxForce(BABYLON.PhysicsConstraintAxis.ANGULAR_Y, FLIPPER_MOTOR_MAX_FORCE);
-        constraint.setAxisMotorTarget(BABYLON.PhysicsConstraintAxis.ANGULAR_Y, 0);
-
-        // motorSign: left activates toward +maxLimit (positive motor target), right activates
-        // toward -maxLimit/minLimit (negative motor target) - see the limit range above.
         const motorSign = isLeft ? 1 : -1;
+        const minAngleRad = isLeft ? restAngleRad : restAngleRad - FLIPPER_SWEEP_RAD;
+        const maxAngleRad = isLeft ? restAngleRad + FLIPPER_SWEEP_RAD : restAngleRad;
 
-        return { mesh, aggregate, constraint, active: false, motorSign };
+        const flipper = { mesh, aggregate, active: false, motorSign, pivot, halfLength, restAngleRad, minAngleRad, maxAngleRad, currentAngleRad: restAngleRad };
+        setFlipperAngle(flipper, restAngleRad);
+        return flipper;
+    }
+
+    // Positions and orients the flipper mesh for a given absolute angle, orbiting its center
+    // around the fixed pivot point exactly like the old constraint's pivotB offset did (a
+    // rotating box pinned at one end moves its center along an arc, not just spins in place).
+    // Havok picks this transform up next physics step via disablePreStep = false (see
+    // createFlipper()) and uses it for collision response against the ball.
+    function setFlipperAngle(flipper, angleRad) {
+        flipper.currentAngleRad = angleRad;
+        flipper.mesh.position.set(
+            flipper.pivot.x + flipper.halfLength * Math.cos(angleRad),
+            flipper.pivot.y,
+            flipper.pivot.z + flipper.halfLength * Math.sin(angleRad)
+        );
+        if (!flipper.mesh.rotationQuaternion) {
+            flipper.mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+        }
+        BABYLON.Quaternion.RotationAxisToRef(BABYLON.Axis.Y, angleRad, flipper.mesh.rotationQuaternion);
     }
 
     function activateFlipper(flipper) {
-        if (flipper.active) return;
         flipper.active = true;
-        flipper.constraint.setAxisMotorTarget(
-            BABYLON.PhysicsConstraintAxis.ANGULAR_Y,
-            flipper.motorSign * FLIPPER_ACTIVATE_SPEED_RAD_S
-        );
     }
 
     function deactivateFlipper(flipper) {
         flipper.active = false;
-        flipper.constraint.setAxisMotorTarget(
-            BABYLON.PhysicsConstraintAxis.ANGULAR_Y,
-            -flipper.motorSign * FLIPPER_RETURN_SPEED_RAD_S
-        );
     }
 
-    // A physics-driven mesh's `.rotation` Euler property is NOT reliable for reading its current
-    // orientation. Confirmed against Babylon's actual source (transformNode.pure.ts): the
-    // rotationQuaternion setter explicitly resets `.rotation` to (0,0,0) the moment
-    // rotationQuaternion takes over ("// reset the rotation vector" in Babylon's own code) -
-    // which happens automatically inside PhysicsAggregate's PhysicsBody constructor. Havok's
-    // per-frame sync then only ever writes rotationQuaternion, never touches `.rotation` again -
-    // so `.rotation.y` stays permanently frozen at 0 for the whole life of any physics body.
-    // (This is what made the flipper-angle readout below show a static 0.0deg for both flippers
-    // even once real playtesting on a physical device confirmed Havok, the table, and the ball
-    // were all otherwise working - a broken readout, not proof of a broken constraint.)
-    function flipperAngleDegrees(mesh) {
-        if (mesh.rotationQuaternion) {
-            return (mesh.rotationQuaternion.toEulerAngles().y * 180) / Math.PI;
+    // Advances each flipper's angle by simple, fully deterministic JS arithmetic (called once per
+    // frame for both flippers, from the render loop) - see createFlipper()'s comment for why this
+    // replaced a physics-constraint motor entirely. While active, sweeps toward the extended
+    // limit at FLIPPER_ACTIVATE_SPEED_RAD_S, clamped so it can't overshoot; once released, sweeps
+    // back toward restAngleRad at FLIPPER_RETURN_SPEED_RAD_S, also clamped so it settles exactly
+    // at rest instead of oscillating past it.
+    function updateFlipperMotor(flipper, deltaMs) {
+        const dt = deltaMs / 1000;
+        if (flipper.active) {
+            const target = flipper.motorSign > 0 ? flipper.maxAngleRad : flipper.minAngleRad;
+            const step = flipper.motorSign * FLIPPER_ACTIVATE_SPEED_RAD_S * dt;
+            const next = flipper.currentAngleRad + step;
+            setFlipperAngle(flipper, flipper.motorSign > 0 ? Math.min(next, target) : Math.max(next, target));
+        } else {
+            const diff = flipper.restAngleRad - flipper.currentAngleRad;
+            const maxStep = FLIPPER_RETURN_SPEED_RAD_S * dt;
+            if (Math.abs(diff) <= maxStep) {
+                setFlipperAngle(flipper, flipper.restAngleRad);
+            } else {
+                setFlipperAngle(flipper, flipper.currentAngleRad + Math.sign(diff) * maxStep);
+            }
         }
-        return (mesh.rotation.y * 180) / Math.PI;
+    }
+
+    function flipperAngleDegrees(flipper) {
+        return (flipper.currentAngleRad * 180) / Math.PI;
     }
 
     // ===================================
@@ -1632,7 +1665,6 @@
             new BABYLON.Vector3(FLIPPER_GAP_HALF_M, FLIPPER_HEIGHT_M / 2, FLIPPER_Z_M),
             false, flipperMat
         );
-
         // Desktop controls: LEFT/RIGHT arrows, matching the existing 2D game's control scheme
         // (release-prompts/14-*.md documents the equivalent touch controls for mobile, which get
         // reconnected to whatever the final flipper API looks like in Stage 11 - keyboard first
@@ -1679,7 +1711,6 @@
             new BABYLON.Vector3(plunger.baseX, 0.03, plunger.baseZ),
             ballMat
         );
-
         // --- Particle VFX (Stage 8, babylon-prompts/08-*.md) ---
         const particleTexture = createParticleTexture(scene);
         const ballTrail = buildBallTrail(scene, particleTexture, mainBall.mesh, highFidelity);
@@ -2366,6 +2397,8 @@
             // duration" requirement. Camera effects and the dev-panel status readouts are left
             // running during pause - harmless either way, and simpler than guarding everything.
             if (!isPaused) {
+                updateFlipperMotor(leftFlipper, deltaMs);
+                updateFlipperMotor(rightFlipper, deltaMs);
                 updateBallPhysics(mainBall, deltaMs);
                 testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
                 updateBallTrail(ballTrail, mainBall, highFidelity);
@@ -2405,12 +2438,11 @@
             statusStuckTimer.textContent = Math.round(mainBall.stuckTimeMs) + ' ms';
             statusPlungerCharge.textContent = Math.round(plunger.chargePercent * 100) + '%';
 
-            // Live flipper angle readout (degrees) - see createFlipper()'s comment on the
-            // biggest unverified assumption in this stage; this is how a human confirms whether
-            // it held. Uses flipperAngleDegrees(), not raw mesh.rotation.y - see that function's
-            // comment for why the raw Euler property can't be trusted on a physics-driven mesh.
-            statusLeftFlipper.textContent = flipperAngleDegrees(leftFlipper.mesh).toFixed(1) + '°';
-            statusRightFlipper.textContent = flipperAngleDegrees(rightFlipper.mesh).toFixed(1) + '°';
+            // Live flipper angle readout (degrees) - reads the flipper's own tracked state
+            // directly (see createFlipper()/updateFlipperMotor()), not a physics-engine
+            // transform, since flippers are now kinematic (see createFlipper()'s comment).
+            statusLeftFlipper.textContent = flipperAngleDegrees(leftFlipper).toFixed(1) + '°';
+            statusRightFlipper.textContent = flipperAngleDegrees(rightFlipper).toFixed(1) + '°';
 
             scene.render();
         });

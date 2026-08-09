@@ -1,0 +1,6 @@
+# Vendored third-party build artifacts (Stage 13, babylon-prompts/13-*.md - see VENDORING.md).
+# Large, minified/binary, and never hand-edited - mark them so git doesn't try to diff or merge
+# them line-by-line.
+vendor/babylonjs/babylon.js -diff linguist-vendored
+vendor/babylonjs/havok/HavokPhysics_umd.js -diff linguist-vendored
+vendor/babylonjs/havok/*.wasm -diff -text binary linguist-vendored
