@@ -1,5 +1,10 @@
 # SPIRITBALL — Known Issues & Release Stability Report
 
+> **Archived.** This document describes the original Phaser/Arcade-Physics 2D game, which has
+> been fully removed from the project (SPIRITBALL is now Babylon.js/Havok 3D only). Kept here as
+> historical record of what was fixed and why. For current status, see `../BABYLON_3D_OVERHAUL.md`,
+> the `../babylon-prompts/` stage docs, and `../improvement-prompts/` for what's next.
+
 **Date:** 2026-08-08
 **Status update (2026-08-08, same day):** Items 1–10 and 12 have been fixed in this branch — see
 the corresponding `release-prompts/NN-*.md` files, which now double as a record of what was

@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <!-- Same mobile meta-tag set proven out on the Phaser build (phaser2d.html) - viewport-fit=cover
-         for safe-area insets, no pinch-zoom since this is a full-screen game, PWA/homescreen hints. -->
+    <!-- viewport-fit=cover for safe-area insets, no pinch-zoom since this is a full-screen game,
+         PWA/homescreen hints. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#05010f">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -30,7 +30,56 @@
             touch-action: none;
         }
 
+        /* Player-facing HUD - score/lives only, always visible. Separate from #status-panel
+           (the dev/debug panel below): until this was added, the ONLY place score/lives were
+           ever shown was inside that dev panel, alongside test buttons - not acceptable for a
+           real playable build. Small and out of the way (top-right, opposite the dev panel's
+           top-left corner) so it never blocks the table. */
+        #player-hud {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 10;
+            display: flex;
+            gap: 16px;
+            background: rgba(10, 0, 25, 0.55);
+            border: 1px solid rgba(0, 255, 255, 0.4);
+            border-radius: 8px;
+            padding: 6px 14px;
+            color: #00ffff;
+            font-size: 14px;
+            line-height: 1.4;
+            text-shadow: 0 0 6px rgba(0, 255, 255, 0.6);
+        }
+
+        #player-hud .hud-label {
+            color: #888;
+            font-size: 10px;
+            display: block;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        #player-hud .hud-value {
+            font-weight: bold;
+        }
+
+        @media (max-width: 480px) {
+            #player-hud {
+                top: 8px;
+                right: 8px;
+                padding: 5px 10px;
+                font-size: 12px;
+                gap: 10px;
+            }
+        }
+
+        /* Dev/debug panel - hidden by default (see #player-hud's comment above for why this used
+           to be the only place score/lives showed at all). Shown by appending ?dev=1 to the URL
+           - toggled in babylon-game.js, not here, since it also needs to persist across the
+           menu/pause screens. */
         #status-panel {
+            display: none;
             position: fixed;
             top: 12px;
             left: 12px;
@@ -96,14 +145,10 @@
 
         /* ===================================
            MOBILE TOUCH CONTROLS - ARCADE STYLE (Stage 11, babylon-prompts/11-*.md)
-           Ported from styles.css/phaser2d.html's already-designed-and-tuned controls
-           (release-prompts/14-*.md) rather than redesigned - per that stage doc's own
-           constraint, this file's job is rewiring event handlers to the new 3D flipper/plunger
-           functions, not re-styling. Copied inline (not a <link> to styles.css) since that
-           file also carries a lot of 2D-game-specific canvas/HUD/menu/pause-button CSS that
-           doesn't apply here and would risk selector collisions with this page's own
-           #status-panel/#error-panel/#flash-overlay - not worth the DRY-ness given neither file
-           is expected to change often once each is stable.
+           Originally ported from the now-removed 2D Phaser build's already-tuned touch-control
+           styling (archive/release-prompts/14-*.md), then adapted for this page's own
+           3D flipper/plunger event handlers. Kept as inline styles (not a separate stylesheet)
+           since this is the only front-end this project has now.
            =================================== */
         #mobile-controls {
             display: none; /* toggled by updateMobileControlsVisibility() in babylon-game.js */
@@ -290,6 +335,160 @@
         #unsupported-panel p { max-width: 420px; line-height: 1.6; font-size: 15px; }
         #unsupported-panel a { color: #00ffff; }
 
+        /* ===================================
+           MENU / PAUSE / CONTROLS / GAME OVER SCREENS (Stage 12, babylon-prompts/12-*.md)
+           Built as DOM/CSS overlays per the doc's own explicit instruction - text-heavy,
+           infrequently-changing, accessibility-sensitive screens where HTML/CSS is easier to get
+           right than a 3D-scene text layout system (that treatment is reserved for the in-
+           gameplay backglass, 09-*.md, which earns its 3D-ness by being part of the cabinet
+           during play). Content/copy/flow ported from MenuScene/GameOverScene/pauseGame()/
+           showSettingsMenu() in ../index.js - font family deliberately kept as this page's
+           existing 'Courier New' stack rather than also loading the 2D game's Google Fonts
+           (Righteous/Monoton/Orbitron), a new external CDN dependency this project has
+           consistently avoided adding elsewhere (Stage 7's skybox, Stage 9's backglass) for the
+           same reason: one fragile CDN dependency (Babylon/Havok itself) is already the norm
+           here, a second one for cosmetic font loading wasn't worth it. This is a font-family
+           difference only - all copy/behavior is preserved as the doc requires.
+           =================================== */
+        .screen-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 200;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            padding: 24px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            color: #ffffff;
+        }
+
+        /* Menu screen is deliberately translucent (not opaque) so the idle attract-mode orbit
+           camera (10-*.md) is visible behind it through the canvas, per the doc's explicit
+           instruction - every other overlay here uses a solid dark background since gameplay
+           isn't meant to show through them. */
+        #menu-overlay {
+            justify-content: center;
+            background: linear-gradient(rgba(5, 1, 15, 0.55), rgba(5, 1, 15, 0.8));
+        }
+
+        #pause-overlay, #controls-overlay, #gameover-overlay {
+            justify-content: flex-start;
+            padding-top: 8vh;
+            background: rgba(5, 1, 15, 0.93);
+        }
+
+        .screen-overlay h1 {
+            font-size: clamp(32px, 9vw, 56px);
+            color: #00ffff;
+            text-shadow: 0 0 12px #ff00ff, 0 0 24px #00ffff;
+            margin: 0 0 8px 0;
+        }
+
+        #gameover-overlay h1 { color: #ff0099; text-shadow: 0 0 12px #ff0099; }
+        #controls-overlay h1, #menu-overlay .tagline { color: #ffff00; }
+
+        .screen-overlay .tagline {
+            font-size: clamp(14px, 3.5vw, 18px);
+            opacity: 0.9;
+            margin: 0 0 24px 0;
+        }
+
+        .screen-overlay .highscore-line {
+            font-size: clamp(18px, 4.5vw, 24px);
+            color: #ffff00;
+            margin-bottom: 32px;
+        }
+
+        .screen-overlay .pulse-text {
+            animation: menu-pulse 1.1s ease-in-out infinite;
+        }
+
+        @keyframes menu-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .start-instructions, .restart-instructions {
+            font-size: clamp(18px, 5vw, 30px);
+            color: #00ff99;
+            text-shadow: 0 0 8px #00ff99;
+        }
+
+        .screen-overlay button {
+            font-family: inherit;
+            font-size: clamp(16px, 4vw, 22px);
+            font-weight: bold;
+            color: #ffffff;
+            background: #1a1a3e;
+            border: 3px solid #00ffff;
+            border-radius: 8px;
+            padding: 14px 28px;
+            margin: 10px 0;
+            min-width: 240px;
+            cursor: pointer;
+        }
+
+        .screen-overlay button:active, .screen-overlay button:hover {
+            color: #00ffff;
+            background: #2a2a5e;
+        }
+
+        #pause-newgame-btn { border-color: #00ff00; }
+        #pause-newgame-btn:active, #pause-newgame-btn:hover { color: #00ff00; }
+        #pause-controls-btn { border-color: #ffff00; }
+        #pause-controls-btn:active, #pause-controls-btn:hover { color: #ffff00; }
+
+        .screen-overlay .hint {
+            font-size: 13px;
+            color: #888;
+            margin-top: 20px;
+        }
+
+        #controls-rows { margin: 12px 0 24px 0; }
+        .control-row { margin-bottom: 20px; }
+        .control-row .key {
+            display: block;
+            font-size: clamp(16px, 4vw, 20px);
+            font-weight: bold;
+            color: #00ffff;
+        }
+        .control-row .action {
+            display: block;
+            font-size: clamp(13px, 3vw, 16px);
+            margin-top: 4px;
+        }
+
+        #gameover-score {
+            font-size: clamp(36px, 10vw, 54px);
+            font-weight: bold;
+            color: #00ffff;
+            margin: 4px 0 20px 0;
+        }
+
+        #gameover-stats { font-size: 15px; line-height: 1.8; margin-bottom: 24px; }
+
+        /* Pause button - visible on both desktop and mobile (matching the 2D game's actual
+           behavior - it's a sibling of #mobile-controls there, not nested inside it), unlike the
+           flipper zones/launch button which are mobile-only. */
+        #pause-btn {
+            position: fixed;
+            top: max(16px, env(safe-area-inset-top));
+            right: max(16px, env(safe-area-inset-right));
+            z-index: 45;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            font-size: 20px;
+            color: #00ffff;
+            background: rgba(10, 0, 25, 0.8);
+            border: 2px solid #00ffff;
+            cursor: pointer;
+            touch-action: none;
+        }
+
         /* Camera "flash" (Stage 10, babylon-prompts/10-*.md) - a DOM overlay rather than a
            DefaultRenderingPipeline color-grade pulse, deliberately: the pipeline only exists when
            detectHighFidelity() is true (07-*.md), and a flash tied exclusively to that would
@@ -325,16 +524,26 @@
         }
     </style>
 
-    <!-- Confirmed CDN URLs and load order (Havok before core) - see BABYLON_3D_OVERHAUL.md. -->
-    <script src="https://cdn.babylonjs.com/havok/HavokPhysics_umd.js"></script>
-    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <!-- Self-hosted, not CDN-loaded (Stage 13, babylon-prompts/13-*.md): Babylon's own docs say
+         cdn.babylonjs.com isn't intended for production use. These are the exact same official
+         build artifacts the CDN serves (babylonjs@9.20.0's babylon.js,
+         @babylonjs/havok@1.3.14's UMD+WASM), pulled once via npm and committed under vendor/ -
+         see VENDORING.md for exactly how and how to update them. Load order (Havok before core)
+         unchanged from every prior stage. -->
+    <script src="vendor/babylonjs/havok/HavokPhysics_umd.js"></script>
+    <script src="vendor/babylonjs/babylon.js"></script>
 </head>
 <body>
     <canvas id="renderCanvas"></canvas>
     <div id="flash-overlay"></div>
 
+    <div id="player-hud">
+        <div><span class="hud-label">Score</span><span class="hud-value" id="hud-score">0</span></div>
+        <div><span class="hud-label">Lives</span><span class="hud-value" id="hud-lives">3</span></div>
+    </div>
+
     <div id="status-panel">
-        <h1>SPIRITBALL 3D (dev build)</h1>
+        <h1>SPIRITBALL (dev build)</h1>
         <div class="row"><span>Score: </span><span id="status-score">0</span></div>
         <div class="row"><span>Lives: </span><span id="status-lives">3</span></div>
         <div class="row"><span>Havok: </span><span id="status-havok">loading…</span></div>
@@ -356,9 +565,8 @@
         <button id="reset-plunger-btn">RESET BALL TO PLUNGER</button>
     </div>
 
-    <!-- Arcade-style mobile overlay controls, ported from phaser2d.html/styles.css
-         (release-prompts/14-*.md) - see this file's <style> block comment. Shown/hidden by
-         updateMobileControlsVisibility() in babylon-game.js. -->
+    <!-- Arcade-style mobile overlay controls - see this file's <style> block comment.
+         Shown/hidden by updateMobileControlsVisibility() in babylon-game.js. -->
     <div id="mobile-controls">
         <div id="flipper-zone-left" class="flipper-zone left" role="button" aria-label="Left Flipper">
             <span class="flipper-zone-icon">◀</span>
@@ -370,6 +578,40 @@
             <span class="launch-btn-icon">⚡</span>
             <span class="launch-btn-label">LAUNCH</span>
         </button>
+    </div>
+
+    <button id="pause-btn" aria-label="Pause Game">⏸</button>
+
+    <!-- Menu/title screen (Stage 12) - shown until the first launch input, translucent so the
+         idle attract-mode orbit camera (10-*.md) is visible behind it. -->
+    <div id="menu-overlay" class="screen-overlay">
+        <h1 class="pulse-text">SPIRITBALL</h1>
+        <p class="tagline">DMT Vision Quest Pinball</p>
+        <p class="highscore-line" id="menu-highscore">HIGH SCORE: 0</p>
+        <p class="start-instructions pulse-text" id="menu-start-instructions">PRESS SPACE TO START</p>
+    </div>
+
+    <div id="pause-overlay" class="screen-overlay">
+        <h1>GAME PAUSED</h1>
+        <button id="pause-resume-btn">▶ RESUME GAME</button><br>
+        <button id="pause-newgame-btn">🔄 NEW GAME</button><br>
+        <button id="pause-controls-btn">ℹ CONTROLS</button>
+        <p class="hint">ESC or TAP RESUME to continue</p>
+    </div>
+
+    <div id="controls-overlay" class="screen-overlay">
+        <h1>CONTROLS</h1>
+        <div id="controls-rows"></div>
+        <button id="controls-back-btn">◄ BACK</button>
+    </div>
+
+    <div id="gameover-overlay" class="screen-overlay">
+        <h1>GAME OVER</h1>
+        <p>FINAL SCORE</p>
+        <p id="gameover-score">0</p>
+        <p class="highscore-line" id="gameover-highscore-line"></p>
+        <div id="gameover-stats"></div>
+        <p class="restart-instructions pulse-text" id="gameover-restart-instructions">PRESS SPACE TO PLAY AGAIN</p>
     </div>
 
     <div id="rotate-overlay" class="rotate-overlay">
@@ -385,12 +627,12 @@
     </div>
 
     <div id="unsupported-panel">
-        <h1>3D Not Supported On This Device</h1>
+        <h1>Not Supported On This Device</h1>
         <p id="unsupported-message">
-            SPIRITBALL 3D needs a browser with WebAssembly SIMD support (e.g. iOS 16.4+, recent
-            Chrome/Firefox/Edge/Android). Your browser doesn't appear to support it.
+            SPIRITBALL needs a browser with WebAssembly SIMD support (e.g. iOS 16.4+, recent
+            Chrome/Firefox/Edge/Android). Your browser doesn't appear to support it - try updating
+            your browser or OS, or opening this page on a different device.
         </p>
-        <p><a href="phaser2d.html">Try the 2D version instead →</a></p>
     </div>
 
     <script src="babylon-game.js"></script>

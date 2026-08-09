@@ -1,7 +1,7 @@
 # Stage 10 — Camera choreography and impact juice
 
 ## Context
-The 2D version's `cameraShake()`/`cameraFlash()` helpers (`../release-prompts/12-accessibility-pass.md`)
+The 2D version's `cameraShake()`/`cameraFlash()` helpers (`../archive/release-prompts/12-accessibility-pass.md`)
 gave every hit, launch, and mission event some visual punch through Phaser's 2D camera effects.
 This stage rebuilds that feeling for the fixed 3D camera from `02-*.md`, plus adds genuinely
 3D-only spectacle (a menu-idle orbit) that had no 2D equivalent.
@@ -19,7 +19,7 @@ becoming disorienting, plus a slow cinematic orbit camera for idle/menu moments.
    "flash." Keep the *call sites* conceptually mapped 1:1 to the old ones (flipper hits, every
    `hit*()` collision handler from `06-*.md`, launches from `05-*.md`, mission-complete/rank-up
    from the ported mission logic) so nothing loses its existing feedback moment.
-2. Respect `window.SPIRITBALL_reducedMotion` (`../release-prompts/12-*.md`) exactly as the 2D
+2. Respect `window.SPIRITBALL_reducedMotion` (`../archive/release-prompts/12-*.md`) exactly as the 2D
    version did - these effects should no-op or be significantly dampened when that flag is set,
    reusing the same flag rather than inventing a new one.
 3. Add camera beats for moments that didn't have a dedicated camera treatment in 2D but benefit

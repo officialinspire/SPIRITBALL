@@ -5,7 +5,7 @@ Read `../BABYLON_3D_OVERHAUL.md` first — it has the full vision, the architect
 (confirmed CDN URLs, init code, the iOS/Havok compatibility limit, the flipper-constraint API
 note) that every stage below assumes.
 
-**Unlike `../release-prompts/`, these are sequential, not independent.** Each stage builds
+**Unlike `../archive/release-prompts/`, these are sequential, not independent.** Each stage builds
 physically on the last — apply them in order. A fresh coding session can still be handed just one
 stage file at a time (each is self-contained with its own context/goal/steps/acceptance
 criteria), but it needs the *previous* stages to already be done, not just the master doc.
@@ -33,7 +33,7 @@ The user explicitly chose the higher-risk of two options presented: a full 3D *p
 rather than keeping the existing, already-tuned 2D Arcade Physics simulation and using Babylon.js
 only as a renderer. That choice is the right call if the goal is a genuinely "real" 3D pinball
 feel rather than a re-skinned 2D game — but it means almost none of the physics-dependent tuning
-work already done (`../release-prompts/01-*.md`, `13-*.md`) transfers directly. Budget Stages 3-5
+work already done (`../archive/release-prompts/01-*.md`, `13-*.md`) transfers directly. Budget Stages 3-5
 in particular as real, iterative feel-tuning work, not mechanical ports.
 
 ## What was and wasn't verified before writing these

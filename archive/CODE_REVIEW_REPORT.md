@@ -2,7 +2,10 @@
 > game and concluded there were no blocking bugs. The game has since been rewritten around a
 > mission/rank/fuel system, and a fresh review of the current code found several real, verified
 > bugs affecting both desktop and mobile play. See `KNOWN_ISSUES.md` and `release-prompts/` for
-> the current, authoritative issue list and fixes. This file is kept for historical reference only.
+> the fixes that followed. **Further archived, 2026-08-09**: the Phaser 2D game this report
+> reviewed has since been removed entirely — SPIRITBALL is now Babylon.js/Havok 3D only. See
+> `../BABYLON_3D_OVERHAUL.md`, `../babylon-prompts/`, and `../improvement-prompts/` for current
+> status. This file is kept for historical reference only.
 
 # SPIRITBALL - Comprehensive Code Review & Debug Report
 **Date:** December 5, 2025

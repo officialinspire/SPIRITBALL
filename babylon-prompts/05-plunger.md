@@ -2,7 +2,7 @@
 
 ## Context
 Ports the charge-and-release power curve already designed and tuned in the 2D version
-(`../release-prompts/13-plunger-ball-mechanics-revamp.md`) into the 3D physics world, as a
+(`../archive/release-prompts/13-plunger-ball-mechanics-revamp.md`) into the 3D physics world, as a
 visible 3D piston in the launch lane.
 
 ## Goal
@@ -16,7 +16,7 @@ proportional to how long it was held.
    `02-*.md`) with the ball resting at its base when not in play.
 2. **Recommend a kinematic-animated plunger, not a physically-simulated spring**, for the same
    reliability reasons the 2D version kept its launch mechanic simple and deterministic
-   (`../release-prompts/13-*.md`): animate the plunger mesh's position by hand based on charge
+   (`../archive/release-prompts/13-*.md`): animate the plunger mesh's position by hand based on charge
    percentage (matching the old pull-back distance/easing), and on release, **apply a calculated
    impulse directly to the ball** (rather than relying on the plunger mesh physically pushing it)
    using the same charge-time-to-power curve as the 2D version:

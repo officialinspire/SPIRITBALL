@@ -59,7 +59,7 @@ chosen scale), find out here, not four stages in.
   prove the pipeline and surface any fundamental blockers early.
 - If Havok fails to load or initialize for any reason, make that failure loud and visible (an
   on-page error message with the actual error), not a silent blank canvas - the CDN-failure
-  problem this project already solved for Phaser (`release-prompts/10-*.md`) is exactly the kind
+  problem this project already solved for Phaser (`archive/release-prompts/10-*.md`) is exactly the kind
   of thing to watch for here too.
 
 ## Acceptance criteria

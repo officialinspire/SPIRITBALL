@@ -2,7 +2,7 @@
 
 ## Context
 The single biggest gameplay-feel change in this whole rewrite. The current 2D flipper feel
-(`../release-prompts/01-flipper-collision-physics.md`) worked by directly setting the ball's
+(`../archive/release-prompts/01-flipper-collision-physics.md`) worked by directly setting the ball's
 velocity based on a hand-tuned power/angle formula the instant a collision was detected - that
 approach doesn't exist in a real rigid-body simulation. Here, the flipper is a physical object
 with mass and angular momentum, driven by a motor, and it transfers force to the ball through
@@ -65,7 +65,7 @@ and the existing touch-zone controls (mobile, wiring happens in Stage 11).
   is activated - not just nudged.
 - A ball arriving on a flipper *while it's already held up* (not just at the exact instant of
   activation) still gets flipped - this was the core bug fixed in the 2D version
-  (`../release-prompts/01-*.md`) and the 3D rigid-body approach should get this right more
+  (`../archive/release-prompts/01-*.md`) and the 3D rigid-body approach should get this right more
   naturally (continuous contact dynamics rather than a one-shot velocity injection), but confirm
   it's actually true here rather than assuming the new engine automatically solves it.
 - No physics instability (flippers vibrating, snapping to extreme angles, or launching the ball

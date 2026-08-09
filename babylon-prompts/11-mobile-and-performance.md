@@ -2,7 +2,7 @@
 
 ## Context
 Two things converge here: reconnecting the DOM-overlay touch controls already built and tuned in
-`../release-prompts/14-arcade-mobile-fullscreen-controls.md` (full-screen arcade-style edge
+`../archive/release-prompts/14-arcade-mobile-fullscreen-controls.md` (full-screen arcade-style edge
 zones, launch button, fullscreen/orientation-lock request) to the new physics-driven flipper/
 plunger functions from `04-*.md`/`05-*.md`, and confronting the hard compatibility ceiling
 identified in `../BABYLON_3D_OVERHAUL.md`: **Havok requires WebAssembly SIMD, unsupported on iOS
@@ -17,7 +17,7 @@ the same device-tier concept already established (`PerformanceManager` in `../in
 
 ## What to do
 1. **Reconnect controls**: the DOM elements and touch/mouse event wiring from
-   `release-prompts/14-*.md` (`#flipper-zone-left`/`#flipper-zone-right`, `#launch-btn`,
+   `archive/release-prompts/14-*.md` (`#flipper-zone-left`/`#flipper-zone-right`, `#launch-btn`,
    `InputManager.setLaunchReady()`, `vibrate()`, the fullscreen/orientation-lock request flow)
    don't need to change - they're engine-agnostic DOM/JS. What changes is what they *call*: wire
    `flipper-zone-left`'s press/release to the new `activateLeftFlipper()`/`deactivateLeftFlipper()`
@@ -39,7 +39,7 @@ the same device-tier concept already established (`PerformanceManager` in `../in
    established for the 2D game's particle multiplier. Verify on a simulated low-tier profile
    (devtools CPU/GPU throttling, or an actual older device if available) that the game stays
    playable - responsive flippers and a stable-enough frame rate - even if visually reduced.
-4. Re-verify the mobile-specific UX work from `release-prompts/02-*.md` and `14-*.md` (landscape
+4. Re-verify the mobile-specific UX work from `archive/release-prompts/02-*.md` and `14-*.md` (landscape
    rotate-prompt, full-screen request, safe-area-aware control positioning) still applies
    correctly with the new full-bleed 3D canvas - the DOM overlay approach means most of this
    should carry over unchanged, but confirm rather than assume, especially the interaction between
@@ -50,7 +50,7 @@ the same device-tier concept already established (`PerformanceManager` in `../in
 ## Constraints
 - Don't silently degrade or crash on unsupported devices - the whole point of this stage is
   turning an unhandled failure into a deliberate, honest one.
-- Keep the DOM control markup/CSS from `release-prompts/14-*.md` as the source of truth for
+- Keep the DOM control markup/CSS from `archive/release-prompts/14-*.md` as the source of truth for
   control layout - this stage is about rewiring event handlers, not redesigning the controls.
 
 ## Acceptance criteria
@@ -74,7 +74,7 @@ touchscreen with zero flipper input, but explicitly documented as "not Stage 11'
 UI." That stopgap is now fully replaced (not left running alongside the real thing) with the
 actual `#flipper-zone-left`/`#flipper-zone-right`/`#launch-btn` markup, CSS, and
 touchstart/touchend/touchcancel + mousedown/mouseup/mouseleave event pattern ported directly from
-`InputManager` in `../index.js` (`release-prompts/14-*.md`) - copied inline into `index.html`'s
+`InputManager` in `../index.js` (`archive/release-prompts/14-*.md`) - copied inline into `index.html`'s
 own `<style>` block rather than linking `styles.css` wholesale, since that file also carries a lot
 of 2D-game-specific canvas/HUD/menu/pause-button CSS that doesn't apply here and risked selector
 collisions with this page's own `#status-panel`/`#error-panel`/`#flash-overlay`. Press/release now

@@ -17,26 +17,40 @@
 // Stage 10: camera shake/punch/flash juice + an idle attract-mode orbit camera
 //           (babylon-prompts/10-*.md - see that file's implementation note)
 // Stage 11: real mobile touch controls (arcade edge zones + launch button, ported from
-//           release-prompts/14-*.md), Havok/WASM-SIMD compatibility detection with an honest
+//           archive/release-prompts/14-*.md), Havok/WASM-SIMD compatibility detection with an honest
 //           fallback message, and performance-tier gating (babylon-prompts/11-*.md - see that
 //           file's implementation note)
-// See BABYLON_3D_OVERHAUL.md for the overall architecture.
+// Stage 12: Menu/Pause/Controls/Game-Over DOM-overlay screens, real pause (scene.physicsEnabled),
+//           and Game Over on 0 lives (babylon-prompts/12-*.md - see that file's implementation
+//           note, including why the full mission FSM still isn't built even now - no stage in
+//           this 13-stage plan actually assigns building it, only deferred to "whenever real UI
+//           exists," which this stage's screens now do)
+// Stage 13 (in progress): self-hosted Babylon/Havok under vendor/babylonjs/ (see VENDORING.md),
+//           replacing the CDN <script> tags per Babylon's own "not for production" guidance -
+//           this unlocked this project's first real interactive browser testing, which
+//           immediately found a severe flipper physics bug: createFlipper() is now a kinematic
+//           PhysicsMotionType.ANIMATED body driven by plain JS arithmetic, not a
+//           Physics6DoFConstraint hinge (see createFlipper()'s comment for the full debugging
+//           history). Phaser (phaser2d.html/index.js/styles.css and its image assets) has since
+//           been removed entirely, along with the now-superseded babylon-spike.*; see README.md
+//           for current status and improvement-prompts/ for what's next. babylon-prompts/13-*.md's
+//           full feature-parity checklist and PWA/manifest check are still not done.
+// See BABYLON_3D_OVERHAUL.md for the overall architecture and README.md for project status.
 //
 // Scope so far: the static table boundary (now with a real playfield floor), the fixed gameplay
 // camera (plus an idle attract-mode orbit camera active until the first launch), one physics-
 // driven ball, two motorized flippers, a plunger/launch lane, scored obstacles (bumpers, mission
-// targets, satellite, slingshots, re-entry lanes) with real collision/trigger detection and a
-// drain zone, SPIRITBALL's actual DMT/cosmic/chakra visual identity (PBR materials, glow layer,
-// bloom, procedural starfield skybox), particle VFX (ball trail, drain vortex, hit bursts, chakra
-// sparkle), a real 3D-mounted backglass panel showing score/high-score/lives/messages, camera
-// shake/punch/screen-flash impact juice on every event that has something to react to, real
-// ported mobile touch controls (arcade flipper zones + launch button, fullscreen/orientation-lock,
-// rotate-prompt), and a proactive+reactive Havok/WASM-SIMD compatibility check with a link to the
-// still-working 2D build for unsupported devices. The full mission FSM (select/start/complete/
-// rank-up) remains deferred to Stage 12, whose real UI it needs to be testable. This file
-// supersedes babylon-spike.js as the base for the real game; the
-// spike file stays around as a disposable physics-tuning sandbox (per its own stage doc), not
-// because this file depends on it.
+// targets, satellite, slingshots, re-entry lanes) with real collision/trigger detection and a real
+// Game Over flow, SPIRITBALL's actual DMT/cosmic/chakra visual identity (PBR materials, glow
+// layer, bloom, procedural starfield skybox), particle VFX (ball trail, drain vortex, hit bursts,
+// chakra sparkle), a real 3D-mounted backglass panel showing score/high-score/lives/messages,
+// camera shake/punch/screen-flash impact juice, real ported mobile touch controls (arcade flipper
+// zones + launch button, fullscreen/orientation-lock, rotate-prompt), a proactive+reactive Havok/
+// WASM-SIMD compatibility check with a link to the still-working 2D build, and DOM-overlay Menu/
+// Pause/Controls/Game-Over screens with a real physics-halting pause. The mission FSM (select/
+// complete/rank-up) itself remains unbuilt - this file supersedes babylon-spike.js as the base
+// for the real game; the spike file stays around as a disposable physics-tuning sandbox (per its
+// own stage doc), not because this file depends on it.
 // ===================================
 
 (function () {
@@ -51,7 +65,7 @@
 
     // ===================================
     // Mobile device detection, fullscreen/orientation-lock, vibration (Stage 11,
-    // babylon-prompts/11-*.md) - ported from InputManager in ../index.js (release-prompts/
+    // babylon-prompts/11-*.md) - ported from InputManager in ../index.js (archive/release-prompts/
     // 02-*.md, 14-*.md), same detection logic/thresholds, not redesigned. Plain browser APIs,
     // no BABYLON references, safe at top level/immediately. The actual DOM element wiring
     // (flipper zones, launch button) happens inside main(), since it needs the flipper/plunger
@@ -146,10 +160,9 @@
     // (before even attempting to load the CDN scripts) via UA version sniffing for the one
     // specific, known-deterministic case; main()'s outer catch handler also treats any
     // WASM/SIMD-flavored error message reactively the same way, covering other unknown
-    // SIMD-incompatible browsers this version check doesn't name. Decision, made explicitly per
-    // the doc's own prompt: yes, there is a fallback - phaser2d.html (the 2D build) already
-    // exists and works, so the message links to it rather than leaving an unsupported player
-    // with nothing playable at all.
+    // SIMD-incompatible browsers this version check doesn't name. No 2D fallback exists anymore
+    // (the Phaser build was removed once the 3D build became the only supported version) - an
+    // unsupported device gets an honest "not supported" message instead of a broken game.
     // ===================================
     function detectLikelyUnsupportedIOS() {
         const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -170,6 +183,17 @@
         const mobileControlsEl = document.getElementById('mobile-controls');
         if (mobileControlsEl) mobileControlsEl.style.display = 'none';
     }
+
+    // Dev/debug panel (#status-panel - score/lives/Havok status/CCD test/flipper-angle readouts
+    // and the manual test buttons) is hidden by default so a real player just sees the game and
+    // the small #player-hud. Append ?dev=1 to the URL to show it - runs immediately, outside
+    // main(), so it still works even if Havok/Babylon fail to load entirely. Not persisted
+    // (no localStorage) - deliberately explicit per-load, so it can't get silently left on.
+    function setDevPanelVisible(visible) {
+        const panel = document.getElementById('status-panel');
+        if (panel) panel.style.display = visible ? 'block' : 'none';
+    }
+    setDevPanelVisible(new URLSearchParams(window.location.search).has('dev'));
 
     // ===================================
     // Coordinate / scale conversion (the single source of truth every later stage must reuse)
@@ -196,6 +220,16 @@
     const TABLE_WIDTH_M = 540 * PX_TO_M; // 0.51
     const TABLE_LENGTH_M = 960 * PX_TO_M; // ~0.9067
     const WALL_HEIGHT_M = 0.04; // new 3D-only dimension - taller than the ball so it can't hop out
+
+    // Havok collision filtering category for the ball (see PhysicsShape.filterMembershipMask/
+    // filterCollideMask - confirmed real API against physicsShape.ts). Everything else keeps
+    // Havok's own default membership/collide masks (unrestricted - collides with everything), so
+    // this alone changes nothing about existing ball-vs-playfield/wall/bumper/etc. collision. It
+    // exists purely so the flipper (see createFlipper()) can restrict ITS collide mask to "ball
+    // only" - flippers were exploding on contact with the playfield/nearby scenery once their
+    // position became rigidly LOCKED (Stage 13's flipper-constraint fix), and a flipper has no
+    // gameplay reason to physically collide with anything but the ball anyway.
+    const COLLISION_CATEGORY_BALL = 2;
 
     // Converts a 2D CONFIG-space X (0..540) to 3D world X, centered on the table.
     function toWorldX(x2d) {
@@ -247,12 +281,12 @@
 
     // Converted from CONFIG.ballMaxVelocity: 1800 (px/s) in ../index.js, using the same PX_TO_M
     // scale as everything else - a second line of defense against tunneling/instability behind
-    // Havok's CCD, same spirit as the old Arcade Physics safety net. See release-prompts/13-*.md
+    // Havok's CCD, same spirit as the old Arcade Physics safety net. See archive/release-prompts/13-*.md
     // for the original 2D value's history.
     const MAX_BALL_SPEED_MS = 1800 * PX_TO_M; // ~1.7 m/s
 
     // Anti-stuck thresholds, converted from checkBallStuck() in ../index.js (revamped in
-    // release-prompts/13-*.md): speed threshold 40px/s -> m/s, kick components 400/380px/s ->
+    // archive/release-prompts/13-*.md): speed threshold 40px/s -> m/s, kick components 400/380px/s ->
     // m/s. Time values (ms) don't need conversion. "Downhill" in this stage's tilt convention is
     // -Z (see the GRAVITY_VECTOR_FN comment above), replacing the 2D version's "+Y" (toward the
     // bottom of the screen).
@@ -285,6 +319,7 @@
     const FLIPPER_MASS_KG = 0.03;
     const FLIPPER_GAP_HALF_M = 0.045; // each pivot sits this far from table center X=0
     const FLIPPER_Z_M = -0.36; // near the flipper/near-camera end of the table
+    const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s comment - avoids flipper/playfield contact fighting the LOCKED constraint
 
     // Sweep angle in radians, converted with plain math, not BABYLON.Tools.ToRadians() - this
     // file's constants are evaluated at script-parse time, before the CDN-load checks inside
@@ -293,7 +328,7 @@
     // listeners further down even get registered.
     //
     // The 70-degree sweep magnitude reuses the OLD 2D game's already-tuned value (20deg rest to
-    // -50deg active - see release-prompts/01-*.md) but the actual REST ANGLES below are NOT
+    // -50deg active - see archive/release-prompts/01-*.md) but the actual REST ANGLES below are NOT
     // reused from 2D - flippers are a brand-new 3D mechanism (motorized hinge constraint, not a
     // velocity-injection formula), and naively reusing the 2D angle numbers via this file's
     // toWorldRotationY() wall-conversion helper produced physically wrong geometry (paddle tips
@@ -309,11 +344,10 @@
     const FLIPPER_RIGHT_REST_RAD = (-80 * Math.PI) / 180;
 
     // Motor tuning - NOT ported from anything (flippers are an entirely new mechanism in this
-    // 3D rewrite; the 2D version's velocity-injection formula has no equivalent here). Starting
-    // points reasoned from the flipper's own mass/size, not verified by play - see this stage's
-    // implementation note for why, and expect to retune once this can actually be tested.
-    const FLIPPER_MOTOR_MAX_FORCE = 4; // N*m - generous relative to the flipper's small mass/inertia
-    const FLIPPER_ACTIVATE_SPEED_RAD_S = 26; // fast "punch" - the angle limit stops it, like a real solenoid slamming into a mechanical stop
+    // 3D rewrite; the 2D version's velocity-injection formula has no equivalent here). These are
+    // angle-per-second rates consumed directly by updateFlipperMotor()'s kinematic stepping (see
+    // createFlipper()'s comment for why this isn't a physics-constraint motor).
+    const FLIPPER_ACTIVATE_SPEED_RAD_S = 26; // fast "punch" - clamped exactly at the sweep limit, like a real solenoid slamming into a mechanical stop
     const FLIPPER_RETURN_SPEED_RAD_S = 9; // slower, controlled return (magnitude only - direction is per-flipper, see createFlipper())
 
     // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
@@ -353,7 +387,7 @@
     // is a kinematic-animated plunger mesh (no physics body of its own) plus a directly-set ball
     // velocity on release - not a simulated spring - for the same determinism reasons the 2D
     // version (CONFIG.plungerMinPower/plungerMaxPower, updatePlunger()/launchBall() in
-    // ../index.js, hardened in release-prompts/13-*.md) kept its launch mechanic simple.
+    // ../index.js, hardened in archive/release-prompts/13-*.md) kept its launch mechanic simple.
     // ===================================
 
     // Launch lane position/size, ported from setupPlunger()'s launchPort rectangle and
@@ -703,7 +737,7 @@
 
     function updatePlungerVisual(plunger) {
         // Pulls back along -Z (toward the near/camera end) as charge increases, matching the 2D
-        // plunger sprite's tween-back-then-snap-forward motion - see release-prompts/13-*.md.
+        // plunger sprite's tween-back-then-snap-forward motion - see archive/release-prompts/13-*.md.
         plunger.mesh.position.z = plunger.baseZ - plunger.chargePercent * PLUNGER_TRAVEL_M;
         // Simple color pulse at max charge in place of a particle effect (Stage 8's job) - the
         // stage doc explicitly allows this as the minimum viable max-charge feedback for now.
@@ -779,7 +813,7 @@
     // BootScene.preload() uses for the 2D eyeball sprite in ../index.js, just applied here to a
     // sphere instead of a flat sprite) rather than loading an external image. Deliberate: this
     // project already depends on one fragile CDN load (Babylon/Havok itself), and the existing
-    // background.webp asset (release-prompts/09-*.md) was authored as a flat 2D portrait-game
+    // background.webp asset (archive/release-prompts/09-*.md) was authored as a flat 2D portrait-game
     // backdrop, not a projection suited to wrapping around a 3D sphere - reusing it as-is would
     // look wrong, and re-authoring a proper equirectangular version wasn't worth doing sight-
     // unseen in a sandbox that can't render the result either way.
@@ -1098,6 +1132,7 @@
             { mass: BALL_MASS_KG, restitution: 0.65, friction: 0.35 },
             scene
         );
+        aggregate.shape.filterMembershipMask = COLLISION_CATEGORY_BALL;
 
         // Continuous collision detection - confirmed real Havok/Babylon method names (see
         // BABYLON_3D_OVERHAUL.md); defensively checked rather than assumed, same as Stage 1/2.
@@ -1140,47 +1175,54 @@
     }
 
     // ===================================
-    // Flippers: motorized, limited Physics6DoFConstraint hinges. Uses BABYLON.Physics6DoFConstraint
-    // rather than the simpler HingeConstraint, and setAxisMotorType/setAxisMotorTarget/
-    // setAxisMotorMaxForce for the motor - all confirmed real, current Babylon.js API (checked
-    // directly against Babylon's source/docs before writing this, not guessed - see
-    // BABYLON_3D_OVERHAUL.md and babylon-prompts/04-*.md's implementation note).
-    //
-    // BIGGEST UNVERIFIED ASSUMPTION IN THIS STAGE: that a Physics6DoFConstraint's angular limits
-    // (minLimit/maxLimit) are measured relative to the two bodies' RELATIVE orientation at the
-    // moment the constraint is created, not some absolute world reference. This code is built
-    // entirely around that assumption (each flipper is created already posed at its own rest
-    // angle, then limited to [0, FLIPPER_SWEEP_RAD] "from there"). If this sandbox's CDN weren't
-    // blocked this would have been confirmed empirically before writing the rest of this file;
-    // instead, the on-page flipper-angle readout (see main()) exists specifically so a human can
-    // immediately see whether this assumption held - if a flipper doesn't move, moves the wrong
-    // way, or both flippers move the same absolute direction instead of mirroring, this is where
-    // to look first. (First real playtest showed both flippers reading a static 0.0deg even at
-    // rest - that turned out to be a separate bug in the readout itself, not this assumption; see
-    // flipperAngleDegrees()'s comment. This assumption is still unconfirmed pending a retest with
-    // the fixed readout.)
+    // Flippers: KINEMATIC (PhysicsMotionType.ANIMATED) meshes, not a physics constraint. This is
+    // a deliberate rewrite, not the original design - every earlier version of this function used
+    // BABYLON.Physics6DoFConstraint (a motorized, limited hinge pinning a dynamic flipper body to
+    // a static anchor). That approach went through an extensive real Playwright/headless-Chromium
+    // debugging pass this stage (Stage 13) chasing a genuine, reproducible instability: even after
+    // fixing (a) missing axis locks (Havok's SIX_DOF requires every DOF listed explicitly or it
+    // defaults to FREE, not LOCKED - confirmed against havokPlugin.ts's
+    // initConstraint()/_nativeToLimitMode()), (b) a degenerate constraint frame (axisA/axisB
+    // defaulted to the same vector as perpAxisA/perpAxisB, an undefined cross-product axis, and
+    // neither was even the flipper's real pivot axis), and (c) a flipper/playfield collision
+    // fighting the LOCKED axes every step (fixed via COLLISION_CATEGORY_BALL, kept below since
+    // it's still useful) - the constraint remained unstable in a way that tracked disturbingly
+    // closely with which flipper's rest angle happened to be more extreme (-100 degrees vs -80
+    // degrees, straddling a suspected ~90-degree branch-cut in Havok's own relative-angle
+    // computation for LIMITED axes): real angular velocities up to Havok's own ~99 rad/s safety
+    // clamp with ZERO player input, and even once "stable" (motionless), the settled rest angle
+    // was tens of degrees off from where it was supposed to be (confirmed via direct quaternion
+    // comparison, not just the Euler-angle readout, ruling out a decomposition artifact - real
+    // physical deviation). Multiple targeted fixes (motor force retuning, axis reference-frame
+    // changes, hand-derived compensating vectors) each shifted the symptom without resolving it.
+    // Rather than continue chasing undocumented Havok solver internals, this is a standard game-
+    // physics technique: a kinematic body's transform is set directly by ordinary JS/game logic
+    // (fully deterministic, immune to constraint-solver instability) while Havok still uses it for
+    // collision response against DYNAMIC bodies - "they behave like dynamic bodies, but they won't
+    // be affected by other bodies, but still push other bodies out of the way" (Babylon's own
+    // PhysicsBody doc comment for PhysicsMotionType.ANIMATED). The ball still bounces off flippers
+    // correctly; the flipper itself just isn't simulated anymore, it's animated - exactly right
+    // for a player-controlled mechanism whose motion is fully specified by input state anyway.
     // ===================================
     function createFlipper(scene, name, pivotWorldPos, isLeft, mat) {
-        const anchor = BABYLON.MeshBuilder.CreateBox(name + 'Anchor', { size: 0.006 }, scene);
-        anchor.position.copyFrom(pivotWorldPos);
-        anchor.isVisible = false;
-        const anchorAggregate = new BABYLON.PhysicsAggregate(anchor, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
+        // Clearance above the playfield: the playfield's top face sits at exactly Y=0 (see its
+        // own comment), and pivotWorldPos.y (FLIPPER_HEIGHT_M / 2) would put the flipper box's
+        // bottom face flush against it. Kept from the constraint-based version even though a
+        // kinematic body can't "fight" a LOCK constraint anymore - real flippers don't drag
+        // directly on the playfield surface either, and it costs nothing.
+        const pivot = new BABYLON.Vector3(pivotWorldPos.x, pivotWorldPos.y + FLIPPER_PLAYFIELD_CLEARANCE_M, pivotWorldPos.z);
 
         // Rest angle and mirroring: see FLIPPER_LEFT_REST_RAD/FLIPPER_RIGHT_REST_RAD's comment -
         // these are NOT simple negations of each other, because mirroring a rotating object
         // requires flipping both the angle AND the direction it sweeps in, not just the angle.
         const restAngleRad = isLeft ? FLIPPER_LEFT_REST_RAD : FLIPPER_RIGHT_REST_RAD;
         const halfLength = FLIPPER_LENGTH_M / 2;
-        const offsetX = halfLength * Math.cos(restAngleRad);
-        const offsetZ = halfLength * Math.sin(restAngleRad);
 
         const mesh = BABYLON.MeshBuilder.CreateBox(name, {
             width: FLIPPER_LENGTH_M,
             height: FLIPPER_HEIGHT_M,
             depth: FLIPPER_THICKNESS_M
         }, scene);
-        mesh.position.set(pivotWorldPos.x + offsetX, pivotWorldPos.y, pivotWorldPos.z + offsetZ);
-        mesh.rotation.y = restAngleRad;
         mesh.material = mat;
         mesh.metadata = { kind: 'flipper' }; // Stage 10's flipper-contact camera shake
 
@@ -1190,75 +1232,82 @@
             { mass: FLIPPER_MASS_KG, restitution: 0.3, friction: 0.4 },
             scene
         );
+        // PhysicsAggregate only offers STATIC (mass 0) or DYNAMIC (mass > 0) directly - ANIMATED
+        // (kinematic) requires an explicit setMotionType() call after construction. Confirmed
+        // real API against physicsBody.ts/IPhysicsEnginePlugin.ts.
+        aggregate.body.setMotionType(BABYLON.PhysicsMotionType.ANIMATED);
+        // disablePreStep defaults to true (Havok's own default, for performance, since most
+        // bodies are STATIC or DYNAMIC and never need it) - an ANIMATED body needs it OFF so
+        // Havok reads this mesh's transform every step instead of ignoring it. Confirmed real
+        // property against physicsBody.ts.
+        aggregate.body.disablePreStep = false;
+        // Only the ball should ever physically collide with a flipper - see
+        // COLLISION_CATEGORY_BALL's comment. No longer needed for LOCK-vs-collision fighting
+        // (there's no LOCK constraint anymore), but still correct: flippers have no gameplay
+        // reason to push against the playfield, walls, or other scenery.
+        aggregate.shape.filterCollideMask = COLLISION_CATEGORY_BALL;
 
-        // Limit range: left sweeps from the creation pose (0) toward +SWEEP; right sweeps from
-        // the creation pose (0) toward -SWEEP - the mirrored motor direction that makes the
-        // right flipper a true mirror image of the left, not just a mirrored rest angle with the
-        // same rotation direction (verified numerically - see the constants' comment).
-        const minLimit = isLeft ? 0 : -FLIPPER_SWEEP_RAD;
-        const maxLimit = isLeft ? FLIPPER_SWEEP_RAD : 0;
-
-        const constraint = new BABYLON.Physics6DoFConstraint({
-            pivotA: BABYLON.Vector3.Zero(),
-            pivotB: new BABYLON.Vector3(-halfLength, 0, 0),
-            perpAxisA: new BABYLON.Vector3(1, 0, 0),
-            perpAxisB: new BABYLON.Vector3(1, 0, 0)
-        }, [
-            { axis: BABYLON.PhysicsConstraintAxis.ANGULAR_Y, minLimit: minLimit, maxLimit: maxLimit }
-        ], scene);
-
-        // Constraint must be attached to the bodies BEFORE any setAxisMotor*() call - Havok only
-        // allocates constraint._pluginData (an array the plugin iterates over internally) inside
-        // addConstraint()/initConstraint(). Calling a motor setter first hits an empty/undefined
-        // _pluginData and throws "not iterable". Confirmed against Babylon's actual source
-        // (havokPlugin.ts's own initConstraint comment even calls this ordering "real weird").
-        // This was caught via a real Android Chrome playtest, not caught in this sandbox, since
-        // this sandbox cannot load the Havok/Babylon CDN to exercise this code path at all.
-        anchorAggregate.body.addConstraint(aggregate.body, constraint);
-
-        constraint.setAxisMotorType(BABYLON.PhysicsConstraintAxis.ANGULAR_Y, BABYLON.PhysicsConstraintMotorType.VELOCITY);
-        constraint.setAxisMotorMaxForce(BABYLON.PhysicsConstraintAxis.ANGULAR_Y, FLIPPER_MOTOR_MAX_FORCE);
-        constraint.setAxisMotorTarget(BABYLON.PhysicsConstraintAxis.ANGULAR_Y, 0);
-
-        // motorSign: left activates toward +maxLimit (positive motor target), right activates
-        // toward -maxLimit/minLimit (negative motor target) - see the limit range above.
         const motorSign = isLeft ? 1 : -1;
+        const minAngleRad = isLeft ? restAngleRad : restAngleRad - FLIPPER_SWEEP_RAD;
+        const maxAngleRad = isLeft ? restAngleRad + FLIPPER_SWEEP_RAD : restAngleRad;
 
-        return { mesh, aggregate, constraint, active: false, motorSign };
+        const flipper = { mesh, aggregate, active: false, motorSign, pivot, halfLength, restAngleRad, minAngleRad, maxAngleRad, currentAngleRad: restAngleRad };
+        setFlipperAngle(flipper, restAngleRad);
+        return flipper;
+    }
+
+    // Positions and orients the flipper mesh for a given absolute angle, orbiting its center
+    // around the fixed pivot point exactly like the old constraint's pivotB offset did (a
+    // rotating box pinned at one end moves its center along an arc, not just spins in place).
+    // Havok picks this transform up next physics step via disablePreStep = false (see
+    // createFlipper()) and uses it for collision response against the ball.
+    function setFlipperAngle(flipper, angleRad) {
+        flipper.currentAngleRad = angleRad;
+        flipper.mesh.position.set(
+            flipper.pivot.x + flipper.halfLength * Math.cos(angleRad),
+            flipper.pivot.y,
+            flipper.pivot.z + flipper.halfLength * Math.sin(angleRad)
+        );
+        if (!flipper.mesh.rotationQuaternion) {
+            flipper.mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+        }
+        BABYLON.Quaternion.RotationAxisToRef(BABYLON.Axis.Y, angleRad, flipper.mesh.rotationQuaternion);
     }
 
     function activateFlipper(flipper) {
-        if (flipper.active) return;
         flipper.active = true;
-        flipper.constraint.setAxisMotorTarget(
-            BABYLON.PhysicsConstraintAxis.ANGULAR_Y,
-            flipper.motorSign * FLIPPER_ACTIVATE_SPEED_RAD_S
-        );
     }
 
     function deactivateFlipper(flipper) {
         flipper.active = false;
-        flipper.constraint.setAxisMotorTarget(
-            BABYLON.PhysicsConstraintAxis.ANGULAR_Y,
-            -flipper.motorSign * FLIPPER_RETURN_SPEED_RAD_S
-        );
     }
 
-    // A physics-driven mesh's `.rotation` Euler property is NOT reliable for reading its current
-    // orientation. Confirmed against Babylon's actual source (transformNode.pure.ts): the
-    // rotationQuaternion setter explicitly resets `.rotation` to (0,0,0) the moment
-    // rotationQuaternion takes over ("// reset the rotation vector" in Babylon's own code) -
-    // which happens automatically inside PhysicsAggregate's PhysicsBody constructor. Havok's
-    // per-frame sync then only ever writes rotationQuaternion, never touches `.rotation` again -
-    // so `.rotation.y` stays permanently frozen at 0 for the whole life of any physics body.
-    // (This is what made the flipper-angle readout below show a static 0.0deg for both flippers
-    // even once real playtesting on a physical device confirmed Havok, the table, and the ball
-    // were all otherwise working - a broken readout, not proof of a broken constraint.)
-    function flipperAngleDegrees(mesh) {
-        if (mesh.rotationQuaternion) {
-            return (mesh.rotationQuaternion.toEulerAngles().y * 180) / Math.PI;
+    // Advances each flipper's angle by simple, fully deterministic JS arithmetic (called once per
+    // frame for both flippers, from the render loop) - see createFlipper()'s comment for why this
+    // replaced a physics-constraint motor entirely. While active, sweeps toward the extended
+    // limit at FLIPPER_ACTIVATE_SPEED_RAD_S, clamped so it can't overshoot; once released, sweeps
+    // back toward restAngleRad at FLIPPER_RETURN_SPEED_RAD_S, also clamped so it settles exactly
+    // at rest instead of oscillating past it.
+    function updateFlipperMotor(flipper, deltaMs) {
+        const dt = deltaMs / 1000;
+        if (flipper.active) {
+            const target = flipper.motorSign > 0 ? flipper.maxAngleRad : flipper.minAngleRad;
+            const step = flipper.motorSign * FLIPPER_ACTIVATE_SPEED_RAD_S * dt;
+            const next = flipper.currentAngleRad + step;
+            setFlipperAngle(flipper, flipper.motorSign > 0 ? Math.min(next, target) : Math.max(next, target));
+        } else {
+            const diff = flipper.restAngleRad - flipper.currentAngleRad;
+            const maxStep = FLIPPER_RETURN_SPEED_RAD_S * dt;
+            if (Math.abs(diff) <= maxStep) {
+                setFlipperAngle(flipper, flipper.restAngleRad);
+            } else {
+                setFlipperAngle(flipper, flipper.currentAngleRad + Math.sign(diff) * maxStep);
+            }
         }
-        return (mesh.rotation.y * 180) / Math.PI;
+    }
+
+    function flipperAngleDegrees(flipper) {
+        return (flipper.currentAngleRad * 180) / Math.PI;
     }
 
     // ===================================
@@ -1473,7 +1522,12 @@
         buildLaunchLane(scene);
         buildDrainZone(scene);
         const backglass = buildBackglass(scene);
-        const highScoreKey = 'spiritball3d-highscore'; // separate from the 2D game's 'spiritball-highscore'
+        // Stage 9 originally used a separate 'spiritball3d-highscore' key to avoid cross-
+        // contaminating the 2D build's scores during parallel development. Stage 12's doc asked
+        // to reuse the 2D game's key instead so high scores carried over for returning players -
+        // kept even after the 2D build's own removal, since it's still just "the" high-score key
+        // now, and changing it again would silently reset everyone's saved score for no reason.
+        const highScoreKey = 'spiritball-highscore';
         backglass.state.highScore = parseInt(localStorage.getItem(highScoreKey), 10) || 0;
         backglass.redraw();
 
@@ -1620,9 +1674,8 @@
             new BABYLON.Vector3(FLIPPER_GAP_HALF_M, FLIPPER_HEIGHT_M / 2, FLIPPER_Z_M),
             false, flipperMat
         );
-
         // Desktop controls: LEFT/RIGHT arrows, matching the existing 2D game's control scheme
-        // (release-prompts/14-*.md documents the equivalent touch controls for mobile, which get
+        // (archive/release-prompts/14-*.md documents the equivalent touch controls for mobile, which get
         // reconnected to whatever the final flipper API looks like in Stage 11 - keyboard first
         // here since it's needed just to test flippers at all). window-level listeners, not
         // canvas-focused, so no click-to-focus step is needed first.
@@ -1667,7 +1720,6 @@
             new BABYLON.Vector3(plunger.baseX, 0.03, plunger.baseZ),
             ballMat
         );
-
         // --- Particle VFX (Stage 8, babylon-prompts/08-*.md) ---
         const particleTexture = createParticleTexture(scene);
         const ballTrail = buildBallTrail(scene, particleTexture, mainBall.mesh, highFidelity);
@@ -1786,7 +1838,7 @@
         // Mirrors handleLaunchPress()/handleLaunchRelease() in ../index.js: power is purely a
         // continuous function of hold duration (see the render loop below), and release always
         // tries to launch if the ball is ready - no separate "did we see a press" bookkeeping,
-        // which is what makes "release immediately after a reset" reliable (release-prompts/13-
+        // which is what makes "release immediately after a reset" reliable (archive/release-prompts/13-
         // *.md's desktop-launch-after-death fix, ported here since Stage 5's acceptance criteria
         // calls out the exact same scenario).
         function handleLaunchPress() {
@@ -1826,11 +1878,30 @@
             vibrateDevice(20 + Math.round(powerPercent * 40)); // matches launchBall()'s power-scaled vibrate() in ../index.js
         }
 
+        // SPACE has multiple jobs depending on screen state, matching the 2D game's single-
+        // persistent-listener approach (archive/release-prompts/07-*.md's lesson: check state each time,
+        // don't re-register a listener per screen-open) - dismiss the menu and start, resume from
+        // pause, restart from game over, or (the normal case) charge/launch the plunger. All of
+        // isPaused/gameOverActive/menuOverlay/resumeGame()/startNewGame() are declared later in
+        // this function (the screens module below) but safely readable here via closure, since
+        // this callback only ever fires after main()'s full synchronous setup has completed.
         window.addEventListener('keydown', (e) => {
-            if (e.code === 'Space') {
-                e.preventDefault(); // stop the page from scrolling on spacebar
-                handleLaunchPress();
+            if (e.code !== 'Space') return;
+            e.preventDefault(); // stop the page from scrolling on spacebar
+            if (menuOverlay.style.display === 'flex') {
+                hideMenuScreen();
+                handleLaunchPress(); // also ends attract mode internally
+                return;
             }
+            if (gameOverActive) {
+                startNewGame();
+                return;
+            }
+            if (isPaused) {
+                resumeGame();
+                return;
+            }
+            handleLaunchPress();
         });
         window.addEventListener('keyup', (e) => {
             if (e.code === 'Space') handleLaunchRelease();
@@ -1839,7 +1910,7 @@
         // --- Mobile controls (Stage 11, babylon-prompts/11-*.md) ---
         //
         // DOM elements/CSS and event pattern ported directly from InputManager.setupMobileControls()
-        // in ../index.js (release-prompts/14-*.md) - full-height arcade-style edge zones (tap
+        // in ../index.js (archive/release-prompts/14-*.md) - full-height arcade-style edge zones (tap
         // ANYWHERE along the side, not a small button) plus a discrete round launch button, both
         // wired with the same touchstart/touchend/touchcancel + mousedown/mouseup/mouseleave
         // pattern for touch AND desktop-mouse testing. What changed from the 2D version: press/
@@ -1928,14 +1999,33 @@
         // of changing independently, so comparing against them directly sidesteps that question.
         let score = 0;
         let lives = STARTING_LIVES;
+        // Simple hit counters, ported from gameState.statistics in ../index.js - just the ones
+        // that actually exist given Stage 6's scoped-down obstacle set (bumper/satellite/mission-
+        // target/re-entry-lane; the 2D statistics object also tracks obstacle/inlane/outlane hits
+        // that have no 3D equivalent yet). Feeds the Game Over screen's stat lines (Stage 12).
+        // Bookkeeping only, not the deferred mission FSM itself.
+        const stats = { bumperHits: 0, satelliteHits: 0, targetHits: 0, laneHits: 0 };
         const statusScore = document.getElementById('status-score');
         const statusLives = document.getElementById('status-lives');
-        statusScore.textContent = '0';
-        statusLives.textContent = String(lives);
+        const hudScore = document.getElementById('hud-score');
+        const hudLives = document.getElementById('hud-lives');
+        // Two displays share every score/lives update: #status-panel's dev readout (hidden by
+        // default, see setDevPanelVisible()) and #player-hud, the actual player-facing display -
+        // see index.html's #player-hud comment for why a second element was needed at all.
+        function setScore(value) {
+            statusScore.textContent = String(value);
+            hudScore.textContent = String(value);
+        }
+        function setLives(value) {
+            statusLives.textContent = String(value);
+            hudLives.textContent = String(value);
+        }
+        setScore(0);
+        setLives(lives);
 
         function addScore(points) {
             score += points;
-            statusScore.textContent = String(score);
+            setScore(score);
             backglass.state.score = score;
             if (score > backglass.state.highScore) {
                 backglass.state.highScore = score;
@@ -1990,6 +2080,7 @@
             if (meta.kind === 'bumper') {
                 setCooldown(mesh, COOLDOWN_BUMPER_MS);
                 addScore(SCORE_ATTACK_BUMPER);
+                stats.bumperHits++;
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + SCORE_ATTACK_BUMPER, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
@@ -1997,6 +2088,7 @@
             } else if (meta.kind === 'satellite') {
                 setCooldown(mesh, COOLDOWN_SATELLITE_MS);
                 addScore(SCORE_SATELLITE);
+                stats.satelliteHits++;
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('SATELLITE!', 900);
@@ -2035,6 +2127,7 @@
             if (meta.kind === 'missionTarget') {
                 setCooldown(mesh, COOLDOWN_MISSION_TARGET_MS);
                 addScore(SCORE_MISSION_TARGET);
+                stats.targetHits++;
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 // hitMissionTarget() in ../index.js shows "Selected: {missionName}" here - no
@@ -2045,6 +2138,7 @@
             } else if (meta.kind === 'reentryLane') {
                 setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
                 addScore(SCORE_REENTRY_LANE);
+                stats.laneHits++;
                 // Persistent recolor to "lit" green MUST happen before pulseMesh(), not after -
                 // pulseMesh() captures whatever emissiveColor is current when it's called and
                 // restores exactly that after its 100ms flash, so recoloring afterward would get
@@ -2071,7 +2165,7 @@
             // without this guard every frame it stays there would count as a separate drain.
             ballInPlay = false;
             lives--;
-            statusLives.textContent = String(lives);
+            setLives(lives);
             backglass.state.lives = lives;
             backglass.showMessage('DRAINED!', 1400); // no Grim Reaper visual yet (Stage 12) - this is the stand-in
             triggerCameraShake(400, 0.008); // matches checkDrain()'s cameraShake(400, 0.008)
@@ -2081,12 +2175,12 @@
             triggerCameraPunch(400, new BABYLON.Vector3(0, -0.03, 0));
             setTimeout(() => {
                 if (lives <= 0) {
-                    lives = STARTING_LIVES;
-                    score = 0;
-                    statusLives.textContent = String(lives);
-                    statusScore.textContent = '0';
-                    backglass.state.lives = lives;
-                    backglass.state.score = score;
+                    // Stage 12: was "reset lives/score in place" (Stage 6's documented
+                    // simplification, made before any Game Over screen existed to show final
+                    // results on). Now shows the real Game Over screen instead; NEW GAME/restart
+                    // input there is what actually resets state - see showGameOverScreen().
+                    showGameOverScreen();
+                    return;
                 }
                 backglass.redraw();
                 resetBallToPlunger();
@@ -2111,12 +2205,251 @@
             // scoring/drain only tracks the one canonical mainBall.
         });
 
+        // --- Menu, Pause, Controls, Game Over screens (Stage 12, babylon-prompts/12-*.md) ---
+        //
+        // Built as DOM/CSS overlays, not 3D meshes or Babylon GUI, per the doc's own explicit
+        // instruction (see index.html's <style> block comment for the full reasoning - HTML/CSS
+        // is easier to get font rendering/focus/screen-reader behavior right on for text-heavy,
+        // infrequently-changing screens than a 3D-scene text layout system would be; the 3D-
+        // mounted-panel treatment is reserved for the in-gameplay backglass, 09-*.md, which earns
+        // its 3D-ness by being part of the cabinet during play).
+        //
+        // Scope note: Final Rank and mission-progress stats from GameOverScene in ../index.js are
+        // deliberately NOT shown - this stage builds the screens, not the mission FSM itself
+        // (still deferred, per Stage 6's decision), and a "Final Rank" with no rank-progression
+        // system behind it would just be a permanently-fake "Rookie." Only the hit-count stats
+        // that genuinely exist (see the `stats` object above) are shown.
+        const menuOverlay = document.getElementById('menu-overlay');
+        const pauseOverlay = document.getElementById('pause-overlay');
+        const controlsOverlay = document.getElementById('controls-overlay');
+        const gameOverOverlay = document.getElementById('gameover-overlay');
+        const pauseBtn = document.getElementById('pause-btn');
+
+        let isPaused = false;
+        let gameOverActive = false;
+
+        // --- Menu/title screen: shown until the first launch input, translucent so the idle
+        // attract-mode camera (10-*.md) is visible behind it, matching the doc's explicit spec. ---
+        document.getElementById('menu-highscore').textContent = 'HIGH SCORE: ' + backglass.state.highScore;
+        document.getElementById('menu-start-instructions').textContent =
+            isMobileDevice ? 'TAP ⚡ TO START' : 'PRESS SPACE TO START';
+        menuOverlay.style.display = 'flex';
+
+        function hideMenuScreen() {
+            menuOverlay.style.display = 'none';
+        }
+
+        // Tap-anywhere-to-start, matching MenuScene's this.input.once('pointerdown', ...) in
+        // ../index.js - the overlay covers the full screen while visible, so this naturally
+        // takes priority over the flipper zones/launch button underneath without needing to
+        // modify their own handlers.
+        menuOverlay.addEventListener('click', () => {
+            hideMenuScreen();
+            handleLaunchPress(); // also ends attract mode internally
+        });
+
+        // --- Controls reference content, platform-aware (archive/release-prompts/04-*.md's content -
+        // this already-replaced the old non-functional sound/music toggle with a real controls
+        // reference; that decision carries over unchanged, just re-rendered as DOM). ---
+        function renderControlsRows() {
+            const rowsEl = document.getElementById('controls-rows');
+            rowsEl.innerHTML = '';
+            const rows = isMobileDevice ? [
+                ['◀ / ▶ ZONES', 'Left / Right Flippers'],
+                ['⚡ BUTTON', 'Hold to Charge, Release to Launch'],
+                ['⏸ BUTTON', 'Pause / Resume']
+            ] : [
+                ['LEFT / RIGHT ARROWS', 'Left / Right Flippers'],
+                ['SPACE', 'Hold to Charge, Release to Launch'],
+                ['ESC', 'Pause / Resume']
+            ];
+            rows.forEach(([key, action]) => {
+                const row = document.createElement('div');
+                row.className = 'control-row';
+                const keySpan = document.createElement('span');
+                keySpan.className = 'key';
+                keySpan.textContent = key;
+                const actionSpan = document.createElement('span');
+                actionSpan.className = 'action';
+                actionSpan.textContent = action;
+                row.appendChild(keySpan);
+                row.appendChild(actionSpan);
+                rowsEl.appendChild(row);
+            });
+        }
+        renderControlsRows();
+
+        // --- Pause / Controls flow, ported from pauseGame()/resumeGame()/showSettingsMenu() in
+        // ../index.js. scene.physicsEnabled toggling confirmed against Babylon's actual source
+        // (see the render loop's pause-gate comment below) - not guessed. ---
+        function openPauseMenu() {
+            if (isPaused || gameOverActive || menuOverlay.style.display === 'flex') return;
+            isPaused = true;
+            scene.physicsEnabled = false;
+            pauseOverlay.style.display = 'flex';
+        }
+
+        function resumeGame() {
+            if (!isPaused) return;
+            isPaused = false;
+            scene.physicsEnabled = true;
+            pauseOverlay.style.display = 'none';
+            controlsOverlay.style.display = 'none';
+        }
+
+        function openControlsScreen() {
+            pauseOverlay.style.display = 'none';
+            controlsOverlay.style.display = 'flex';
+        }
+
+        function backFromControlsScreen() {
+            controlsOverlay.style.display = 'none';
+            pauseOverlay.style.display = 'flex';
+        }
+
+        // Matches restartGame()'s scene.start('GameScene') in ../index.js - straight back into
+        // gameplay, no menu detour. Resets all run state, not just the ball's position.
+        function startNewGame() {
+            score = 0;
+            lives = STARTING_LIVES;
+            stats.bumperHits = 0;
+            stats.satelliteHits = 0;
+            stats.targetHits = 0;
+            stats.laneHits = 0;
+            setScore(0);
+            setLives(lives);
+            backglass.state.score = 0;
+            backglass.state.lives = lives;
+            backglass.redraw();
+            resetBallToPlunger();
+            isPaused = false;
+            scene.physicsEnabled = true;
+            pauseOverlay.style.display = 'none';
+            controlsOverlay.style.display = 'none';
+            gameOverOverlay.style.display = 'none';
+            gameOverActive = false;
+        }
+
+        document.getElementById('pause-resume-btn').addEventListener('click', resumeGame);
+        document.getElementById('pause-newgame-btn').addEventListener('click', startNewGame);
+        document.getElementById('pause-controls-btn').addEventListener('click', openControlsScreen);
+        document.getElementById('controls-back-btn').addEventListener('click', backFromControlsScreen);
+
+        function togglePauseFromButton(e) {
+            e.preventDefault();
+            if (isPaused) {
+                resumeGame();
+            } else {
+                openPauseMenu();
+            }
+        }
+        pauseBtn.addEventListener('click', togglePauseFromButton);
+        pauseBtn.addEventListener('touchstart', togglePauseFromButton, { passive: false });
+
+        // ESC: single persistent listener (archive/release-prompts/07-*.md's lesson - check state each
+        // time a key event fires, don't re-register a resume/back shortcut every time a screen
+        // opens, which is what caused the original listener-leak bug this ports the fix from).
+        // Backs out of the Controls submenu to the pause menu instead of resuming outright when
+        // that submenu is open, matching the 2D version's exact behavior.
+        window.addEventListener('keydown', (e) => {
+            if (e.code !== 'Escape') return;
+            if (controlsOverlay.style.display === 'flex') {
+                backFromControlsScreen();
+                return;
+            }
+            if (isPaused) {
+                resumeGame();
+            } else if (!gameOverActive && menuOverlay.style.display !== 'flex') {
+                openPauseMenu();
+            }
+        });
+
+        // --- Game Over screen, ported from GameOverScene in ../index.js. Triggered from
+        // handleDrain() above when lives reach 0 (previously that just reset score/lives in
+        // place - see this stage's implementation note). ---
+        function showGameOverScreen() {
+            gameOverActive = true;
+            document.getElementById('gameover-score').textContent = String(score);
+
+            const hsLine = document.getElementById('gameover-highscore-line');
+            if (score >= backglass.state.highScore) {
+                hsLine.textContent = 'NEW HIGH SCORE!';
+                hsLine.classList.add('pulse-text');
+            } else {
+                hsLine.textContent = 'HIGH SCORE: ' + backglass.state.highScore;
+                hsLine.classList.remove('pulse-text');
+            }
+
+            const statsEl = document.getElementById('gameover-stats');
+            statsEl.innerHTML = '';
+            const statLines = [
+                ['Bumper Hits', stats.bumperHits],
+                ['Satellite Hits', stats.satelliteHits],
+                ['Target Hits', stats.targetHits],
+                ['Lane Hits', stats.laneHits]
+            ];
+            statLines.forEach(([label, value]) => {
+                if (value > 0) {
+                    const p = document.createElement('p');
+                    p.textContent = label + ': ' + value;
+                    statsEl.appendChild(p);
+                }
+            });
+
+            document.getElementById('gameover-restart-instructions').textContent =
+                isMobileDevice ? 'TAP ⚡ TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
+            gameOverOverlay.style.display = 'flex';
+        }
+
+        // Tap-anywhere-to-restart, matching GameOverScene's this.input.once('pointerdown', ...).
+        gameOverOverlay.addEventListener('click', startNewGame);
+
         engine.runRenderLoop(() => {
             const deltaMs = engine.getDeltaTime();
 
-            updateBallPhysics(mainBall, deltaMs);
-            testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
-            updateBallTrail(ballTrail, mainBall, highFidelity);
+            // Pause gate (Stage 12, babylon-prompts/12-*.md): scene.physicsEnabled = false
+            // (toggled in openPauseMenu()/resumeGame() below) already stops Havok's own step -
+            // confirmed against Babylon's actual source (scene.pure.ts: `if (this.physicsEnabled)
+            // this._advancePhysicsEngineStep(...)`) - so the flippers/ball naturally freeze via
+            // real physics with no separate flag needed for them. What Havok's flag does NOT
+            // cover is this file's OWN per-frame JS logic (anti-stuck kicks, velocity clamping,
+            // trail emission, plunger charge accumulation) - those run every render-loop tick
+            // regardless of scene.physicsEnabled, so they need their own explicit guard here to
+            // satisfy the doc's "no charge-time or physics-state corruption from the pause
+            // duration" requirement. Camera effects and the dev-panel status readouts are left
+            // running during pause - harmless either way, and simpler than guarding everything.
+            if (!isPaused) {
+                updateFlipperMotor(leftFlipper, deltaMs);
+                updateFlipperMotor(rightFlipper, deltaMs);
+                updateBallPhysics(mainBall, deltaMs);
+                testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
+                updateBallTrail(ballTrail, mainBall, highFidelity);
+
+                if (ccdTestActive) {
+                    ccdTestElapsedMs += deltaMs;
+                    if (mainBall.mesh.position.z > topWallFarEdgeZ) {
+                        statusCcd.textContent = 'FAIL — tunneled through top wall';
+                        statusCcd.className = 'bad';
+                        ccdTestActive = false;
+                    } else if (ccdTestElapsedMs >= CCD_TEST_DURATION_MS) {
+                        statusCcd.textContent = 'PASS — never exceeded wall bound';
+                        statusCcd.className = 'ok';
+                        ccdTestActive = false;
+                    }
+                }
+
+                // Continuous charge-to-power curve, ported from updatePlunger() in ../index.js -
+                // no fixed tiers, power increases smoothly with hold duration up to
+                // PLUNGER_CHARGE_TIME_MS. Guarded by isPaused so charge time doesn't keep
+                // accumulating while the pause menu is open.
+                if (plungerCharging) {
+                    plungerChargeElapsedMs += deltaMs;
+                    const chargePercent = Math.min(plungerChargeElapsedMs / PLUNGER_CHARGE_TIME_MS, 1);
+                    plungerPower = PLUNGER_MIN_POWER_MS + (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS) * chargePercent;
+                    plunger.chargePercent = chargePercent;
+                }
+                updatePlungerVisual(plunger);
+            }
 
             if (attractModeActive) {
                 attractCamera.alpha += deltaMs * 0.00015; // slow continuous orbit
@@ -2124,38 +2457,14 @@
                 updateCameraEffects(deltaMs);
             }
 
-            if (ccdTestActive) {
-                ccdTestElapsedMs += deltaMs;
-                if (mainBall.mesh.position.z > topWallFarEdgeZ) {
-                    statusCcd.textContent = 'FAIL — tunneled through top wall';
-                    statusCcd.className = 'bad';
-                    ccdTestActive = false;
-                } else if (ccdTestElapsedMs >= CCD_TEST_DURATION_MS) {
-                    statusCcd.textContent = 'PASS — never exceeded wall bound';
-                    statusCcd.className = 'ok';
-                    ccdTestActive = false;
-                }
-            }
-
             statusStuckTimer.textContent = Math.round(mainBall.stuckTimeMs) + ' ms';
-
-            // Continuous charge-to-power curve, ported from updatePlunger() in ../index.js - no
-            // fixed tiers, power increases smoothly with hold duration up to PLUNGER_CHARGE_TIME_MS.
-            if (plungerCharging) {
-                plungerChargeElapsedMs += deltaMs;
-                const chargePercent = Math.min(plungerChargeElapsedMs / PLUNGER_CHARGE_TIME_MS, 1);
-                plungerPower = PLUNGER_MIN_POWER_MS + (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS) * chargePercent;
-                plunger.chargePercent = chargePercent;
-            }
-            updatePlungerVisual(plunger);
             statusPlungerCharge.textContent = Math.round(plunger.chargePercent * 100) + '%';
 
-            // Live flipper angle readout (degrees) - see createFlipper()'s comment on the
-            // biggest unverified assumption in this stage; this is how a human confirms whether
-            // it held. Uses flipperAngleDegrees(), not raw mesh.rotation.y - see that function's
-            // comment for why the raw Euler property can't be trusted on a physics-driven mesh.
-            statusLeftFlipper.textContent = flipperAngleDegrees(leftFlipper.mesh).toFixed(1) + '°';
-            statusRightFlipper.textContent = flipperAngleDegrees(rightFlipper.mesh).toFixed(1) + '°';
+            // Live flipper angle readout (degrees) - reads the flipper's own tracked state
+            // directly (see createFlipper()/updateFlipperMotor()), not a physics-engine
+            // transform, since flippers are now kinematic (see createFlipper()'s comment).
+            statusLeftFlipper.textContent = flipperAngleDegrees(leftFlipper).toFixed(1) + '°';
+            statusRightFlipper.textContent = flipperAngleDegrees(rightFlipper).toFixed(1) + '°';
 
             scene.render();
         });

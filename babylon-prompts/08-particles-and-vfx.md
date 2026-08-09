@@ -23,7 +23,7 @@ into the glow layer from Stage 7 for a cohesive, energetic look.
 4. **Chakra sparkle**: an ambient, low-intensity particle effect around each lit/active chakra
    target for extra visual interest beyond the static glow material from Stage 7.
 5. Respect the reduced-motion accessibility hook: port the intent of
-   `../release-prompts/12-accessibility-pass.md`'s `window.SPIRITBALL_reducedMotion` flag - skip
+   `../archive/release-prompts/12-accessibility-pass.md`'s `window.SPIRITBALL_reducedMotion` flag - skip
    or significantly reduce non-essential decorative particle effects (ambient sparkle, drain
    swirl intensity) when it's set, while keeping essential feedback (hit bursts that confirm a
    collision registered) intact, same principle as the original pass applied to camera
