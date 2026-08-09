@@ -94,6 +94,36 @@
             }
         }
 
+        /* Dedicated launch button, separate from the flipper touch zones (which claim the whole
+           left/right half of the canvas) and from the top-left debug panel (too fiddly to hold
+           during a charge gesture). Big, thumb-reachable, bottom-center - the standard mobile
+           pinball placement. */
+        #launch-btn {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            padding: 16px 32px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            font-size: 14px;
+            letter-spacing: 1px;
+            color: #00ffff;
+            background: linear-gradient(135deg, rgba(138, 43, 226, 0.7), rgba(75, 0, 130, 0.8));
+            border: 2px solid #00ffff;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+            touch-action: none;
+            user-select: none;
+            cursor: pointer;
+        }
+
+        #launch-btn.charging {
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.6), rgba(0, 150, 150, 0.7));
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.8);
+        }
+
         #error-panel {
             display: none;
             position: fixed;
@@ -130,16 +160,20 @@
         <div class="row"><span>CCD test: </span><span id="status-ccd">not run</span></div>
         <div class="row"><span>Left flipper angle: </span><span id="status-left-flipper">—</span></div>
         <div class="row"><span>Right flipper angle: </span><span id="status-right-flipper">—</span></div>
+        <div class="row"><span>Plunger charge: </span><span id="status-plunger-charge">0%</span></div>
         <div class="row" style="color:#888; font-size:11px; margin-top:4px;">
-            Controls: LEFT/RIGHT arrow keys (desktop) or tap the left/right half of the screen
-            (mobile) = flippers.
+            Controls: LEFT/RIGHT arrow keys or SPACE (desktop); tap left/right half of the screen
+            for flippers, hold the LAUNCH button below to charge/fire the plunger (mobile).
         </div>
         <button id="drop-btn">DROP TEST BALL (random pos)</button>
         <button id="clear-btn">CLEAR EXTRA TEST BALLS</button>
         <button id="ccd-test-btn">LAUNCH MAIN BALL AT WALL (CCD TEST)</button>
         <button id="stuck-test-btn">FREEZE MAIN BALL (STUCK TEST)</button>
         <button id="flipper-drop-btn">DROP BALL ON LEFT FLIPPER</button>
+        <button id="reset-plunger-btn">RESET BALL TO PLUNGER</button>
     </div>
+
+    <button id="launch-btn">HOLD TO LAUNCH</button>
 
     <div id="error-panel">
         <h1>Failed to start</h1>

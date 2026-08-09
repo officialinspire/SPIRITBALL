@@ -197,6 +197,48 @@
     ]; // 3 lanes near the top wall, matching CONFIG.reentryLaneCount
 
     // ===================================
+    // Plunger / launch lane (babylon-prompts/05-*.md). Per that stage's own recommendation, this
+    // is a kinematic-animated plunger mesh (no physics body of its own) plus a directly-set ball
+    // velocity on release - not a simulated spring - for the same determinism reasons the 2D
+    // version (CONFIG.plungerMinPower/plungerMaxPower, updatePlunger()/launchBall() in
+    // ../index.js, hardened in release-prompts/13-*.md) kept its launch mechanic simple.
+    // ===================================
+
+    // Launch lane position/size, ported from setupPlunger()'s launchPort rectangle and
+    // resetBall()'s ball-rest position in ../index.js (2D CONFIG-space pixels), not redesigned.
+    const BALL_REST_X_PX = 470; // matches resetBall()'s (CONFIG.width-70, CONFIG.height-220) exactly
+    const BALL_REST_Z_PX = 740;
+    // The lane's only wall that didn't already exist: rightWall (see buildTable()) already forms
+    // the lane's outer edge, but nothing separated it from the main playfield on the inner side.
+    // NOT derived from setupPlunger()'s launchPort rectangle (center 495, width 50, "inner edge"
+    // at 470, same as BALL_REST_X_PX) - confirmed that rectangle is purely decorative in the 2D
+    // game (setupPlunger() never calls physics.add.existing() on it, unlike every real wall in
+    // setupTable()), so reusing 470 for a genuine physics wall here would put the ball resting
+    // flush against it with zero clearance. Node-verified: needs >= ball radius (0.0135m) + this
+    // wall's own half-thickness (~0.0038m) =~0.017m of clearance from BALL_REST_X_PX; picked 30px
+    // (~0.028m) for a comfortable margin, which also reads as a believably real-width lane.
+    const LANE_INNER_WALL_X_PX = BALL_REST_X_PX - 30; // 440
+    const LANE_WALL_Z_TOP_PX = 500; // a bit past the old decorative port's own 535-785 span for margin
+    const LANE_WALL_Z_BOTTOM_PX = 830;
+
+    const PLUNGER_CHARGE_TIME_MS = 2000; // same charge window as CONFIG.plungerChargeTime
+    // Power range ported from CONFIG.plungerMinPower/plungerMaxPower (700/1600 px/s) via the same
+    // PX_TO_M scale used for MAX_BALL_SPEED_MS in 03-*.md - these become target ball speeds in
+    // m/s, directly set on release (not an impulse - see the block comment above), consistent
+    // with how updateBallPhysics()'s anti-stuck kick already sets velocity directly rather than
+    // applying a force/impulse.
+    const PLUNGER_MIN_POWER_MS = 700 * PX_TO_M; // ~0.66 m/s
+    const PLUNGER_MAX_POWER_MS = 1600 * PX_TO_M; // ~1.51 m/s - comfortably under MAX_BALL_SPEED_MS
+    // launchBall()'s horizontal kick (-(150 + power*0.08)) ported the same way: a fixed base plus
+    // a ratio of the power itself, so proportionally weaker/stronger launches still curve the same
+    // relative amount.
+    const PLUNGER_HORIZONTAL_BASE_MS = 150 * PX_TO_M;
+    const PLUNGER_HORIZONTAL_RATIO = 0.08;
+
+    const PLUNGER_REST_Z_M = -0.02; // new 3D-only visual detail: how far the plunger tip sits
+    const PLUNGER_TRAVEL_M = 0.045; // from the ball at rest, and how far it pulls back at full charge
+
+    // ===================================
     // Loading/error handling - same hardened pattern proven out in babylon-spike.js after real
     // playtesting found the original version could hang silently. See that file's Stage 1
     // implementation note for why each piece here exists.
@@ -308,6 +350,66 @@
         new BABYLON.PhysicsAggregate(floor, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.1, friction: 0.8 }, scene);
 
         return walls;
+    }
+
+    // The launch lane's one missing wall (see LANE_INNER_WALL_X_PX's comment) - separates the
+    // plunger channel from the main playfield. rightWall (above) already forms the lane's outer
+    // edge, so this is the only new physical geometry this stage needs beyond that.
+    function buildLaunchLane(scene) {
+        const laneMat = new BABYLON.StandardMaterial('laneWallMat', scene);
+        laneMat.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.55);
+
+        const wall = BABYLON.MeshBuilder.CreateBox('launchLaneWall', {
+            width: 8 * PX_TO_M,
+            height: WALL_HEIGHT_M,
+            depth: (LANE_WALL_Z_BOTTOM_PX - LANE_WALL_Z_TOP_PX) * PX_TO_M
+        }, scene);
+        wall.position.set(
+            toWorldX(LANE_INNER_WALL_X_PX),
+            WALL_HEIGHT_M / 2,
+            toWorldZ((LANE_WALL_Z_TOP_PX + LANE_WALL_Z_BOTTOM_PX) / 2)
+        );
+        wall.material = laneMat;
+        new BABYLON.PhysicsAggregate(wall, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.6 }, scene);
+
+        return wall;
+    }
+
+    // Kinematic-animated plunger mesh (no physics body - see the "Plunger / launch lane" block
+    // comment above). chargePercent (0-1) directly drives its Z position between rest and
+    // fully-pulled-back; main() reads/writes .chargePercent every frame, this function only
+    // builds the mesh and applies whatever chargePercent currently holds.
+    function createPlunger(scene, mat) {
+        const mesh = BABYLON.MeshBuilder.CreateCylinder('plunger', {
+            diameter: 8 * PX_TO_M,
+            height: 0.03,
+            tessellation: 12
+        }, scene);
+        mesh.rotation.x = Math.PI / 2; // lay the cylinder flat along Z, the lane's long axis
+        mesh.material = mat;
+
+        const plunger = {
+            mesh,
+            chargePercent: 0,
+            baseX: toWorldX(BALL_REST_X_PX),
+            baseY: 0.02,
+            baseZ: toWorldZ(BALL_REST_Z_PX) + PLUNGER_REST_Z_M
+        };
+        plunger.mesh.position.set(plunger.baseX, plunger.baseY, plunger.baseZ);
+        return plunger;
+    }
+
+    function updatePlungerVisual(plunger) {
+        // Pulls back along -Z (toward the near/camera end) as charge increases, matching the 2D
+        // plunger sprite's tween-back-then-snap-forward motion - see release-prompts/13-*.md.
+        plunger.mesh.position.z = plunger.baseZ - plunger.chargePercent * PLUNGER_TRAVEL_M;
+        // Simple color pulse at max charge in place of a particle effect (Stage 8's job) - the
+        // stage doc explicitly allows this as the minimum viable max-charge feedback for now.
+        if (plunger.chargePercent >= 1) {
+            plunger.mesh.material.emissiveColor = new BABYLON.Color3(0, 0.8, 0.8);
+        } else {
+            plunger.mesh.material.emissiveColor = new BABYLON.Color3(0, 0.2, 0.2);
+        }
     }
 
     // Fixed, non-orbitable pinball-cabinet camera: positioned near the flipper end (-Z, per the
@@ -608,6 +710,12 @@
         buildTable(scene);
         buildCamera(scene);
         buildObstacles(scene);
+        buildLaunchLane(scene);
+
+        const plungerMat = new BABYLON.StandardMaterial('plungerMat', scene);
+        plungerMat.diffuseColor = new BABYLON.Color3(0.7, 0.7, 0.7);
+        plungerMat.emissiveColor = new BABYLON.Color3(0, 0.2, 0.2);
+        const plunger = createPlunger(scene, plungerMat);
 
         const flipperMat = new BABYLON.StandardMaterial('flipperMat', scene);
         flipperMat.diffuseColor = new BABYLON.Color3(1, 0, 1);
@@ -679,13 +787,11 @@
         ballMat.emissiveColor = new BABYLON.Color3(0, 0.3, 0.3);
 
         // --- The main game ball (Stage 3): one canonical ball, physics-maintained every frame
-        // via updateBallPhysics(). Spawned near the flipper end, off to one side, roughly where
-        // a launch chute will sit in a later stage - not exact plunger placement yet (that's
-        // Stage 5's job), just a sensible starting point for observing table-tilt rolling
-        // behavior now. ---
+        // via updateBallPhysics(). Now spawned resting on the plunger (Stage 5), matching
+        // resetBall()'s ball-rest position in ../index.js, instead of Stage 3's placeholder spot. ---
         const mainBall = createBall(
             scene,
-            new BABYLON.Vector3(TABLE_WIDTH_M * 0.32, 0.05, -TABLE_LENGTH_M * 0.25),
+            new BABYLON.Vector3(plunger.baseX, 0.03, plunger.baseZ),
             ballMat
         );
 
@@ -762,6 +868,89 @@
             mainBall.stuckTimeMs = 0;
         });
 
+        // --- Plunger / launch (Stage 5, babylon-prompts/05-*.md) ---
+        //
+        // ballInPlay is a minimal stand-in for the 2D game's canLaunch/ballInPlay pair
+        // (../index.js) - there's no drain/ball-loss detection yet (that's Stage 6's job), so
+        // once launched there's currently no automatic way back to "ready to launch" other than
+        // the RESET BALL TO PLUNGER button below. That's an accepted, documented gap for this
+        // physics-testbed stage, not an oversight.
+        let ballInPlay = false;
+        let plungerCharging = false;
+        let plungerChargeElapsedMs = 0;
+        let plungerPower = PLUNGER_MIN_POWER_MS;
+        const statusPlungerCharge = document.getElementById('status-plunger-charge');
+
+        function resetBallToPlunger() {
+            mainBall.mesh.position.set(plunger.baseX, 0.03, plunger.baseZ);
+            mainBall.aggregate.body.setLinearVelocity(BABYLON.Vector3.Zero());
+            mainBall.aggregate.body.setAngularVelocity(BABYLON.Vector3.Zero());
+            mainBall.stuckTimeMs = 0;
+            ballInPlay = false;
+            plungerCharging = false;
+            plungerChargeElapsedMs = 0;
+            plungerPower = PLUNGER_MIN_POWER_MS;
+            plunger.chargePercent = 0;
+        }
+
+        // Mirrors handleLaunchPress()/handleLaunchRelease() in ../index.js: power is purely a
+        // continuous function of hold duration (see the render loop below), and release always
+        // tries to launch if the ball is ready - no separate "did we see a press" bookkeeping,
+        // which is what makes "release immediately after a reset" reliable (release-prompts/13-
+        // *.md's desktop-launch-after-death fix, ported here since Stage 5's acceptance criteria
+        // calls out the exact same scenario).
+        function handleLaunchPress() {
+            if (ballInPlay) return;
+            plungerCharging = true;
+            plungerChargeElapsedMs = 0;
+            plungerPower = PLUNGER_MIN_POWER_MS;
+        }
+
+        function handleLaunchRelease() {
+            if (ballInPlay) return;
+            if (!plungerCharging) {
+                plungerPower = PLUNGER_MIN_POWER_MS;
+            }
+            // +Z = up-table, matching launchBall()'s velocityY = -power under the toWorldZ()
+            // sign flip (02-*.md); velocityX keeps the same sign/scale relationship as the 2D
+            // version's -(150 + power*0.08) kick - see PLUNGER_HORIZONTAL_BASE_MS's comment.
+            const velocityZ = plungerPower;
+            const velocityX = -(PLUNGER_HORIZONTAL_BASE_MS + plungerPower * PLUNGER_HORIZONTAL_RATIO);
+            mainBall.aggregate.body.setLinearVelocity(new BABYLON.Vector3(velocityX, 0, velocityZ));
+            mainBall.stuckTimeMs = 0;
+            ballInPlay = true;
+            plungerCharging = false;
+            plunger.chargePercent = 0;
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault(); // stop the page from scrolling on spacebar
+                handleLaunchPress();
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') handleLaunchRelease();
+        });
+
+        const launchBtn = document.getElementById('launch-btn');
+        launchBtn.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            handleLaunchPress();
+            launchBtn.classList.add('charging');
+        });
+        launchBtn.addEventListener('pointerup', () => {
+            handleLaunchRelease();
+            launchBtn.classList.remove('charging');
+        });
+        launchBtn.addEventListener('pointercancel', () => {
+            handleLaunchRelease();
+            launchBtn.classList.remove('charging');
+        });
+
+        const resetPlungerBtn = document.getElementById('reset-plunger-btn');
+        resetPlungerBtn.addEventListener('click', resetBallToPlunger);
+
         engine.runRenderLoop(() => {
             const deltaMs = engine.getDeltaTime();
 
@@ -782,6 +971,17 @@
             }
 
             statusStuckTimer.textContent = Math.round(mainBall.stuckTimeMs) + ' ms';
+
+            // Continuous charge-to-power curve, ported from updatePlunger() in ../index.js - no
+            // fixed tiers, power increases smoothly with hold duration up to PLUNGER_CHARGE_TIME_MS.
+            if (plungerCharging) {
+                plungerChargeElapsedMs += deltaMs;
+                const chargePercent = Math.min(plungerChargeElapsedMs / PLUNGER_CHARGE_TIME_MS, 1);
+                plungerPower = PLUNGER_MIN_POWER_MS + (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS) * chargePercent;
+                plunger.chargePercent = chargePercent;
+            }
+            updatePlungerVisual(plunger);
+            statusPlungerCharge.textContent = Math.round(plunger.chargePercent * 100) + '%';
 
             // Live flipper angle readout (degrees) - see createFlipper()'s comment on the
             // biggest unverified assumption in this stage; this is how a human confirms whether

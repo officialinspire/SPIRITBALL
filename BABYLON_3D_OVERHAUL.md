@@ -1,8 +1,8 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stages 1–4 implemented (Stage 4 with an expanded scope — see below).
-Stage 1
+**Status (2026-08-09):** Stages 1–5 implemented (Stages 4-5 with expanded/adjusted scope — see
+below). Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
 (`babylon-game.html`/`babylon-game.js`) adds the real table boundary (7 walls, ported faithfully
@@ -25,7 +25,7 @@ obstacle-placement half of Stage 6 forward: a pop bumper cluster, mission target
 slingshots, and re-entry lanes now sit on the table in a fresh, Space-Cadet-inspired layout (not a
 raw port of the 2D game's coordinates) as real static colliders — physically present and
 bouncing correctly, but not yet wired to any scoring/mission logic, which stays Stage 6's job (see
-its forward-reference note). Stages 5, 7–13 are planned, not started.
+its forward-reference note).
 **Also on 2026-08-09, at the user's explicit request:** `babylon-game.html` was promoted to
 `index.html` so GitHub Pages serves the Babylon 3D build by default — the old Phaser game was
 renamed `phaser2d.html` (kept working, not deleted) rather than removed outright, since the 3D
@@ -36,6 +36,17 @@ flipper, multi-touch capable) were added at the same time, since none existed an
 can't be meaningfully played on a touchscreen without them — this is a stopgap, not Stage 11's
 real touch-zone UI. This pulls a piece of Stage 13 (file promotion) far ahead of schedule; see
 `babylon-prompts/13-*.md`'s forward-reference note for exactly what is and isn't done as a result.
+First real-device playtest (Android Chrome, on the now-live `index.html`) found two real bugs
+neither this sandbox nor a code-only review had caught: a `Physics6DoFConstraint` motor crash
+(motor setters were being called before `addConstraint()` bound the constraint to its bodies -
+fixed) and a misleading flipper-angle readout (Babylon resets a physics mesh's `.rotation` to zero
+the moment `rotationQuaternion` takes over, so the readout had to switch to decomposing
+`rotationQuaternion` instead - fixed; see `04-*.md`'s implementation note for both). Stage 5 adds
+the plunger/launch mechanic: a kinematic (non-physics) plunger mesh, the same charge-time/power
+curve as the 2D game re-derived into real-world units, and a dedicated mobile launch button
+(Pointer Events) since the flipper touch zones already claim the rest of the screen - see
+`05-*.md`'s implementation note, including a second real-wall-clearance bug caught via the same
+Node-verification habit before any testing. Stages 6-13 are planned, not started.
 
 ## The goal
 
