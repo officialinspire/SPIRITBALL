@@ -12,7 +12,10 @@ physics on Babylon.js/Havok as a true 3D pinball game. See `../BABYLON_3D_OVERHA
 record of the Phaser/2D-era bug fixes — the mission/scoring/rank *logic* they hardened carries
 forward into the 3D rewrite unchanged; the physics/rendering code they fixed is being replaced
 wholesale.
-**Scope:** `index.html`, `index.js`, `styles.css` (current XP-Pinball-mechanics build, v5.0)
+**Scope:** `phaser2d.html` (renamed from `index.html` on 2026-08-09 when the Babylon.js 3D build
+became the live GitHub Pages entry point — see `../BABYLON_3D_OVERHAUL.md`'s status line), plus
+`index.js`, `styles.css` (unchanged, current XP-Pinball-mechanics build, v5.0). Everything below
+still applies to that file, just at its new path.
 **Supersedes:** `CODE_REVIEW_REPORT.md` (Dec 5 2025), which reviewed an older chakra/combo-based
 build and concluded "no blocking bugs." That build no longer matches the code — the game has
 since been rewritten around a mission/rank/fuel system, and several real, verifiable bugs exist

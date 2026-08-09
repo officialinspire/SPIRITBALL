@@ -606,6 +606,37 @@
             if (e.code === 'ArrowRight') deactivateFlipper(rightFlipper);
         });
 
+        // Mobile touch controls: tap-and-hold the left/right half of the canvas to activate the
+        // matching flipper, release to let it fall. This is a minimal placeholder (no visible
+        // on-screen buttons/zones yet - that's Stage 11's job), but a real pinball table can't be
+        // playtested at all on a touchscreen without *some* way to fire the flippers, so this
+        // can't wait for Stage 11. Tracks touches by identifier (a Map) so both flippers can be
+        // held at once with two fingers, same as the old 2D game's arcade controls.
+        const activeFlipperTouches = new Map();
+
+        function flipperForTouchX(clientX) {
+            return clientX < window.innerWidth / 2 ? leftFlipper : rightFlipper;
+        }
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            for (const touch of e.changedTouches) {
+                const flipper = flipperForTouchX(touch.clientX);
+                activeFlipperTouches.set(touch.identifier, flipper);
+                activateFlipper(flipper);
+            }
+        }, { passive: false });
+
+        function releaseFlipperTouch(e) {
+            for (const touch of e.changedTouches) {
+                const flipper = activeFlipperTouches.get(touch.identifier);
+                if (flipper) deactivateFlipper(flipper);
+                activeFlipperTouches.delete(touch.identifier);
+            }
+        }
+        canvas.addEventListener('touchend', releaseFlipperTouch, { passive: true });
+        canvas.addEventListener('touchcancel', releaseFlipperTouch, { passive: true });
+
         const statusLeftFlipper = document.getElementById('status-left-flipper');
         const statusRightFlipper = document.getElementById('status-right-flipper');
 
@@ -730,8 +761,8 @@
         });
         window.addEventListener('resize', () => engine.resize());
 
-        console.log('[SPIRITBALL Stage 4] Flippers + obstacle layout initialized.');
+        console.log('[SPIRITBALL 3D] Flippers + obstacle layout initialized.');
     }
 
-    main().catch((err) => showFatalError('Failed to initialize Stage 4.', err));
+    main().catch((err) => showFatalError('Failed to initialize SPIRITBALL 3D.', err));
 })();
