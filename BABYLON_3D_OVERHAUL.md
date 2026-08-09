@@ -1,7 +1,7 @@
 # SPIRITBALL — Babylon.js 3D Overhaul: Vision & Architecture
 
 **Date:** 2026-08-08
-**Status (2026-08-09):** Stages 1–2 implemented. Stage 1
+**Status (2026-08-09):** Stages 1–3 implemented. Stage 1
 (`babylon-spike.html`/`babylon-spike.js`) proved the pipeline and was hardened after a real
 playtest found a silent-hang bug (fixed — see `babylon-prompts/01-*.md`). Stage 2
 (`babylon-game.html`/`babylon-game.js`) adds the real table boundary (7 walls, ported faithfully
@@ -10,10 +10,13 @@ and makes a deliberate architecture call not in the original master doc text: **
 with level geometry**, not tilted geometry — see the implementation note in `babylon-prompts/02-*.md`
 for why, since it affects every later stage. Also corrected the master doc's exact real-world
 table dimensions (0.51×1.07m) to a uniform-scale 0.51×0.907m to avoid distorting angled walls —
-same note. Geometry math was sanity-checked with a standalone Node script; actual rendering,
-physics behavior, and camera framing still need a real browser — this sandbox's Babylon/Havok CDN
-access is blocked, same limitation as Phaser's was in earlier sessions. Stages 3–13 are planned,
-not started.
+same note. Stage 3 adds the main physics-driven ball (velocity clamp + anti-stuck recovery,
+values converted from the already-tuned 2D constants) plus a self-verifying CCD/tunneling test
+button, since this sandbox can't be used to eyeball a single ~90ms fast-moving frame — see
+`babylon-prompts/03-*.md`. Geometry and physics-constant math was sanity-checked with standalone
+Node scripts throughout; actual rendering, physics feel, and camera framing still need a real
+browser — this sandbox's Babylon/Havok CDN access is blocked, same limitation as Phaser's was in
+earlier sessions. Stages 4–13 are planned, not started.
 
 ## The goal
 

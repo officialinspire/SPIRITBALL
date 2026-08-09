@@ -1,12 +1,15 @@
 // ===================================
-// SPIRITBALL — Babylon.js 3D overhaul, Stage 2: 3D table geometry + pinball-cabinet camera
-// See babylon-prompts/02-3d-table-and-camera.md and BABYLON_3D_OVERHAUL.md.
+// SPIRITBALL — Babylon.js 3D overhaul
+// Stage 2: 3D table geometry + pinball-cabinet camera (babylon-prompts/02-*.md)
+// Stage 3: ball physics + anti-stuck logic (babylon-prompts/03-*.md)
+// See BABYLON_3D_OVERHAUL.md for the overall architecture.
 //
-// Scope: the static table BOUNDARY only (top wall, left/right walls, corner slants, upper
-// guide rails) at real-world scale, plus the fixed gameplay camera. No flippers, plunger,
-// bumpers, or game logic yet - those are later stages. This file supersedes babylon-spike.js
-// as the base for the real game; the spike file stays around as a disposable physics-tuning
-// sandbox (per its own stage doc), not because this file depends on it.
+// Scope so far: the static table BOUNDARY (top wall, left/right walls, corner slants, upper
+// guide rails), the fixed gameplay camera, and one physics-driven ball with velocity clamping
+// and anti-stuck recovery. Still no flippers, plunger, bumpers, or game logic - those are later
+// stages. This file supersedes babylon-spike.js as the base for the real game; the spike file
+// stays around as a disposable physics-tuning sandbox (per its own stage doc), not because this
+// file depends on it.
 // ===================================
 
 (function () {
@@ -84,6 +87,26 @@
     );
 
     const BALL_DIAMETER_M = 0.027;
+    const BALL_MASS_KG = 0.08;
+
+    // Converted from CONFIG.ballMaxVelocity: 1800 (px/s) in ../index.js, using the same PX_TO_M
+    // scale as everything else - a second line of defense against tunneling/instability behind
+    // Havok's CCD, same spirit as the old Arcade Physics safety net. See release-prompts/13-*.md
+    // for the original 2D value's history.
+    const MAX_BALL_SPEED_MS = 1800 * PX_TO_M; // ~1.7 m/s
+
+    // Anti-stuck thresholds, converted from checkBallStuck() in ../index.js (revamped in
+    // release-prompts/13-*.md): speed threshold 40px/s -> m/s, kick components 400/380px/s ->
+    // m/s. Time values (ms) don't need conversion. "Downhill" in this stage's tilt convention is
+    // -Z (see the GRAVITY_VECTOR_FN comment above), replacing the 2D version's "+Y" (toward the
+    // bottom of the screen).
+    const STUCK_SPEED_THRESHOLD_MS = 40 * PX_TO_M; // ~0.038 m/s
+    const STUCK_TIME_THRESHOLD_MS = 450;
+    const STUCK_KICK_X_RANGE_MS = 400 * PX_TO_M; // ~0.378 m/s, randomized +/-
+    const STUCK_KICK_DOWNHILL_MS = 380 * PX_TO_M; // ~0.359 m/s toward -Z
+    const STUCK_KICK_UP_MS = 0.15; // small vertical hop to help clear resting contact - new in
+                                    // 3D, no 2D equivalent needed since 2D had no "resting on a
+                                    // surface via normal contact" concept the same way
 
     // ===================================
     // Loading/error handling - same hardened pattern proven out in babylon-spike.js after real
@@ -92,8 +115,12 @@
     // ===================================
     const statusHavok = document.getElementById('status-havok');
     const statusBalls = document.getElementById('status-balls');
+    const statusStuckTimer = document.getElementById('status-stuck-timer');
+    const statusCcd = document.getElementById('status-ccd');
     const dropBtn = document.getElementById('drop-btn');
     const clearBtn = document.getElementById('clear-btn');
+    const ccdTestBtn = document.getElementById('ccd-test-btn');
+    const stuckTestBtn = document.getElementById('stuck-test-btn');
     const errorPanel = document.getElementById('error-panel');
     const errorMessage = document.getElementById('error-message');
     const canvas = document.getElementById('renderCanvas');
@@ -206,6 +233,61 @@
         return camera;
     }
 
+    // Creates one physics-driven ball at the given position. Shared by the main game ball and
+    // the Stage 2 debug drop-tool below, so there's exactly one place that defines "what a
+    // SPIRITBALL ball is" physically.
+    function createBall(scene, position, ballMat) {
+        const mesh = BABYLON.MeshBuilder.CreateSphere('ball', { diameter: BALL_DIAMETER_M }, scene);
+        mesh.position.copyFrom(position);
+        mesh.material = ballMat;
+
+        const aggregate = new BABYLON.PhysicsAggregate(
+            mesh,
+            BABYLON.PhysicsShapeType.SPHERE,
+            { mass: BALL_MASS_KG, restitution: 0.65, friction: 0.35 },
+            scene
+        );
+
+        // Continuous collision detection - confirmed real Havok/Babylon method names (see
+        // BABYLON_3D_OVERHAUL.md); defensively checked rather than assumed, same as Stage 1/2.
+        if (aggregate.body && typeof aggregate.body.setCcdMotionThreshold === 'function') {
+            aggregate.body.setCcdMotionThreshold(BALL_DIAMETER_M * 0.5);
+            aggregate.body.setCcdSweptSphereRadius(BALL_DIAMETER_M * 0.5);
+        } else {
+            console.warn('CCD methods not found on this Havok PhysicsBody build - tunneling protection may be reduced to the manual max-speed clamp only.');
+        }
+
+        return { mesh, aggregate, stuckTimeMs: 0 };
+    }
+
+    // Per-frame ball physics maintenance: max-speed clamp (defense #2 behind Havok's CCD) and
+    // the anti-stuck recovery, ported from checkBallStuck() in ../index.js. Deliberately mirrors
+    // that function's "accumulate, then one decisive kick" design rather than the per-frame
+    // nudge it replaced - see the STUCK_* constants' comment for why that matters. `ball` is one
+    // of the {mesh, aggregate, stuckTimeMs} objects created by createBall().
+    function updateBallPhysics(ball, deltaMs) {
+        if (!ball.aggregate.body) return;
+
+        const v = ball.aggregate.body.getLinearVelocity();
+        const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+
+        if (speed > MAX_BALL_SPEED_MS) {
+            const scale = MAX_BALL_SPEED_MS / speed;
+            ball.aggregate.body.setLinearVelocity(new BABYLON.Vector3(v.x * scale, v.y * scale, v.z * scale));
+        }
+
+        if (speed < STUCK_SPEED_THRESHOLD_MS) {
+            ball.stuckTimeMs += deltaMs;
+            if (ball.stuckTimeMs >= STUCK_TIME_THRESHOLD_MS) {
+                const kickX = (Math.random() - 0.5) * STUCK_KICK_X_RANGE_MS;
+                ball.aggregate.body.setLinearVelocity(new BABYLON.Vector3(kickX, STUCK_KICK_UP_MS, -STUCK_KICK_DOWNHILL_MS));
+                ball.stuckTimeMs = 0;
+            }
+        } else {
+            ball.stuckTimeMs = 0;
+        }
+    }
+
     async function main() {
         setStatus('checking scripts…');
 
@@ -235,55 +317,111 @@
         buildTable(scene);
         buildCamera(scene);
 
-        // --- Drop-test-ball tool: the acceptance-criteria requirement to verify the boundary
-        // has no gaps, made repeatable without reloading the page. ---
-        const testBalls = [];
         const ballMat = new BABYLON.StandardMaterial('ballMat', scene);
         ballMat.diffuseColor = new BABYLON.Color3(0, 1, 1);
         ballMat.emissiveColor = new BABYLON.Color3(0, 0.3, 0.3);
 
+        // --- The main game ball (Stage 3): one canonical ball, physics-maintained every frame
+        // via updateBallPhysics(). Spawned near the flipper end, off to one side, roughly where
+        // a launch chute will sit in a later stage - not exact plunger placement yet (that's
+        // Stage 5's job), just a sensible starting point for observing table-tilt rolling
+        // behavior now. ---
+        const mainBall = createBall(
+            scene,
+            new BABYLON.Vector3(TABLE_WIDTH_M * 0.32, 0.05, -TABLE_LENGTH_M * 0.25),
+            ballMat
+        );
+
+        // --- Debug drop-tool balls (from Stage 2), kept for repeatable boundary-gap testing -
+        // now backed by the same createBall() factory as the main ball instead of duplicating
+        // its setup, and also maintained by updateBallPhysics() every frame. ---
+        const testBalls = [];
+
         function dropTestBall() {
             const x = (Math.random() - 0.5) * (TABLE_WIDTH_M - BALL_DIAMETER_M * 2);
             const z = (Math.random() - 0.5) * (TABLE_LENGTH_M - BALL_DIAMETER_M * 2);
-            const ball = BABYLON.MeshBuilder.CreateSphere('testBall', { diameter: BALL_DIAMETER_M }, scene);
-            ball.position.set(x, 0.15, z);
-            ball.material = ballMat;
-
-            const aggregate = new BABYLON.PhysicsAggregate(
-                ball,
-                BABYLON.PhysicsShapeType.SPHERE,
-                { mass: 0.08, restitution: 0.65, friction: 0.35 },
-                scene
-            );
-            if (aggregate.body && typeof aggregate.body.setCcdMotionThreshold === 'function') {
-                aggregate.body.setCcdMotionThreshold(BALL_DIAMETER_M * 0.5);
-                aggregate.body.setCcdSweptSphereRadius(BALL_DIAMETER_M * 0.5);
-            }
-
-            testBalls.push({ mesh: ball, aggregate });
-            statusBalls.textContent = String(testBalls.length);
+            testBalls.push(createBall(scene, new BABYLON.Vector3(x, 0.15, z), ballMat));
+            statusBalls.textContent = String(testBalls.length + 1); // +1 for the main ball
         }
 
         function clearTestBalls() {
-            testBalls.forEach(({ mesh, aggregate }) => {
-                aggregate.dispose();
-                mesh.dispose();
+            testBalls.forEach((ball) => {
+                ball.aggregate.dispose();
+                ball.mesh.dispose();
             });
             testBalls.length = 0;
-            statusBalls.textContent = '0';
+            statusBalls.textContent = '1'; // main ball still present
         }
 
         dropBtn.addEventListener('click', dropTestBall);
         clearBtn.addEventListener('click', clearTestBalls);
+        statusBalls.textContent = '1';
 
-        // Seed one ball immediately so there's something to look at on load.
-        dropTestBall();
+        // --- Stage 3 verification tools ---
+        //
+        // This sandbox cannot load the Babylon/Havok CDN (see BABYLON_3D_OVERHAUL.md's risk
+        // section), so the acceptance criteria that need visual judgment (does rolling/settling
+        // "look" physically plausible) can only be checked by a human. But the CCD/tunneling
+        // check is a factual pass/fail that doesn't require judgment - self-verifying rather
+        // than eyeballing a single fast frame.
 
-        engine.runRenderLoop(() => scene.render());
+        // CCD / anti-tunneling test: reposition the main ball near the flipper end and fire it
+        // at extreme velocity (well beyond MAX_BALL_SPEED_MS, deliberately - this tests whether
+        // a single physics step can outrun collision detection, which is exactly the scenario
+        // CCD exists for) straight at the thin top wall, then watch for a couple of seconds
+        // whether it ever ends up beyond that wall's far edge.
+        let ccdTestActive = false;
+        let ccdTestElapsedMs = 0;
+        const CCD_TEST_DURATION_MS = 2500;
+        const CCD_TEST_SPEED_MS = 8; // ~4.7x MAX_BALL_SPEED_MS - see comment above
+        const topWallFarEdgeZ = toWorldZ(15) + (30 * PX_TO_M) / 2;
+
+        ccdTestBtn.addEventListener('click', () => {
+            mainBall.mesh.position.set(0, 0.05, -TABLE_LENGTH_M * 0.3);
+            mainBall.aggregate.body.setLinearVelocity(new BABYLON.Vector3(0, 0, CCD_TEST_SPEED_MS));
+            mainBall.stuckTimeMs = 0;
+            ccdTestActive = true;
+            ccdTestElapsedMs = 0;
+            statusCcd.textContent = 'running…';
+            statusCcd.className = '';
+        });
+
+        // Force-stuck test: zero the main ball's velocity in place so the anti-stuck timer can
+        // be watched counting up to its kick (status-stuck-timer below), without needing to find
+        // or wait for a naturally-occurring stuck spot on the table.
+        stuckTestBtn.addEventListener('click', () => {
+            mainBall.aggregate.body.setLinearVelocity(BABYLON.Vector3.Zero());
+            mainBall.aggregate.body.setAngularVelocity(BABYLON.Vector3.Zero());
+            mainBall.stuckTimeMs = 0;
+        });
+
+        engine.runRenderLoop(() => {
+            const deltaMs = engine.getDeltaTime();
+
+            updateBallPhysics(mainBall, deltaMs);
+            testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
+
+            if (ccdTestActive) {
+                ccdTestElapsedMs += deltaMs;
+                if (mainBall.mesh.position.z > topWallFarEdgeZ) {
+                    statusCcd.textContent = 'FAIL — tunneled through top wall';
+                    statusCcd.className = 'bad';
+                    ccdTestActive = false;
+                } else if (ccdTestElapsedMs >= CCD_TEST_DURATION_MS) {
+                    statusCcd.textContent = 'PASS — never exceeded wall bound';
+                    statusCcd.className = 'ok';
+                    ccdTestActive = false;
+                }
+            }
+
+            statusStuckTimer.textContent = Math.round(mainBall.stuckTimeMs) + ' ms';
+
+            scene.render();
+        });
         window.addEventListener('resize', () => engine.resize());
 
-        console.log('[SPIRITBALL Stage 2] Table + camera initialized. Gravity vector:', GRAVITY_VECTOR_FN());
+        console.log('[SPIRITBALL Stage 3] Ball physics initialized. Max speed:', MAX_BALL_SPEED_MS.toFixed(3), 'm/s');
     }
 
-    main().catch((err) => showFatalError('Failed to initialize Stage 2.', err));
+    main().catch((err) => showFatalError('Failed to initialize Stage 3.', err));
 })();
