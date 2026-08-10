@@ -62,7 +62,7 @@ each of these:
   the Web Audio API, with a mute control on the Controls screen (`improvement-prompts/04-*.md`).
   There's still no background music.
 - Mission/rank progression exists: hitting a mission target selects and starts one of 3 missions
-  (bumper/satellite/re-entry-lane focused), completing it awards a score bonus and advances a
+  (bumper/comet/re-entry-lane focused), completing it awards a score bonus and advances a
   Space-Cadet-style rank (Cadet through Fleet Admiral), shown on the backglass and as "Final Rank"
   on the Game Over screen (`improvement-prompts/05-*.md`).
 - Materials/lighting/glow, particles, the backglass, camera juice, scoring, drain/lives/Game-Over,
@@ -70,10 +70,17 @@ each of these:
   running game (not just assumed from source) — see `improvement-prompts/03-*.md`. Mobile
   multi-touch interaction specifically still hasn't been verified on a real device (no touch
   hardware in this sandbox) — everything else in that checklist has.
-- Obstacle geometry (bumpers, targets, satellite, slingshots, lanes) now reads as real pinball
-  elements — pop bumpers, mounted drop targets, a ringed satellite, wedge-housed slingshot
+- Obstacle geometry (bumpers, targets, comet, slingshots, lanes) now reads as real pinball
+  elements — pop bumpers, mounted drop targets, a ringed comet, wedge-housed slingshot
   kickers, and railed lane guides — via decorative companion meshes with no physics changes
   (`improvement-prompts/06-*.md`).
+- The board centerpiece is a giant spinning, collidable Saturn (visible top-center, with two
+  counter-rotating rings) worth a large score bonus on hit; the old small satellite obstacle was
+  re-themed into a comet (its own cyan color identity, distinct from Saturn's gold) rather than
+  removed. The bumper cluster now has one larger "boss" bumper worth notably more than its three
+  regular siblings, and a periodically-spawning score-multiplier power-up orb grants a temporary
+  2x score bonus when collected — all built to make the board read as more thematic and give
+  gameplay more variety than a set of interchangeable obstacles.
 - The player HUD and the 3D backglass no longer both show score: the HUD is the sole score/lives
   readout (guaranteed legible on any device), and the backglass shows high score, rank, mission
   progress, and hit messages instead (`improvement-prompts/07-*.md`).
