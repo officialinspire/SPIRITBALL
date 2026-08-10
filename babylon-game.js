@@ -281,6 +281,22 @@
         setTimeout(() => playTone(700, 0.18, { type: 'sine', freqEnd: 1200, volume: 0.16 }), 90);
     }
 
+    // Orbit entrance - a short, quiet rising sweep, just enough to confirm "the shot registered"
+    // without competing with the bigger completion sting that follows if the shot lands.
+    function playOrbitEnterSound() {
+        playTone(320, 0.09, { type: 'sine', freqEnd: 480, volume: 0.1 });
+    }
+
+    // Orbit completed - a two-note ascending sweep-then-chime, distinct in shape from both
+    // playPowerUpSound() (two short upward chimes, no sweep) and playRankUpSound() (a longer
+    // four-note fanfare) - reads as "you finished a loop," not "you collected something" or
+    // "you ranked up." `pitchBase` differs between the two orbits (see the call sites) purely so
+    // the ear can tell them apart, matching this file's existing per-obstacle pitch convention.
+    function playOrbitCompleteSound(pitchBase) {
+        playTone(pitchBase, 0.16, { type: 'sine', freqEnd: pitchBase * 1.8, volume: 0.17 });
+        setTimeout(() => playTone(pitchBase * 1.5, 0.14, { type: 'triangle', volume: 0.15 }), 100);
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -670,6 +686,43 @@
     ];
 
     // ===================================
+    // Upper-table LEFT ORBIT / RIGHT ORBIT skill shots - guided routes carrying the ball from
+    // mid-table up into the upper board and back, scored only on a genuine entrance->completion
+    // traversal (see orbitState in main() and its handleTriggerHit() branch).
+    //
+    // Layout constraint, checked against the real geometry before picking any numbers: a true
+    // wall-hugging orbit (running right along leftWall/rightWall) does NOT fit on either side of
+    // this board. leftWall's inner face sits at x~-0.2267, and the mission target bank's own
+    // outermost target (x=-0.20, TARGET_RADIUS_M=0.014) already reaches to x~-0.214 - only 0.0127m
+    // of gap, well under the ball's own diameter (BALL_DIAMETER_M=0.027). The mirrored right-side
+    // gap (rightWall's inner face to the comet's outer edge) is 0.0347m - technically wider than
+    // the ball but with essentially zero margin, not a reliable guided channel. Both sides were
+    // measured this way (target/comet radius + position, wall inner face) rather than assumed.
+    //
+    // The corridor that DOES have real room on both sides is the inboard one, between Saturn's
+    // collider and the mission-target-bank/comet: ~0.051m clear on the left (target bank's own
+    // inner edge to Saturn's edge) and ~0.103m clear on the right (Saturn's edge to the comet's
+    // inner edge) - both comfortably wider than the ball. Each orbit runs through its side's
+    // corridor, alongside (not through) the existing target bank/comet/Saturn/bumper cluster -
+    // nothing about this feature moves or removes any of that existing geometry.
+    const ORBIT_RAIL_BOTTOM_Z_M = 0.12; // just above the boss bumper's own footprint (z~0.16-0.03 clearance-wise, see BUMPER_CLUSTER)
+    const ORBIT_RAIL_TOP_Z_M = 0.37; // just below the reentry lanes (z=0.40), inside the upper table
+    const ORBIT_ENTRANCE_Z_M = 0.15; // inside the rail's guided span, not at its unguided tip
+    const ORBIT_COMPLETION_Z_M = 0.35; // ditto, near the rail's top end
+    const ORBIT_TRIGGER_WIDTH_M = 0.03;
+    const ORBIT_TRIGGER_DEPTH_M = 0.025;
+    // How long a completion trigger has to fire after its matching entrance before the shot is
+    // considered stale (a ball that entered, stalled, and rolled back down shouldn't silently
+    // score if it happens to clip the completion trigger much later on some unrelated pass).
+    const ORBIT_COMPLETION_WINDOW_MS = 4000;
+    const ORBITS = [
+        // Left: rail runs alongside the mission target bank's inner (Saturn-facing) edge.
+        { side: 'left', railBottomX: -0.075, railTopX: -0.08, entranceX: -0.078, completionX: -0.08 },
+        // Right: rail runs alongside the comet's inner (Saturn-facing) edge, through the wider gap.
+        { side: 'right', railBottomX: 0.09, railTopX: 0.1, entranceX: 0.095, completionX: 0.1 }
+    ];
+
+    // ===================================
     // Plunger / launch lane (babylon-prompts/05-*.md). Per that stage's own recommendation, this
     // is a kinematic-animated plunger mesh (no physics body of its own) plus a directly-set ball
     // velocity on release - not a simulated spring - for the same determinism reasons the 2D
@@ -782,6 +835,11 @@
     // choice (the ball is very likely about to drain down that path with no ball-save/kickback
     // implemented yet to rescue it), so the outlane isn't purely a punishment with zero upside.
     const SCORE_OUTLANE = 500;
+    // Awarded only on a completed entrance->completion traversal (see orbitState in main()) - a
+    // genuine skill shot, worth notably more than any single obstacle hit but less than Saturn or
+    // a mission completion. Shared by both sides - leftOrbitShots/rightOrbitShots track which side
+    // separately, the point value itself doesn't need to differ between them.
+    const SCORE_ORBIT = 1500;
 
     // Rank names ported from the classic "3D Pinball for Windows - Space Cadet" progression this
     // table's own layout is explicitly modeled on (see buildObstacles()'s "authentic
@@ -816,6 +874,7 @@
     const COOLDOWN_REENTRY_LANE_MS = 1000;
     const COOLDOWN_SATURN_MS = 500; // new giant Saturn - a bit longer than the regular bumpers, matching its "big, deliberate hit" feel rather than rapid-fire pinging
     const COOLDOWN_SIDE_LANE_MS = 600; // shared by all 4 new inlane/outlane rollovers, same one-constant-per-mechanic pattern as COOLDOWN_REENTRY_LANE_MS
+    const COOLDOWN_ORBIT_MS = 600; // shared by all 4 orbit entrance/completion triggers
     // Not present in the 2D cooldown map (walls/flippers there fire shake unconditionally, every
     // physics-substep-worth of contact) - added here (Stage 10) specifically to keep grinding
     // contact from shaking the camera every single frame, matching the doc's own "don't add
@@ -930,10 +989,14 @@
     // reentry lanes' mission-tied "lit" state (a genuinely different mechanic, see SIDE_LANES'
     // block comment).
     const HEX_LANE_LAMP = 0xffaa00;
+    // Electric cyan-white - the orbit lamps' own identity, distinct from HEX_LANE_LAMP's amber
+    // (inlane/outlane) and HEX_MISSION_ACTIVE's green (reentry lanes), so the board's three
+    // "lit insert" mechanics each read as visually distinct at a glance.
+    const HEX_ORBIT_LAMP = 0x33ccff;
     const HEX_BACKGROUND = 0x1a0033;
 
     let COLOR_BALL, COLOR_EYEBALL, COLOR_FLIPPER, COLOR_WALL, COLOR_BUMPERS, COLOR_CHAKRA,
-        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_BACKGROUND;
+        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_ORBIT_LAMP, COLOR_BACKGROUND;
 
     // Device-tier gate, ported from PerformanceManager.detectPerformance() in ../index.js -
     // simplified to the single boolean the doc asks for ("structured so they *can* be gated...
@@ -2207,6 +2270,90 @@
             });
         });
 
+        // Upper-table LEFT ORBIT / RIGHT ORBIT skill shots - see ORBITS' block comment (near its
+        // declaration) for the full layout reasoning. Each side gets one visible guide rail
+        // (capped by end posts, same visual language as the inlane/outlane divider above) running
+        // alongside the existing mission-target-bank/comet, plus an entrance and a completion
+        // rollover trigger with their own lamp inserts.
+        ORBITS.forEach((orbitDef) => {
+            // Same empirically-derived rotation formula as the inlane guide above (see its own
+            // comment for how rotationY = atan2(-dz, dx) was verified against this exact Babylon
+            // build via mesh.getDirection(Axis.X), not assumed from documented convention).
+            const dx = orbitDef.railTopX - orbitDef.railBottomX;
+            const dz = ORBIT_RAIL_TOP_Z_M - ORBIT_RAIL_BOTTOM_Z_M;
+            const railLength = Math.sqrt(dx * dx + dz * dz);
+            const railRotationY = Math.atan2(-dz, dx);
+            const railCenterX = (orbitDef.railBottomX + orbitDef.railTopX) / 2;
+            const railCenterZ = (ORBIT_RAIL_BOTTOM_Z_M + ORBIT_RAIL_TOP_Z_M) / 2;
+
+            const rail = BABYLON.MeshBuilder.CreateBox('orbitRail' + orbitDef.side, {
+                width: railLength,
+                height: 0.022,
+                depth: 0.015
+            }, scene);
+            rail.position.set(railCenterX, 0.011, railCenterZ);
+            rail.rotation.y = railRotationY;
+            rail.material = housingMat;
+            rail.metadata = { kind: 'wall' }; // reuses the existing generic wall camera-shake/sound feedback, same as the inlane/outlane rails
+            new BABYLON.PhysicsAggregate(rail, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+
+            // Only the TOP end gets a capping post, not the bottom - verified via Playwright that
+            // a post at the rail's bottom tip sits close enough to a realistic entry trajectory to
+            // actually block shots into the lane rather than just marking it (an early build had
+            // one there; a ball aimed at the entrance clipped it and got knocked back inboard
+            // before ever reaching the entrance trigger). The rail's own open bottom tip is the
+            // entrance's real visual cue, alongside the entrance trigger's lamp insert below.
+            [
+                { x: orbitDef.railTopX, z: ORBIT_RAIL_TOP_Z_M }
+            ].forEach((endPos, i) => {
+                const post = BABYLON.MeshBuilder.CreateCylinder('orbitRail' + orbitDef.side + 'Post' + i, {
+                    diameter: 0.016,
+                    height: 0.03
+                }, scene);
+                post.position.set(endPos.x, 0.015, endPos.z);
+                post.material = housingMat;
+                post.metadata = { kind: 'wall' };
+                new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            });
+
+            // Entrance/completion rollover triggers, each with its own indicator lamp insert -
+            // same invisible-trigger/always-visible-lamp split as the inlane/outlane rollovers,
+            // colored with the orbits' own distinct HEX_ORBIT_LAMP identity (see its comment).
+            [
+                { kind: 'orbitEntrance', x: orbitDef.entranceX, z: ORBIT_ENTRANCE_Z_M, debugColor: new BABYLON.Color3(0.3, 0.8, 1) },
+                { kind: 'orbitCompletion', x: orbitDef.completionX, z: ORBIT_COMPLETION_Z_M, debugColor: new BABYLON.Color3(1, 0.9, 0.2) }
+            ].forEach((triggerDef) => {
+                const lampMat = new BABYLON.PBRMaterial(triggerDef.kind + 'LampMat' + orbitDef.side, scene);
+                lampMat.albedoColor = COLOR_ORBIT_LAMP.scale(0.3);
+                lampMat.metallic = 0.2;
+                lampMat.roughness = 0.4;
+                lampMat.emissiveColor = COLOR_ORBIT_LAMP.scale(0.12);
+                const lamp = BABYLON.MeshBuilder.CreateCylinder(triggerDef.kind + 'Lamp' + orbitDef.side, {
+                    diameterTop: ORBIT_TRIGGER_WIDTH_M * 0.6,
+                    diameterBottom: ORBIT_TRIGGER_WIDTH_M * 0.6,
+                    height: 0.003
+                }, scene);
+                lamp.position.set(triggerDef.x, 0.011, triggerDef.z);
+                lamp.material = lampMat;
+
+                const triggerMat = new BABYLON.PBRMaterial(triggerDef.kind + 'TriggerMat' + orbitDef.side, scene);
+                triggerMat.albedoColor = triggerDef.debugColor;
+                triggerMat.alpha = 0.35;
+                triggerMat.emissiveColor = triggerDef.debugColor.scale(0.5);
+                const trigger = BABYLON.MeshBuilder.CreateBox(triggerDef.kind + orbitDef.side, {
+                    width: ORBIT_TRIGGER_WIDTH_M,
+                    height: 0.02,
+                    depth: ORBIT_TRIGGER_DEPTH_M
+                }, scene);
+                trigger.position.set(triggerDef.x, 0.01, triggerDef.z);
+                trigger.material = triggerMat;
+                trigger.isVisible = devMode;
+                trigger.metadata = { kind: triggerDef.kind, side: orbitDef.side, lamp };
+                const aggregate = new BABYLON.PhysicsAggregate(trigger, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
+                aggregate.shape.isTrigger = true;
+            });
+        });
+
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
         // Saturn's rings every frame, and drive the power-up orb's spawn/despawn cycle - the
         // pieces of obstacle geometry later code needs a direct mesh reference to.
@@ -2258,6 +2405,7 @@
         COLOR_COMET = hexToColor3(HEX_COMET);
         COLOR_MISSION_ACTIVE = hexToColor3(HEX_MISSION_ACTIVE);
         COLOR_LANE_LAMP = hexToColor3(HEX_LANE_LAMP);
+        COLOR_ORBIT_LAMP = hexToColor3(HEX_ORBIT_LAMP);
         COLOR_BACKGROUND = hexToColor3(HEX_BACKGROUND);
 
         const engine = new BABYLON.Engine(canvas, true);
@@ -2814,7 +2962,8 @@
         // Bookkeeping only, not the deferred mission FSM itself.
         const stats = {
             bumperHits: 0, cometHits: 0, saturnHits: 0, targetHits: 0, laneHits: 0,
-            missionsCompleted: 0, powerUpsCollected: 0, inlaneHits: 0, outlaneHits: 0
+            missionsCompleted: 0, powerUpsCollected: 0, inlaneHits: 0, outlaneHits: 0,
+            leftOrbitShots: 0, rightOrbitShots: 0
         };
 
         // Mission/rank progression state (improvement-prompts/05-*.md). rank is an index into
@@ -2822,6 +2971,14 @@
         // 'active' (progress is accumulating toward `required`, gated by MISSION_DEFS'
         // selectedIndex-matched type in progressMission() below).
         const mission = { state: 'idle', selectedIndex: null, progress: 0, required: 0, rank: 0 };
+
+        // Orbit shot state (one entry per side) - `armedAt` is the timestamp (performance.now()-
+        // style ms) of the last valid entrance hit, or null if the entrance hasn't fired (or its
+        // window already expired). A completion trigger only scores if armedAt is set and within
+        // ORBIT_COMPLETION_WINDOW_MS - see handleTriggerHit()'s 'orbitCompletion' branch - so a
+        // partial shot (entered, stalled, rolled back without reaching the top) can't score, and a
+        // stale arm from a much earlier pass can't retroactively count a later, unrelated hit.
+        const orbitState = { left: { armedAt: null }, right: { armedAt: null } };
 
         // Score-multiplier power-up state (board redesign) - `active` is the real source of truth
         // for whether the orb is currently hittable (checked in handleTriggerHit()), `timerMs`
@@ -3094,19 +3251,24 @@
             }, 90);
         }
 
-        // Brightens an inlane/outlane's indicator lamp insert to its full COLOR_LANE_LAMP amber on
-        // a rollover, then fades back to the dim at-rest glow set in buildObstacles() - the "lamp
-        // insert" half of this feature's own requirement, kept as a simple standalone flash
-        // (unlike the reentry lanes' persistent lit-green recolor - a deliberately different,
-        // mission-tied mechanic, see SIDE_LANES' block comment) since a rollover here isn't tied
-        // to any ongoing state that should stay visibly "on".
-        function flashLaneLamp(lamp) {
+        // Brightens a lamp insert (inlane/outlane or orbit entrance/completion) to `color` on a
+        // rollover, then fades back to the dim at-rest glow set in buildObstacles() - kept as a
+        // simple standalone flash (unlike the reentry lanes' persistent lit-green recolor - a
+        // deliberately different, mission-tied mechanic, see SIDE_LANES' block comment) since a
+        // rollover here isn't tied to any ongoing state that should stay visibly "on". Shared by
+        // both lamp-bearing features (see flashLaneLamp()'s/orbit triggers' call sites) rather
+        // than duplicated per-feature - the color and flash duration are the only real differences.
+        function flashLamp(lamp, color, durationMs = 220) {
             const mat = lamp.material;
             const originalEmissive = mat.emissiveColor.clone();
-            mat.emissiveColor = COLOR_LANE_LAMP.clone();
+            mat.emissiveColor = color.clone();
             setTimeout(() => {
                 if (!lamp.isDisposed()) mat.emissiveColor.copyFrom(originalEmissive);
-            }, 220);
+            }, durationMs);
+        }
+
+        function flashLaneLamp(lamp) {
+            flashLamp(lamp, COLOR_LANE_LAMP);
         }
 
         function handlePhysicalHit(mesh) {
@@ -3244,6 +3406,33 @@
                 backglass.showMessage((isOutlane ? 'OUTLANE! +' : 'INLANE! +') + points, 700);
                 triggerCameraShake(70, isOutlane ? 0.003 : 0.0025); // a modest rollover beat, not a collision - outlane a touch stronger, it's the more consequential of the two
                 playHitSound(isOutlane ? 430 : 600); // lower/more ominous pitch for the outlane, matching the existing "different obstacle kinds get different pitches" convention
+            } else if (meta.kind === 'orbitEntrance') {
+                // Arms this side's orbit - does NOT score by itself (see ORBITS' block comment:
+                // "Award score only after a valid entrance->completion traversal"). Light feedback
+                // only, so a completed shot's own bigger beat stands out by comparison.
+                setCooldown(mesh, COOLDOWN_ORBIT_MS);
+                orbitState[meta.side].armedAt = performance.now();
+                flashLamp(meta.lamp, COLOR_ORBIT_LAMP, 150);
+                triggerCameraShake(40, 0.0015);
+                playOrbitEnterSound();
+            } else if (meta.kind === 'orbitCompletion') {
+                setCooldown(mesh, COOLDOWN_ORBIT_MS);
+                const armedAt = orbitState[meta.side].armedAt;
+                const withinWindow = armedAt !== null && performance.now() - armedAt <= ORBIT_COMPLETION_WINDOW_MS;
+                // Always flash the lamp and give a small acknowledgement, even for a stray hit on
+                // the completion trigger with no matching entrance - only the scoring/stat/message
+                // below is gated on a genuine traversal.
+                flashLamp(meta.lamp, COLOR_ORBIT_LAMP, 150);
+                if (!withinWindow) return;
+                orbitState[meta.side].armedAt = null; // consume the arm - one entrance buys one completion, not a standing "always score" state
+                const isLeft = meta.side === 'left';
+                addScore(SCORE_ORBIT);
+                if (isLeft) stats.leftOrbitShots++; else stats.rightOrbitShots++;
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage((isLeft ? 'LEFT' : 'RIGHT') + ' ORBIT! +' + SCORE_ORBIT, 900);
+                triggerCameraShake(150, 0.006);
+                triggerCameraPunch(250, cameraForwardDir.scale(0.01));
+                playOrbitCompleteSound(isLeft ? 520 : 620); // distinct pitch per side, matching this file's existing per-obstacle pitch convention
             } else if (meta.kind === 'powerUp') {
                 // powerUp.active (see updatePowerUp()) is the real source of truth for whether
                 // this should count - guards against a trigger event that fires right as the orb
@@ -3445,6 +3634,10 @@
             stats.powerUpsCollected = 0;
             stats.inlaneHits = 0;
             stats.outlaneHits = 0;
+            stats.leftOrbitShots = 0;
+            stats.rightOrbitShots = 0;
+            orbitState.left.armedAt = null;
+            orbitState.right.armedAt = null;
             // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
             // score/lives/stats above - resets on every new game, not a permanent meta-progression.
             mission.state = 'idle';
@@ -3553,6 +3746,8 @@
                 ['Lane Hits', stats.laneHits],
                 ['Inlane Hits', stats.inlaneHits],
                 ['Outlane Hits', stats.outlaneHits],
+                ['Left Orbit Shots', stats.leftOrbitShots],
+                ['Right Orbit Shots', stats.rightOrbitShots],
                 ['Power-Ups Collected', stats.powerUpsCollected]
             ];
             statLines.forEach(([label, value]) => {
