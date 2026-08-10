@@ -28,7 +28,7 @@ work on next, not this order:
 | 3 | `03-real-device-parity-and-visual-qa-pass.md` | ✅ Done — full checklist verified; found and fixed a major bug (`resetBallToPlunger()`'s position reset silently never worked, since Stage 5 - every drain/reset relied on it). |
 | 4 | `04-basic-audio.md` | ✅ Done — procedurally-synthesized (Web Audio API) sound effects for launch/flipper/hits/drain/game-over, plus a persisted mute control on the Controls screen. |
 | 5 | `05-mission-fsm-and-rank-system.md` | ✅ Done — real mission select/progress/complete FSM and a Space-Cadet-style rank ladder, wired to the backglass and Game Over's new Final Rank line. |
-| 6 | `06-obstacle-geometry-polish.md` | Bumpers/targets/lanes/slingshots are still placeholder primitive shapes. |
+| 6 | `06-obstacle-geometry-polish.md` | ✅ Done — decorative companion meshes (skirts/collars/housings/rails) give every obstacle a distinct pinball-element silhouette, with zero changes to any collider. |
 | 7 | `07-hud-and-backglass-reconciliation.md` | The new player HUD and the 3D backglass both show score - redundant, needs a real design decision. |
 | 8 | `08-pwa-icon-and-manifest-refresh.md` | The app icon still matches the old 2D "cosmic eyeball" sprite, not the new 3D visual identity. |
 | 9 | `09-mobile-performance-profiling.md` | Device-tier performance gating exists but has never been validated against real low-end hardware. |

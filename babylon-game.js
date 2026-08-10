@@ -1564,16 +1564,30 @@
     }
 
     // ===================================
-    // Obstacle layout - placeholder geometry only (see file header). All static (mass: 0) so
-    // they don't need their own anti-stuck/velocity-clamp handling; restitution alone gives a
-    // plausible physical "feel" (bouncy pop bumpers/slingshots vs. firmer targets/lanes) without
-    // needing collision-event wiring, which is Stage 6's job once real scoring/mission logic
-    // needs to know exactly when the ball touched what. Mission targets and re-entry lanes are
-    // solid colliders for now, not the "detect but don't block" sensor volumes they'll become in
-    // Stage 6 - a deliberate simplification, not an oversight (see this stage's implementation
-    // note for why building real trigger/sensor detection wasn't taken on this turn).
+    // Obstacle layout. All static (mass: 0) so they don't need their own anti-stuck/velocity-clamp
+    // handling; restitution alone gives a plausible physical "feel" (bouncy pop bumpers/slingshots
+    // vs. firmer targets/lanes) without needing collision-event wiring for that, separate from the
+    // scoring/mission collision-event wiring in main(). Mission targets and re-entry lanes are
+    // trigger volumes ("detect but don't block"), matching the 2D game's overlap-not-collider
+    // treatment of the same objects.
+    //
+    // Geometry (improvement-prompts/06-*.md): each obstacle's actual collider mesh - shape, size,
+    // position, material, physics aggregate, metadata - is UNCHANGED from the primitive-only
+    // version; every addition below is a purely decorative companion mesh with no physics body,
+    // positioned to match, following the same pattern this file already used for the satellite's
+    // ring (Stage 4). This keeps the visual upgrade fully isolated from collision/scoring/trigger
+    // behavior - nothing outside this function needed to change.
     // ===================================
     function buildObstacles(scene) {
+        // Shared dark-metallic material for every non-colliding "housing/bracket/rail" decoration
+        // below (bumper skirts, target mounting posts, slingshot housings, lane guide rails) - one
+        // material instance reused everywhere it's needed, keeping them visually unified as
+        // "hardware" distinct from each obstacle's own colored/emissive collider.
+        const housingMat = new BABYLON.PBRMaterial('obstacleHousingMat', scene);
+        housingMat.albedoColor = new BABYLON.Color3(0.12, 0.12, 0.15);
+        housingMat.metallic = 0.8;
+        housingMat.roughness = 0.35;
+
         // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
         // identity, not one shared color - each bumper is its own emissive-glass PBR material so
         // it can be individually recolored/pulsed on hit (pulseMesh() in main()).
@@ -1587,6 +1601,11 @@
             return mat;
         });
 
+        // Pop-bumper silhouette: the collider stays the exact same sphere it always was (shape,
+        // size, position, material, physics aggregate, metadata all unchanged) - a wide low
+        // "skirt" base and a glowing "collar" ring around its equator are purely decorative
+        // additions with no physics body, giving it the cap-on-a-base read a real pop bumper has
+        // instead of a bare sphere floating above the table.
         BUMPER_CLUSTER.forEach((pos, i) => {
             const mesh = BABYLON.MeshBuilder.CreateSphere('bumper' + i, { diameter: BUMPER_RADIUS_M * 2 }, scene);
             mesh.position.set(pos.x, BUMPER_RADIUS_M, pos.z);
@@ -1595,6 +1614,22 @@
             // Physical body, not a trigger - restitution alone gives the bounce; the ball's
             // collision observable (see main()) reports the hit for scoring on top of that.
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
+
+            const skirt = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Skirt', {
+                diameter: BUMPER_RADIUS_M * 2.6,
+                height: BUMPER_RADIUS_M * 0.35,
+                tessellation: 20
+            }, scene);
+            skirt.position.set(pos.x, BUMPER_RADIUS_M * 0.18, pos.z);
+            skirt.material = housingMat;
+
+            const collar = BABYLON.MeshBuilder.CreateTorus('bumper' + i + 'Collar', {
+                diameter: BUMPER_RADIUS_M * 2.15,
+                thickness: BUMPER_RADIUS_M * 0.14,
+                tessellation: 20
+            }, scene);
+            collar.position.set(pos.x, BUMPER_RADIUS_M * 0.75, pos.z);
+            collar.material = bumperMats[i % bumperMats.length]; // shares the dome's own material/color - reads as one glowing fixture, not a mismatched add-on
         });
 
         // CONFIG.colors.chakra (7 colors) - each mission target gets its own chakra color
@@ -1623,6 +1658,23 @@
             // Trigger, not physical - detect-only per the doc (mission targets don't block the
             // ball in the 2D game either; they're an overlap, not a collider, in setupCollisions()).
             aggregate.shape.isTrigger = true;
+
+            // Drop-target read: a darker backing panel just behind the flag (a real drop target's
+            // mounting bracket) plus a small indicator lamp at its base, matching the classic
+            // pinball rollover-lane light motif - both purely decorative, no physics.
+            const backing = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Backing', {
+                width: TARGET_RADIUS_M * 2.4,
+                height: 0.034,
+                depth: 0.004
+            }, scene);
+            backing.position.set(pos.x, 0.015, pos.z + 0.006);
+            backing.material = housingMat;
+
+            const lamp = BABYLON.MeshBuilder.CreateSphere('missionTarget' + i + 'Lamp', {
+                diameter: TARGET_RADIUS_M * 0.6
+            }, scene);
+            lamp.position.set(pos.x, 0.004, pos.z);
+            lamp.material = targetMats[i % targetMats.length];
             missionTargetMeshes.push(mesh);
         });
 
@@ -1658,6 +1710,18 @@
         // No physics body - purely decorative, would otherwise double the ball's satellite hit
         // detection (this is exactly why it isn't just a bigger satellite sphere).
 
+        // A second, smaller, oppositely-tilted ring (improvement-prompts/06-*.md) - Saturn's real
+        // ring system reads as multiple concentric bands, not one; a second ring at a different
+        // tilt is a cheap way to sell "rings," not just "ring," without a second material.
+        const ring2 = BABYLON.MeshBuilder.CreateTorus('satelliteRing2', {
+            diameter: SATELLITE_RADIUS_M * 2.5,
+            thickness: SATELLITE_RADIUS_M * 0.16,
+            tessellation: 24
+        }, scene);
+        ring2.position.set(SATELLITE_POS.x, SATELLITE_RADIUS_M, SATELLITE_POS.z);
+        ring2.rotation.x = Math.PI / 2.6;
+        ring2.material = ringMat;
+
         const slingshotMat = new BABYLON.PBRMaterial('slingshotMat', scene);
         slingshotMat.albedoColor = new BABYLON.Color3(1, 0, 1); // no direct CONFIG.colors entry for slingshots - kept the existing magenta identity
         slingshotMat.metallic = 0.3;
@@ -1675,6 +1739,22 @@
             mesh.material = slingshotMat;
             mesh.metadata = { kind: 'slingshot' };
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
+
+            // Kicker housing: a triangular-prism wedge (a cylinder with 3-sided tessellation is a
+            // cheap way to get a real prism from MeshBuilder) behind the rubber face above,
+            // matching a real slingshot's wedge shape - the collider itself stays the box it
+            // always was (a wedge-shaped collider would change how the ball bounces off it, which
+            // this doc explicitly says not to do).
+            const housing = BABYLON.MeshBuilder.CreateCylinder('slingshot' + i + 'Housing', {
+                diameterTop: SLINGSHOT_SIZE_M * 1.1,
+                diameterBottom: SLINGSHOT_SIZE_M * 1.1,
+                height: 0.026,
+                tessellation: 3
+            }, scene);
+            housing.position.set(def.x, 0.013, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.15);
+            housing.rotation.x = Math.PI / 2; // lay the prism flat, matching the table plane
+            housing.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20) + Math.PI / 2;
+            housing.material = housingMat;
         });
 
         // Unlit state: dim yellow-ish neutral (no direct 2D equivalent - the 2D lanes start
@@ -1699,6 +1779,20 @@
             mesh.metadata = { kind: 'reentryLane', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.5 }, scene);
             aggregate.shape.isTrigger = true; // overlap, not collider, in setupCollisions()
+
+            // Flanking guide rails (improvement-prompts/06-*.md) - real lane guides are raised
+            // metal wires/rails either side of the lane opening, not just a flat colored patch.
+            // Decorative only, chrome-like (shares housingMat), doesn't change color on hit like
+            // the lit-indicator box above does.
+            [-1, 1].forEach((side) => {
+                const rail = BABYLON.MeshBuilder.CreateBox('reentryLane' + i + 'Rail' + side, {
+                    width: 0.004,
+                    height: 0.018,
+                    depth: REENTRY_LANE_RADIUS_M * 2.4
+                }, scene);
+                rail.position.set(pos.x + side * REENTRY_LANE_RADIUS_M * 1.1, 0.014, pos.z);
+                rail.material = housingMat;
+            });
         });
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems - the only
