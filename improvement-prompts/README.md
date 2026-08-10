@@ -27,7 +27,7 @@ work on next, not this order:
 | 2 | `02-ball-plunger-resting-stability.md` | ✅ Done — plunger now has real kinematic collision (it had none at all); ball rests stably instead of rolling off the table. |
 | 3 | `03-real-device-parity-and-visual-qa-pass.md` | ✅ Done — full checklist verified; found and fixed a major bug (`resetBallToPlunger()`'s position reset silently never worked, since Stage 5 - every drain/reset relied on it). |
 | 4 | `04-basic-audio.md` | ✅ Done — procedurally-synthesized (Web Audio API) sound effects for launch/flipper/hits/drain/game-over, plus a persisted mute control on the Controls screen. |
-| 5 | `05-mission-fsm-and-rank-system.md` | The mission/rank progression system, deferred since Stage 6, still doesn't exist. |
+| 5 | `05-mission-fsm-and-rank-system.md` | ✅ Done — real mission select/progress/complete FSM and a Space-Cadet-style rank ladder, wired to the backglass and Game Over's new Final Rank line. |
 | 6 | `06-obstacle-geometry-polish.md` | Bumpers/targets/lanes/slingshots are still placeholder primitive shapes. |
 | 7 | `07-hud-and-backglass-reconciliation.md` | The new player HUD and the 3D backglass both show score - redundant, needs a real design decision. |
 | 8 | `08-pwa-icon-and-manifest-refresh.md` | The app icon still matches the old 2D "cosmic eyeball" sprite, not the new 3D visual identity. |
