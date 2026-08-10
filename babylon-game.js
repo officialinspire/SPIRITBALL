@@ -267,6 +267,20 @@
         setTimeout(() => playTone(784, 0.35, { type: 'square', volume: 0.17 }), 390);
     }
 
+    // Giant Saturn hit (board redesign) - a single big, low-then-high "boom" distinct from the
+    // regular playHitSound() ping, matching a boss-scale obstacle's weight.
+    function playSaturnHitSound() {
+        playTone(110, 0.35, { type: 'sawtooth', freqEnd: 220, volume: 0.2 });
+        playNoiseClick(0.08, 0.15);
+    }
+
+    // Power-up collected (board redesign) - a bright, quick upward chime, distinct in timbre from
+    // playRankUpSound()'s longer fanfare so the two "good news" stings don't sound identical.
+    function playPowerUpSound() {
+        playTone(500, 0.12, { type: 'sine', freqEnd: 900, volume: 0.18 });
+        setTimeout(() => playTone(700, 0.18, { type: 'sine', freqEnd: 1200, volume: 0.16 }), 90);
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -522,8 +536,32 @@
         { x: -0.11, z: 0.24 }
     ]; // 3 targets in an angled upper-left bank, matching CONFIG.missionTargetCount
 
-    const SATELLITE_RADIUS_M = 0.024;
-    const SATELLITE_POS = { x: 0.16, z: 0.36 }; // upper-right, deliberately opposite the target bank
+    // Giant spinning Saturn (board redesign, user-requested) - the table's new visual and
+    // gameplay centerpiece, top-center. Real collider (notably bigger than every other bumper -
+    // 0.045m vs 0.02m - a genuine "boss" piece), decorative rings extending well beyond it,
+    // continuously rotating (see updateSaturnRotation() in main()'s render loop). Positioned at
+    // z=0.32 rather than further up-table specifically so its collider's top edge (0.32+0.045=
+    // 0.365) stays comfortably clear of the re-entry lanes at z=0.40 (0.035m of margin) without
+    // needing to move them.
+    const SATURN_RADIUS_M = 0.045;
+    const SATURN_POS = { x: 0, z: 0.32 };
+
+    // The old "satellite" object, re-themed as a comet now that Saturn itself is a real dedicated
+    // piece (having both would be a confusing "two Saturns") - same role/size/position family,
+    // just reskinned (new icy-cyan identity, see HEX_COMET) and nudged slightly right/down from
+    // its old (0.16, 0.36) spot to sit clear of Saturn's new footprint and rings.
+    const COMET_RADIUS_M = 0.022;
+    const COMET_POS = { x: 0.17, z: 0.29 };
+
+    // Score-multiplier power-up orb (board redesign) - appears periodically in the open lane
+    // between the bumper cluster and Saturn (naturally in the ball's travel path when it rolls
+    // up-table), despawns if not hit in time. See updatePowerUp() in main()'s render loop.
+    const POWERUP_RADIUS_M = 0.016;
+    const POWERUP_POS = { x: 0, z: 0.22 }; // clear of both the boss bumper's decorative collar (below) and Saturn's collider (above)
+    const POWERUP_SPAWN_INTERVAL_MS = 20000; // how long it stays hidden before reappearing
+    const POWERUP_ACTIVE_DURATION_MS = 7000; // how long it stays visible/hittable before despawning unhit
+    const POWERUP_MULTIPLIER = 2;
+    const POWERUP_MULTIPLIER_DURATION_MS = 12000; // how long the 2x window lasts once collected
 
     const SLINGSHOT_SIZE_M = 0.05;
     const SLINGSHOTS = [
@@ -639,10 +677,12 @@
     //
     // Point values ported directly from CONFIG.scores in ../index.js (not redesigned).
     const SCORE_ATTACK_BUMPER = 500;
-    const SCORE_SATELLITE = 1000;
+    const SCORE_BOSS_BUMPER = 1200; // one bumper in the cluster is a bigger "boss" variant (board redesign) - worth notably more
+    const SCORE_COMET = 1000; // was SCORE_SATELLITE - renamed alongside the satellite->comet reskin
     const SCORE_MISSION_TARGET = 750;
     const SCORE_REENTRY_LANE = 2000;
     const SCORE_SLINGSHOT = 100;
+    const SCORE_SATURN = 3000; // the new giant Saturn centerpiece - the single biggest non-mission scoring hit on the board, matching its size/prominence
     const MISSION_COMPLETE_BONUS = 5000;
 
     // Rank names ported from the classic "3D Pinball for Windows - Space Cadet" progression this
@@ -663,7 +703,7 @@
     // not an oversight).
     const MISSION_DEFS = [
         { type: 'bumper', name: 'BUMPER RUN' },
-        { type: 'satellite', name: 'SATELLITE SWEEP' },
+        { type: 'comet', name: 'COMET CHASE' }, // was 'satellite'/'SATELLITE SWEEP' - renamed alongside the board redesign's satellite->comet reskin
         { type: 'lane', name: 'RE-ENTRY CIRCUIT' }
     ];
     function missionRequiredCount(rank) {
@@ -672,10 +712,11 @@
 
     // Cooldown durations ported from setupCollisions()'s setCooldown() calls in ../index.js.
     const COOLDOWN_BUMPER_MS = 300;
-    const COOLDOWN_SATELLITE_MS = 400;
+    const COOLDOWN_COMET_MS = 400; // was COOLDOWN_SATELLITE_MS
     const COOLDOWN_SLINGSHOT_MS = 200;
     const COOLDOWN_MISSION_TARGET_MS = 500;
     const COOLDOWN_REENTRY_LANE_MS = 1000;
+    const COOLDOWN_SATURN_MS = 500; // new giant Saturn - a bit longer than the regular bumpers, matching its "big, deliberate hit" feel rather than rapid-fire pinging
     // Not present in the 2D cooldown map (walls/flippers there fire shake unconditionally, every
     // physics-substep-worth of contact) - added here (Stage 10) specifically to keep grinding
     // contact from shaking the camera every single frame, matching the doc's own "don't add
@@ -780,11 +821,15 @@
     const HEX_CHAKRA = [0x9400d3, 0xff1493, 0xffff00, 0x00ff00, 0x00ffff, 0x0000ff, 0x8b00ff];
     const HEX_SATURN = 0xffa500;
     const HEX_SATURN_RING = 0xffd700;
+    // Icy cyan-white - a deliberately distinct identity from HEX_SATURN/HEX_SATURN_RING (gold/
+    // orange) now that those colors belong to the real giant Saturn centerpiece; the re-themed
+    // comet needed its own look, not a second "Saturn-colored" object on the board.
+    const HEX_COMET = 0x66e0ff;
     const HEX_MISSION_ACTIVE = 0x00ff00;
     const HEX_BACKGROUND = 0x1a0033;
 
     let COLOR_BALL, COLOR_EYEBALL, COLOR_FLIPPER, COLOR_WALL, COLOR_BUMPERS, COLOR_CHAKRA,
-        COLOR_SATURN, COLOR_SATURN_RING, COLOR_MISSION_ACTIVE, COLOR_BACKGROUND;
+        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_BACKGROUND;
 
     // Device-tier gate, ported from PerformanceManager.detectPerformance() in ../index.js -
     // simplified to the single boolean the doc asks for ("structured so they *can* be gated...
@@ -996,6 +1041,19 @@
         }
     }
 
+    // Giant Saturn's continuous spin (board redesign) - two rings turning in opposite directions,
+    // called unconditionally every rendered frame (not gated by isPaused) so the table still
+    // reads as "alive" on the menu/pause/game-over screens, matching the drain vortex particle
+    // system's own always-running treatment. Reduced under prefers-reduced-motion (slowed, not
+    // stopped outright) - this is ambient/decorative motion, not gameplay-critical feedback, the
+    // same category buildDrainVortex()'s emitRate reduction already established.
+    const SATURN_SPIN_RATE_RAD_MS = 0.0006;
+    function updateSaturnRotation(saturnRings, deltaMs) {
+        const rate = window.SPIRITBALL_reducedMotion ? SATURN_SPIN_RATE_RAD_MS * 0.15 : SATURN_SPIN_RATE_RAD_MS;
+        saturnRings[0].rotation.y += rate * deltaMs;
+        saturnRings[1].rotation.y -= rate * deltaMs * 0.7; // slightly different speed/opposite direction, so the two rings read as independently turning, not one solid piece
+    }
+
     // Fixed, non-orbitable pinball-cabinet camera: positioned near the flipper end (-Z, per the
     // toWorldZ() convention above), above the table surface, angled up the table's length -
     // matching the reference screenshot's vantage point. UniversalCamera (not ArcRotateCamera)
@@ -1155,7 +1213,10 @@
             highScore: 0, message: '', messageTimer: null,
             // Mission/rank progression (improvement-prompts/05-*.md) - missionName is null when
             // no mission is active, matching the original 2D HUD's "Select Mission" idle state.
-            rank: RANK_NAMES[0], missionName: null, missionProgress: 0, missionRequired: 0
+            rank: RANK_NAMES[0], missionName: null, missionProgress: 0, missionRequired: 0,
+            // Score-multiplier power-up (board redesign) - true while a collected orb's 2x
+            // window is running (see updatePowerUp() in main()).
+            multiplierActive: false
         };
 
         function redraw() {
@@ -1187,6 +1248,11 @@
                     'MISSION: ' + state.missionName + ' ' + state.missionProgress + '/' + state.missionRequired,
                     16, 84
                 );
+            }
+
+            if (state.multiplierActive) {
+                ctx.fillStyle = '#ff00ff';
+                ctx.fillText('★ ' + POWERUP_MULTIPLIER + 'X SCORE ACTIVE ★', 16, 110);
             }
 
             if (state.message) {
@@ -1644,33 +1710,40 @@
         });
 
         // Pop-bumper silhouette: the collider stays the exact same sphere it always was (shape,
-        // size, position, material, physics aggregate, metadata all unchanged) - a wide low
-        // "skirt" base and a glowing "collar" ring around its equator are purely decorative
-        // additions with no physics body, giving it the cap-on-a-base read a real pop bumper has
-        // instead of a bare sphere floating above the table.
+        // position, material, physics aggregate, metadata all unchanged) - a wide low "skirt"
+        // base and a glowing "collar" ring around its equator are purely decorative additions
+        // with no physics body, giving it the cap-on-a-base read a real pop bumper has instead of
+        // a bare sphere floating above the table.
+        //
+        // Board redesign: index 0 (closest to the new giant Saturn centerpiece, at the top of the
+        // cluster) is a "boss" bumper - 50% bigger radius and worth notably more (SCORE_BOSS_
+        // BUMPER vs SCORE_ATTACK_BUMPER, see handlePhysicalHit()) - so the cluster reads as having
+        // real internal variety instead of 4 identical clones in different colors.
         BUMPER_CLUSTER.forEach((pos, i) => {
-            const mesh = BABYLON.MeshBuilder.CreateSphere('bumper' + i, { diameter: BUMPER_RADIUS_M * 2 }, scene);
-            mesh.position.set(pos.x, BUMPER_RADIUS_M, pos.z);
+            const isBoss = i === 0;
+            const radius = isBoss ? BUMPER_RADIUS_M * 1.5 : BUMPER_RADIUS_M;
+            const mesh = BABYLON.MeshBuilder.CreateSphere('bumper' + i, { diameter: radius * 2 }, scene);
+            mesh.position.set(pos.x, radius, pos.z);
             mesh.material = bumperMats[i % bumperMats.length];
-            mesh.metadata = { kind: 'bumper' };
+            mesh.metadata = { kind: 'bumper', boss: isBoss };
             // Physical body, not a trigger - restitution alone gives the bounce; the ball's
             // collision observable (see main()) reports the hit for scoring on top of that.
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
 
             const skirt = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Skirt', {
-                diameter: BUMPER_RADIUS_M * 2.6,
-                height: BUMPER_RADIUS_M * 0.35,
+                diameter: radius * 2.6,
+                height: radius * 0.35,
                 tessellation: 20
             }, scene);
-            skirt.position.set(pos.x, BUMPER_RADIUS_M * 0.18, pos.z);
+            skirt.position.set(pos.x, radius * 0.18, pos.z);
             skirt.material = housingMat;
 
             const collar = BABYLON.MeshBuilder.CreateTorus('bumper' + i + 'Collar', {
-                diameter: BUMPER_RADIUS_M * 2.15,
-                thickness: BUMPER_RADIUS_M * 0.14,
+                diameter: radius * 2.15,
+                thickness: radius * 0.14,
                 tessellation: 20
             }, scene);
-            collar.position.set(pos.x, BUMPER_RADIUS_M * 0.75, pos.z);
+            collar.position.set(pos.x, radius * 0.75, pos.z);
             collar.material = bumperMats[i % bumperMats.length]; // shares the dome's own material/color - reads as one glowing fixture, not a mismatched add-on
         });
 
@@ -1720,49 +1793,112 @@
             missionTargetMeshes.push(mesh);
         });
 
-        const satelliteMat = new BABYLON.PBRMaterial('satelliteMat', scene);
-        satelliteMat.albedoColor = COLOR_SATURN;
-        satelliteMat.metallic = 0.5;
-        satelliteMat.roughness = 0.3;
-        satelliteMat.emissiveColor = COLOR_SATURN.scale(0.3);
-        const satelliteMesh = BABYLON.MeshBuilder.CreateSphere('satellite', { diameter: SATELLITE_RADIUS_M * 2 }, scene);
-        satelliteMesh.position.set(SATELLITE_POS.x, SATELLITE_RADIUS_M, SATELLITE_POS.z);
-        satelliteMesh.material = satelliteMat;
-        satelliteMesh.metadata = { kind: 'satellite' };
-        // Physical (collider in the 2D game's setupCollisions(), not an overlap) - see this
-        // stage's implementation note for the full physical-vs-trigger mapping ported from there.
-        new BABYLON.PhysicsAggregate(satelliteMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.8, friction: 0.3 }, scene);
+        // ===================================
+        // Giant spinning Saturn (board redesign) - the table's new visual/gameplay centerpiece.
+        // Real collider (a genuine "boss" piece - SATURN_RADIUS_M is more than double every other
+        // bumper's radius) plus two decorative rings extending well beyond it, both rotated a
+        // little further per frame by updateSaturnRotation() in main()'s render loop. HEX_SATURN/
+        // HEX_SATURN_RING (gold/orange) - previously used by the old small "satellite" object -
+        // now finally belong to an object actually named and shaped like Saturn.
+        // ===================================
+        const saturnMat = new BABYLON.PBRMaterial('saturnMat', scene);
+        saturnMat.albedoColor = COLOR_SATURN;
+        saturnMat.metallic = 0.5;
+        saturnMat.roughness = 0.3;
+        saturnMat.emissiveColor = COLOR_SATURN.scale(0.35);
+        const saturnMesh = BABYLON.MeshBuilder.CreateSphere('saturn', { diameter: SATURN_RADIUS_M * 2 }, scene);
+        saturnMesh.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
+        saturnMesh.material = saturnMat;
+        saturnMesh.metadata = { kind: 'saturn' };
+        // Physical collider - a real, hittable obstacle (per the user's explicit request), not
+        // just a decorative backdrop piece.
+        new BABYLON.PhysicsAggregate(saturnMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
 
-        // Small ring, matching CONFIG.colors.saturnRing and the satellite's own "Saturn" naming/
-        // fiction in ../index.js - a cheap, self-contained addition (one flattened torus, no new
-        // asset dependency) beyond what the doc strictly asked for, purely decorative/non-physical.
-        const ringMat = new BABYLON.PBRMaterial('saturnRingMat', scene);
-        ringMat.albedoColor = COLOR_SATURN_RING;
-        ringMat.metallic = 0.6;
-        ringMat.roughness = 0.25;
-        ringMat.emissiveColor = COLOR_SATURN_RING.scale(0.3);
-        const ring = BABYLON.MeshBuilder.CreateTorus('satelliteRing', {
-            diameter: SATELLITE_RADIUS_M * 3.2,
-            thickness: SATELLITE_RADIUS_M * 0.25,
+        const saturnRingMat = new BABYLON.PBRMaterial('saturnRingMat', scene);
+        saturnRingMat.albedoColor = COLOR_SATURN_RING;
+        saturnRingMat.metallic = 0.6;
+        saturnRingMat.roughness = 0.25;
+        saturnRingMat.emissiveColor = COLOR_SATURN_RING.scale(0.35);
+        const saturnRing1 = BABYLON.MeshBuilder.CreateTorus('saturnRing1', {
+            diameter: SATURN_RADIUS_M * 3.5,
+            thickness: SATURN_RADIUS_M * 0.22,
+            tessellation: 32
+        }, scene);
+        saturnRing1.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
+        saturnRing1.rotation.x = Math.PI / 2.3; // tilted, not flat, so it reads as a ring from the fixed camera angle
+        saturnRing1.material = saturnRingMat;
+        // No physics body - purely decorative, would otherwise double the ball's Saturn hit
+        // detection (same reasoning as every other obstacle's decorative ring in this file).
+
+        const saturnRing2 = BABYLON.MeshBuilder.CreateTorus('saturnRing2', {
+            diameter: SATURN_RADIUS_M * 2.6,
+            thickness: SATURN_RADIUS_M * 0.14,
+            tessellation: 32
+        }, scene);
+        saturnRing2.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
+        saturnRing2.rotation.x = Math.PI / 2.5;
+        saturnRing2.material = saturnRingMat;
+        // Rotated opposite to ring1 each frame (see updateSaturnRotation()) - two rings turning
+        // against each other reads as a much more alive, "spinning" system than one ring alone.
+        const saturnRings = [saturnRing1, saturnRing2];
+
+        // ===================================
+        // Comet (board redesign) - the old "satellite" object, re-themed now that Saturn is a
+        // real dedicated piece. Same role (a physical, scored bumper with its own decorative
+        // ring), same general neighborhood, just a new icy-cyan identity (HEX_COMET) instead of
+        // sharing Saturn's gold/orange colors, and nudged to sit clear of Saturn's new footprint.
+        // ===================================
+        const cometMat = new BABYLON.PBRMaterial('cometMat', scene);
+        cometMat.albedoColor = COLOR_COMET;
+        cometMat.metallic = 0.4;
+        cometMat.roughness = 0.25;
+        cometMat.emissiveColor = COLOR_COMET.scale(0.4);
+        const cometMesh = BABYLON.MeshBuilder.CreateSphere('comet', { diameter: COMET_RADIUS_M * 2 }, scene);
+        cometMesh.position.set(COMET_POS.x, COMET_RADIUS_M, COMET_POS.z);
+        cometMesh.material = cometMat;
+        cometMesh.metadata = { kind: 'comet' };
+        new BABYLON.PhysicsAggregate(cometMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.8, friction: 0.3 }, scene);
+
+        // A single thin "tail" ring standing in for a comet's streak - simpler than the two-ring
+        // Saturn/old-satellite treatment (a comet isn't a ringed planet), still reads as a
+        // distinct halo of motion around the core.
+        const cometRingMat = new BABYLON.PBRMaterial('cometRingMat', scene);
+        cometRingMat.albedoColor = COLOR_COMET;
+        cometRingMat.metallic = 0.2;
+        cometRingMat.roughness = 0.2;
+        cometRingMat.emissiveColor = COLOR_COMET.scale(0.6);
+        cometRingMat.alpha = 0.7;
+        const cometRing = BABYLON.MeshBuilder.CreateTorus('cometRing', {
+            diameter: COMET_RADIUS_M * 3,
+            thickness: COMET_RADIUS_M * 0.18,
             tessellation: 24
         }, scene);
-        ring.position.set(SATELLITE_POS.x, SATELLITE_RADIUS_M, SATELLITE_POS.z);
-        ring.rotation.x = Math.PI / 2.4; // tilted, not flat, so it actually reads as a ring from the fixed camera angle
-        ring.material = ringMat;
-        // No physics body - purely decorative, would otherwise double the ball's satellite hit
-        // detection (this is exactly why it isn't just a bigger satellite sphere).
+        cometRing.position.set(COMET_POS.x, COMET_RADIUS_M, COMET_POS.z);
+        cometRing.rotation.x = Math.PI / 2.4;
+        cometRing.material = cometRingMat;
 
-        // A second, smaller, oppositely-tilted ring (improvement-prompts/06-*.md) - Saturn's real
-        // ring system reads as multiple concentric bands, not one; a second ring at a different
-        // tilt is a cheap way to sell "rings," not just "ring," without a second material.
-        const ring2 = BABYLON.MeshBuilder.CreateTorus('satelliteRing2', {
-            diameter: SATELLITE_RADIUS_M * 2.5,
-            thickness: SATELLITE_RADIUS_M * 0.16,
-            tessellation: 24
-        }, scene);
-        ring2.position.set(SATELLITE_POS.x, SATELLITE_RADIUS_M, SATELLITE_POS.z);
-        ring2.rotation.x = Math.PI / 2.6;
-        ring2.material = ringMat;
+        // ===================================
+        // Score-multiplier power-up orb (board redesign) - hidden at load, toggled visible/
+        // invisible by updatePowerUp() in main()'s render loop on its own spawn/despawn timer.
+        // Trigger-only (detect, don't block), matching mission targets/re-entry lanes.
+        // ===================================
+        const powerUpMat = new BABYLON.PBRMaterial('powerUpMat', scene);
+        powerUpMat.albedoColor = new BABYLON.Color3(1, 1, 1);
+        powerUpMat.metallic = 0.1;
+        powerUpMat.roughness = 0.15;
+        powerUpMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+        const powerUpMesh = BABYLON.MeshBuilder.CreateSphere('powerUp', { diameter: POWERUP_RADIUS_M * 2, segments: 12 }, scene);
+        powerUpMesh.position.set(POWERUP_POS.x, POWERUP_RADIUS_M, POWERUP_POS.z);
+        powerUpMesh.material = powerUpMat;
+        powerUpMesh.metadata = { kind: 'powerUp' };
+        powerUpMesh.isVisible = false;
+        const powerUpAggregate = new BABYLON.PhysicsAggregate(powerUpMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0 }, scene);
+        powerUpAggregate.shape.isTrigger = true;
+        // isVisible/setEnabled hide the mesh, but whether Havok still reports trigger overlaps
+        // for a disabled node isn't something to assume either way - handleTriggerHit()'s own
+        // powerUp.active check (see main()) is the real, explicit source of truth for whether a
+        // hit should actually count, independent of this mesh's enabled state.
+        powerUpMesh.setEnabled(false);
 
         const slingshotMat = new BABYLON.PBRMaterial('slingshotMat', scene);
         slingshotMat.albedoColor = new BABYLON.Color3(1, 0, 1); // no direct CONFIG.colors entry for slingshots - kept the existing magenta identity
@@ -1837,9 +1973,10 @@
             });
         });
 
-        // Returned so main() can attach Stage 8's chakra-sparkle particle systems - the only
-        // piece of obstacle geometry a later stage needs a direct mesh reference to.
-        return { missionTargetMeshes };
+        // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
+        // Saturn's rings every frame, and drive the power-up orb's spawn/despawn cycle - the
+        // pieces of obstacle geometry later code needs a direct mesh reference to.
+        return { missionTargetMeshes, saturnRings, powerUpMesh };
     }
 
     // Drain zone (Stage 6, babylon-prompts/06-*.md) - see the block comment above SCORE_ATTACK_
@@ -1884,6 +2021,7 @@
         COLOR_CHAKRA = HEX_CHAKRA.map(hexToColor3);
         COLOR_SATURN = hexToColor3(HEX_SATURN);
         COLOR_SATURN_RING = hexToColor3(HEX_SATURN_RING);
+        COLOR_COMET = hexToColor3(HEX_COMET);
         COLOR_MISSION_ACTIVE = hexToColor3(HEX_MISSION_ACTIVE);
         COLOR_BACKGROUND = hexToColor3(HEX_BACKGROUND);
 
@@ -2439,13 +2577,24 @@
         // target/re-entry-lane; the 2D statistics object also tracks obstacle/inlane/outlane hits
         // that have no 3D equivalent yet). Feeds the Game Over screen's stat lines (Stage 12).
         // Bookkeeping only, not the deferred mission FSM itself.
-        const stats = { bumperHits: 0, satelliteHits: 0, targetHits: 0, laneHits: 0, missionsCompleted: 0 };
+        const stats = {
+            bumperHits: 0, cometHits: 0, saturnHits: 0, targetHits: 0, laneHits: 0,
+            missionsCompleted: 0, powerUpsCollected: 0
+        };
 
         // Mission/rank progression state (improvement-prompts/05-*.md). rank is an index into
         // RANK_NAMES; state is 'idle' (no mission active - a target hit will select+start one) or
         // 'active' (progress is accumulating toward `required`, gated by MISSION_DEFS'
         // selectedIndex-matched type in progressMission() below).
         const mission = { state: 'idle', selectedIndex: null, progress: 0, required: 0, rank: 0 };
+
+        // Score-multiplier power-up state (board redesign) - `active` is the real source of truth
+        // for whether the orb is currently hittable (checked in handleTriggerHit()), `timerMs`
+        // counts down to either the next spawn (while hidden) or an unhit despawn (while active),
+        // both advanced in updatePowerUp() below. scoreMultiplier is applied directly in
+        // addScore().
+        const powerUp = { active: false, timerMs: POWERUP_SPAWN_INTERVAL_MS, multiplierRemainingMs: 0 };
+        let scoreMultiplier = 1;
         const statusScore = document.getElementById('status-score');
         const statusLives = document.getElementById('status-lives');
         const hudScore = document.getElementById('hud-score');
@@ -2465,13 +2614,56 @@
         setLives(lives);
 
         function addScore(points) {
-            score += points;
+            score += points * scoreMultiplier;
             setScore(score);
             if (score > backglass.state.highScore) {
                 backglass.state.highScore = score;
                 localStorage.setItem(highScoreKey, String(score));
             }
             backglass.redraw();
+        }
+
+        // Power-up orb (board redesign): collectPowerUp() runs when the ball hits it while active
+        // (see handleTriggerHit()); updatePowerUp() advances its spawn/despawn timer and the
+        // multiplier countdown every frame (called from the render loop, gated by !isPaused &&
+        // ballInPlay - no point spawning it or burning down an active window before the ball is
+        // even launched).
+        function collectPowerUp() {
+            powerUp.active = false;
+            obstacles.powerUpMesh.setEnabled(false);
+            powerUp.timerMs = POWERUP_SPAWN_INTERVAL_MS;
+            scoreMultiplier = POWERUP_MULTIPLIER;
+            powerUp.multiplierRemainingMs = POWERUP_MULTIPLIER_DURATION_MS;
+            backglass.state.multiplierActive = true;
+            stats.powerUpsCollected++;
+            backglass.showMessage(POWERUP_MULTIPLIER + 'X SCORE!', 1200);
+            triggerCameraShake(150, 0.007);
+            triggerCameraPunch(300, cameraForwardDir.scale(0.02));
+            playPowerUpSound();
+        }
+
+        function updatePowerUp(deltaMs) {
+            if (powerUp.multiplierRemainingMs > 0) {
+                powerUp.multiplierRemainingMs -= deltaMs;
+                if (powerUp.multiplierRemainingMs <= 0) {
+                    powerUp.multiplierRemainingMs = 0;
+                    scoreMultiplier = 1;
+                    backglass.state.multiplierActive = false;
+                    backglass.redraw();
+                }
+            }
+            powerUp.timerMs -= deltaMs;
+            if (powerUp.active) {
+                if (powerUp.timerMs <= 0) {
+                    powerUp.active = false;
+                    obstacles.powerUpMesh.setEnabled(false);
+                    powerUp.timerMs = POWERUP_SPAWN_INTERVAL_MS;
+                }
+            } else if (powerUp.timerMs <= 0) {
+                powerUp.active = true;
+                obstacles.powerUpMesh.setEnabled(true);
+                powerUp.timerMs = POWERUP_ACTIVE_DURATION_MS;
+            }
         }
 
         // Selects AND starts a mission in one action (see MISSION_DEFS' comment for why) -
@@ -2488,7 +2680,7 @@
         }
 
         // Called from the hit handlers below with the scoring category that just happened
-        // ('bumper'/'satellite'/'lane') - only counts toward an active mission's OWN type, so
+        // ('bumper'/'comet'/'lane') - only counts toward an active mission's OWN type, so
         // progress can't come from unrelated incidental scoring (see MISSION_DEFS' comment).
         function progressMission(type) {
             if (mission.state !== 'active' || MISSION_DEFS[mission.selectedIndex].type !== type) return;
@@ -2570,24 +2762,42 @@
             if (!meta || isOnCooldown(mesh)) return;
             if (meta.kind === 'bumper') {
                 setCooldown(mesh, COOLDOWN_BUMPER_MS);
-                addScore(SCORE_ATTACK_BUMPER);
+                // Board redesign: the boss bumper (index 0, see buildObstacles()) is worth more
+                // and gets its own message/pitch, otherwise identical handling.
+                const points = meta.boss ? SCORE_BOSS_BUMPER : SCORE_ATTACK_BUMPER;
+                addScore(points);
                 stats.bumperHits++;
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
-                backglass.showMessage('+' + SCORE_ATTACK_BUMPER, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
-                triggerCameraShake(120, 0.006); // matches hitAttackBumper()'s cameraShake(120, 0.006)
-                playHitSound(660);
+                backglass.showMessage('+' + points, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
+                triggerCameraShake(120, meta.boss ? 0.008 : 0.006); // matches hitAttackBumper()'s cameraShake(120, 0.006), boss hits a bit harder
+                playHitSound(meta.boss ? 440 : 660);
                 progressMission('bumper');
-            } else if (meta.kind === 'satellite') {
-                setCooldown(mesh, COOLDOWN_SATELLITE_MS);
-                addScore(SCORE_SATELLITE);
-                stats.satelliteHits++;
+            } else if (meta.kind === 'comet') {
+                setCooldown(mesh, COOLDOWN_COMET_MS);
+                addScore(SCORE_COMET);
+                stats.cometHits++;
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
-                backglass.showMessage('SATELLITE!', 900);
+                backglass.showMessage('COMET!', 900);
                 triggerCameraShake(120, 0.005); // matches hitSatellite()'s cameraShake(120, 0.005)
                 playHitSound(880);
-                progressMission('satellite');
+                progressMission('comet');
+            } else if (meta.kind === 'saturn') {
+                // Board redesign: the giant Saturn centerpiece - the single biggest non-mission
+                // scoring hit on the board (SCORE_SATURN), with a correspondingly bigger camera
+                // beat than any regular obstacle. Not mission-tied (there's no 4th mission-target
+                // object for it to belong to) - a standalone "boss" bonus, same spirit as the
+                // bumper cluster's own boss bumper above.
+                setCooldown(mesh, COOLDOWN_SATURN_MS);
+                addScore(SCORE_SATURN);
+                stats.saturnHits++;
+                pulseMesh(mesh);
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage('SATURN! +' + SCORE_SATURN, 1100);
+                triggerCameraShake(200, 0.009);
+                triggerCameraPunch(300, cameraForwardDir.scale(0.015));
+                playSaturnHitSound();
             } else if (meta.kind === 'slingshot') {
                 setCooldown(mesh, COOLDOWN_SLINGSHOT_MS);
                 addScore(SCORE_SLINGSHOT);
@@ -2659,6 +2869,12 @@
                 triggerCameraShake(80, 0.003); // matches hitReentryLane()'s cameraShake(80, 0.003)
                 playHitSound(990);
                 progressMission('lane');
+            } else if (meta.kind === 'powerUp') {
+                // powerUp.active (see updatePowerUp()) is the real source of truth for whether
+                // this should count - guards against a trigger event that fires right as the orb
+                // is being hidden/despawned in the same frame.
+                if (!powerUp.active) return;
+                collectPowerUp();
             }
         }
 
@@ -2846,10 +3062,12 @@
             score = 0;
             lives = STARTING_LIVES;
             stats.bumperHits = 0;
-            stats.satelliteHits = 0;
+            stats.cometHits = 0;
+            stats.saturnHits = 0;
             stats.targetHits = 0;
             stats.laneHits = 0;
             stats.missionsCompleted = 0;
+            stats.powerUpsCollected = 0;
             // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
             // score/lives/stats above - resets on every new game, not a permanent meta-progression.
             mission.state = 'idle';
@@ -2860,6 +3078,13 @@
             backglass.state.rank = RANK_NAMES[0];
             backglass.state.missionName = null;
             backglass.state.missionProgress = 0;
+            // Power-up (board redesign) - also per-run state, same reasoning as mission/rank above.
+            powerUp.active = false;
+            powerUp.timerMs = POWERUP_SPAWN_INTERVAL_MS;
+            powerUp.multiplierRemainingMs = 0;
+            scoreMultiplier = 1;
+            backglass.state.multiplierActive = false;
+            obstacles.powerUpMesh.setEnabled(false);
             setScore(0);
             setLives(lives);
             backglass.redraw();
@@ -2945,9 +3170,11 @@
             const statLines = [
                 ['Missions Completed', stats.missionsCompleted],
                 ['Bumper Hits', stats.bumperHits],
-                ['Satellite Hits', stats.satelliteHits],
+                ['Comet Hits', stats.cometHits],
+                ['Saturn Hits', stats.saturnHits],
                 ['Target Hits', stats.targetHits],
-                ['Lane Hits', stats.laneHits]
+                ['Lane Hits', stats.laneHits],
+                ['Power-Ups Collected', stats.powerUpsCollected]
             ];
             statLines.forEach(([label, value]) => {
                 if (value > 0) {
@@ -2979,12 +3206,22 @@
             // satisfy the doc's "no charge-time or physics-state corruption from the pause
             // duration" requirement. Camera effects and the dev-panel status readouts are left
             // running during pause - harmless either way, and simpler than guarding everything.
+            updateSaturnRotation(obstacles.saturnRings, deltaMs);
+
             if (!isPaused) {
                 updateFlipperMotor(leftFlipper, deltaMs);
                 updateFlipperMotor(rightFlipper, deltaMs);
                 updateBallPhysics(mainBall, deltaMs);
                 testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
                 updateBallTrail(ballTrail, mainBall, highFidelity);
+
+                // Power-up spawn/despawn timer + multiplier countdown - gated on ballInPlay too
+                // (not just isPaused), same reasoning as the plunger-charge guard just below: no
+                // point burning down a spawn timer or an active multiplier window before the ball
+                // is even launched.
+                if (ballInPlay) {
+                    updatePowerUp(deltaMs);
+                }
 
                 if (ccdTestActive) {
                     ccdTestElapsedMs += deltaMs;
