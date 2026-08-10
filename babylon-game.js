@@ -308,6 +308,16 @@
         playNoiseClick(0.15, 0.08);
     }
 
+    // Drop-target bank cleared (user-requested upgrade) - a three-note ascending square-wave
+    // fanfare, shorter than playRankUpSound()'s four-note one so the two "you achieved something"
+    // stings don't read as identical, and square-toned rather than sine/triangle so it's also
+    // distinct from playOrbitCompleteSound()'s sweep-then-chime.
+    function playTargetBankCompleteSound() {
+        playTone(440, 0.14, { type: 'square', volume: 0.16 });
+        setTimeout(() => playTone(660, 0.14, { type: 'square', volume: 0.16 }), 110);
+        setTimeout(() => playTone(880, 0.22, { type: 'square', volume: 0.18 }), 220);
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -570,6 +580,15 @@
         { x: -0.16, z: 0.28 },
         { x: -0.11, z: 0.24 }
     ]; // 3 targets in an angled upper-left bank, matching CONFIG.missionTargetCount
+
+    // Drop-target bank upgrade (user-requested) - a hit target sinks from its raised resting
+    // height down to below the playfield surface instead of just flashing in place. Named here
+    // so both buildObstacles() (initial mesh placement) and main()'s updateDropTargetBank()
+    // (the per-frame tween) reference the same two endpoints rather than duplicating the
+    // literal 0.015 in two places.
+    const TARGET_RAISED_Y_M = 0.015;
+    const TARGET_DROPPED_Y_M = -0.05;
+    const TARGET_DROP_ANIM_MS = 220;
 
     // Giant spinning Saturn (board redesign, user-requested) - the table's new visual and
     // gameplay centerpiece, top-center. Real collider (notably bigger than every other bumper -
@@ -881,6 +900,12 @@
     const SCORE_BOSS_BUMPER = 1200; // one bumper in the cluster is a bigger "boss" variant (board redesign) - worth notably more
     const SCORE_COMET = 1000; // was SCORE_SATELLITE - renamed alongside the satellite->comet reskin
     const SCORE_MISSION_TARGET = 750;
+    // Drop-target bank upgrade - a separate, one-time bonus for dropping all of MISSION_TARGET_
+    // BANK, on top of (not instead of) each individual target's own SCORE_MISSION_TARGET hit.
+    // Deliberately not folded into MISSION_COMPLETE_BONUS or the mission FSM at all - the bank
+    // and the mission-select system are two independent mechanics that happen to share the same
+    // three meshes (see dropMissionTarget()'s comment in main()).
+    const SCORE_TARGET_BANK_COMPLETE = 2500;
     const SCORE_REENTRY_LANE = 2000;
     const SCORE_SLINGSHOT = 100;
     const SCORE_SATURN = 3000; // the new giant Saturn centerpiece - the single biggest non-mission scoring hit on the board, matching its size/prominence
@@ -1998,18 +2023,23 @@
         });
 
         const missionTargetMeshes = [];
+        const missionTargetLamps = [];
         MISSION_TARGET_BANK.forEach((pos, i) => {
             const mesh = BABYLON.MeshBuilder.CreateBox('missionTarget' + i, {
                 width: TARGET_RADIUS_M * 2,
                 height: 0.03,
                 depth: 0.008
             }, scene);
-            mesh.position.set(pos.x, 0.015, pos.z);
+            mesh.position.set(pos.x, TARGET_RAISED_Y_M, pos.z);
             mesh.material = targetMats[i % targetMats.length];
             mesh.metadata = { kind: 'missionTarget', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
             // Trigger, not physical - detect-only per the doc (mission targets don't block the
             // ball in the 2D game either; they're an overlap, not a collider, in setupCollisions()).
+            // Deliberately never moved when the target drops (see updateDropTargetBank() in
+            // main()) - only the visual mesh above sinks. The trigger volume staying put is what
+            // lets handleTriggerHit() treat dropTargetBank[i].dropped as the sole scoring gate,
+            // fully decoupled from wherever the flag mesh currently is mid-animation.
             aggregate.shape.isTrigger = true;
 
             // Drop-target read: a darker backing panel just behind the flag (a real drop target's
@@ -2023,12 +2053,23 @@
             backing.position.set(pos.x, 0.015, pos.z + 0.006);
             backing.material = housingMat;
 
+            // Its own cloned material (not shared with the flag's targetMats[i] like before) so
+            // the lamp can independently show the target's raised/dropped state - matching the
+            // per-instance-clone treatment every other stateful lamp in this file already gets
+            // (inlane/outlane lamps, orbit lamps). Starts bright/"lit" since targets begin raised.
+            const lampColor = COLOR_CHAKRA[i % COLOR_CHAKRA.length];
+            const lampMat = new BABYLON.PBRMaterial('missionTarget' + i + 'LampMat', scene);
+            lampMat.albedoColor = lampColor.scale(0.3);
+            lampMat.metallic = 0.2;
+            lampMat.roughness = 0.4;
+            lampMat.emissiveColor = lampColor.scale(0.9);
             const lamp = BABYLON.MeshBuilder.CreateSphere('missionTarget' + i + 'Lamp', {
                 diameter: TARGET_RADIUS_M * 0.6
             }, scene);
             lamp.position.set(pos.x, 0.004, pos.z);
-            lamp.material = targetMats[i % targetMats.length];
+            lamp.material = lampMat;
             missionTargetMeshes.push(mesh);
+            missionTargetLamps.push(lamp);
         });
 
         // ===================================
@@ -2513,7 +2554,7 @@
         // Saturn's rings every frame, drive the power-up orb's spawn/despawn cycle, and run the
         // Vision Gate's own capture sequence against a direct mesh reference (the ring, not the
         // trigger - the ring is what's actually visible and worth flashing/sparkling).
-        return { missionTargetMeshes, saturnRings, powerUpMesh, visionGateMesh: ring };
+        return { missionTargetMeshes, missionTargetLamps, saturnRings, powerUpMesh, visionGateMesh: ring };
     }
 
     // Drain zone (Stage 6, babylon-prompts/06-*.md) - see the block comment above SCORE_ATTACK_
@@ -3125,7 +3166,7 @@
         const stats = {
             bumperHits: 0, cometHits: 0, saturnHits: 0, targetHits: 0, laneHits: 0,
             missionsCompleted: 0, powerUpsCollected: 0, inlaneHits: 0, outlaneHits: 0,
-            leftOrbitShots: 0, rightOrbitShots: 0, visionGateCaptures: 0
+            leftOrbitShots: 0, rightOrbitShots: 0, visionGateCaptures: 0, targetBankCompletions: 0
         };
 
         // Mission/rank progression state (improvement-prompts/05-*.md). rank is an index into
@@ -3133,6 +3174,20 @@
         // 'active' (progress is accumulating toward `required`, gated by MISSION_DEFS'
         // selectedIndex-matched type in progressMission() below).
         const mission = { state: 'idle', selectedIndex: null, progress: 0, required: 0, rank: 0 };
+
+        // Drop-target bank state (mission targets upgraded from a flash-and-cooldown flag into a
+        // real drop-target bank, user-requested) - one entry per MISSION_TARGET_BANK index.
+        // `dropped` is the actual trigger/collision gate, checked synchronously in
+        // handleTriggerHit() the instant a hit lands; `animMs` (remaining ms in the current sink
+        // tween) drives updateDropTargetBank()'s purely visual position lerp below. Deliberately
+        // two separate fields, not one - a target is unhittable the instant it's marked dropped,
+        // well before its multi-frame drop animation finishes settling, matching the requirement
+        // that visual animation and trigger/collision state stay cleanly separated. Independent
+        // of `mission` above: dropping a target still selects/starts a mission exactly as before
+        // (see handleTriggerHit()), but the bank itself - and its own bank-complete bonus - is a
+        // separate mechanic that doesn't feed mission.progress and isn't reset by it, only reset
+        // alongside it (see resetDropTargetBank()'s call sites).
+        const dropTargetBank = MISSION_TARGET_BANK.map(() => ({ dropped: false, animMs: 0 }));
 
         // Orbit shot state (one entry per side) - `armedAt` is the timestamp (performance.now()-
         // style ms) of the last valid entrance hit, or null if the entrance hasn't fired (or its
@@ -3403,6 +3458,11 @@
             triggerCameraShake(500, 0.01);
             triggerCameraPunch(500, new BABYLON.Vector3(0, 0.02, -0.03));
             playRankUpSound();
+            // Drop-target bank reset (user-requested upgrade) - a mission completing is one of
+            // the transitions the bank is required to reset on, regardless of which targets are
+            // currently down (a target dropped toward this mission doesn't need to stay down once
+            // the mission it helped select/finish is over).
+            resetDropTargetBank();
         }
 
         // Per-object hit cooldown, ported from isOnCooldown()/setCooldown() in ../index.js
@@ -3567,6 +3627,55 @@
             flashLamp(lamp, COLOR_LANE_LAMP);
         }
 
+        // Persistent (not a fade-back flash like flashLamp() above) lit/dim state for a mission
+        // target's own indicator lamp - matches the requirement that each drop target carry its
+        // own state light, independent of the flag mesh's own drop animation.
+        function setMissionTargetLampLit(index, lit) {
+            const lampMat = obstacles.missionTargetLamps[index].material;
+            const color = COLOR_CHAKRA[index % COLOR_CHAKRA.length];
+            lampMat.emissiveColor = lit ? color.scale(0.9) : color.scale(0.12);
+        }
+
+        // Marks a target dropped (the real trigger/collision gate, checked in handleTriggerHit()
+        // below) and starts its visual sink - see dropTargetBank's own block comment above for why
+        // these are two separate pieces of state rather than one. The trigger volume itself never
+        // moves (buildObstacles()), so nothing here needs to touch physics.
+        function dropMissionTarget(index) {
+            const target = dropTargetBank[index];
+            target.dropped = true;
+            target.animMs = TARGET_DROP_ANIM_MS;
+            setMissionTargetLampLit(index, false);
+        }
+
+        // Pops every target in the bank back up and relights its lamp - instant, not animated,
+        // matching every other per-run reset in this file (mission/orbitState/powerUp/visionGate
+        // in startNewGame() below, none of which animate back to their rest state either).
+        // Called from the three transitions the bank is required to reset on: a drain that
+        // doesn't end the game and a fresh new game (both via resetBallToPlunger()'s two call
+        // sites), and completeMission().
+        function resetDropTargetBank() {
+            dropTargetBank.forEach((target, i) => {
+                target.dropped = false;
+                target.animMs = 0;
+                obstacles.missionTargetMeshes[i].position.y = TARGET_RAISED_Y_M;
+                setMissionTargetLampLit(i, true);
+            });
+        }
+
+        // Per-frame visual-only tween, driven by the render loop's deltaMs like every other
+        // continuous effect here (updateSaturnRotation()/updatePowerUp()). Purely cosmetic - a
+        // target already stopped scoring the instant dropMissionTarget() set `dropped`, well
+        // before this finishes sinking the mesh.
+        function updateDropTargetBank(deltaMs) {
+            dropTargetBank.forEach((target, i) => {
+                if (target.animMs <= 0) return;
+                target.animMs = Math.max(0, target.animMs - deltaMs);
+                const progress = 1 - target.animMs / TARGET_DROP_ANIM_MS;
+                obstacles.missionTargetMeshes[i].position.y =
+                    BABYLON.Scalar.Lerp(TARGET_RAISED_Y_M, TARGET_DROPPED_Y_M, progress);
+            });
+        }
+
         function handlePhysicalHit(mesh) {
             const meta = mesh.metadata;
             if (!meta || isOnCooldown(mesh)) return;
@@ -3651,6 +3760,14 @@
             }
             if (isOnCooldown(mesh)) return;
             if (meta.kind === 'missionTarget') {
+                // Drop-target bank upgrade: the trigger volume never moves once a target drops
+                // (see buildObstacles()'s comment - only the flag mesh sinks, in
+                // updateDropTargetBank()), so the ball can keep overlapping a dropped target's
+                // trigger indefinitely. dropTargetBank[].dropped is the real "can this still
+                // score" gate, checked here instead of relying on the cooldown alone -
+                // COOLDOWN_MISSION_TARGET_MS below still debounces the single valid hit itself
+                // (rapid multi-frame overlap on first contact), same as it always did.
+                if (dropTargetBank[meta.index].dropped) return;
                 setCooldown(mesh, COOLDOWN_MISSION_TARGET_MS);
                 addScore(SCORE_MISSION_TARGET);
                 stats.targetHits++;
@@ -3658,6 +3775,7 @@
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 triggerCameraShake(60, 0.002); // matches hitMissionTarget()'s cameraShake(60, 0.002)
                 playHitSound(740);
+                dropMissionTarget(meta.index);
                 // hitMissionTarget() in ../index.js shows "Selected: {missionName}" here - now a
                 // real mission-select state exists (improvement-prompts/05-*.md): an idle target
                 // hit selects+starts this index's mission; a hit while one is already active is
@@ -3666,6 +3784,17 @@
                     startMission(meta.index);
                 } else {
                     backglass.showMessage('TARGET!', 700);
+                }
+                // Bank-complete check, after the above so its message/feedback lands last (the
+                // more significant beat) - see SCORE_TARGET_BANK_COMPLETE's comment for why this
+                // stays fully independent of mission.progress/completeMission().
+                if (dropTargetBank.every((t) => t.dropped)) {
+                    addScore(SCORE_TARGET_BANK_COMPLETE);
+                    stats.targetBankCompletions++;
+                    backglass.showMessage('TARGET BANK CLEARED!', 1200);
+                    triggerCameraShake(250, 0.005);
+                    triggerCameraPunch(250, new BABYLON.Vector3(0, 0.015, -0.02));
+                    playTargetBankCompleteSound();
                 }
             } else if (meta.kind === 'reentryLane') {
                 setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
@@ -3793,6 +3922,12 @@
                     }
                     backglass.redraw();
                     resetBallToPlunger();
+                    // Drop-target bank reset (user-requested upgrade) - real drop-target banks
+                    // reset at the start of each new ball, not mid-ball; this is the "life lost,
+                    // game continues" path (the lives<=0/showGameOverScreen() branch above
+                    // returns before reaching here, so a true game-ending drain doesn't double up
+                    // with startNewGame()'s own reset later).
+                    resetDropTargetBank();
                 };
                 if (isPaused) {
                     pendingDrainAction = action;
@@ -3979,8 +4114,12 @@
             stats.leftOrbitShots = 0;
             stats.rightOrbitShots = 0;
             stats.visionGateCaptures = 0;
+            stats.targetBankCompletions = 0;
             orbitState.left.armedAt = null;
             orbitState.right.armedAt = null;
+            // Drop-target bank (user-requested upgrade) - per-run state, same reasoning as
+            // mission/rank/power-up above.
+            resetDropTargetBank();
             // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
             // score/lives/stats above - resets on every new game, not a permanent meta-progression.
             mission.state = 'idle';
@@ -4092,7 +4231,8 @@
                 ['Left Orbit Shots', stats.leftOrbitShots],
                 ['Right Orbit Shots', stats.rightOrbitShots],
                 ['Vision Gate Captures', stats.visionGateCaptures],
-                ['Power-Ups Collected', stats.powerUpsCollected]
+                ['Power-Ups Collected', stats.powerUpsCollected],
+                ['Target Bank Clears', stats.targetBankCompletions]
             ];
             statLines.forEach(([label, value]) => {
                 if (value > 0) {
@@ -4129,6 +4269,7 @@
             if (!isPaused) {
                 updateFlipperMotor(leftFlipper, deltaMs);
                 updateFlipperMotor(rightFlipper, deltaMs);
+                updateDropTargetBank(deltaMs);
                 // Skipped while the Vision Gate holds the ball (visionGate.active) - not just a
                 // nicety: updateBallPhysics()'s own anti-stuck kick fires after STUCK_TIME_
                 // THRESHOLD_MS (450ms) of near-zero speed, which a deliberately-frozen kinematic
