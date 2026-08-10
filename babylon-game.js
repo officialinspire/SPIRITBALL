@@ -297,6 +297,17 @@
         setTimeout(() => playTone(pitchBase * 1.5, 0.14, { type: 'triangle', volume: 0.15 }), 100);
     }
 
+    // VISION GATE capture - a multi-layered "portal reveal," deliberately the longest and most
+    // elaborate sting in the game (matching its status as the signature feature): a slow rising
+    // sweep underneath two shimmering, overlapping tones, plus a soft noise layer for texture -
+    // distinct in shape from every other sound here, none of which use more than two layers.
+    function playVisionGateSound() {
+        playTone(160, 0.5, { type: 'sawtooth', freqEnd: 420, volume: 0.16 });
+        setTimeout(() => playTone(660, 0.3, { type: 'sine', freqEnd: 990, volume: 0.13 }), 150);
+        setTimeout(() => playTone(880, 0.35, { type: 'triangle', freqEnd: 660, volume: 0.12 }), 300);
+        playNoiseClick(0.15, 0.08);
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -723,6 +734,50 @@
     ];
 
     // ===================================
+    // VISION GATE - SPIRITBALL's signature capture/portal target. A difficult mid/upper-
+    // playfield scoop: on a valid entry the ball is captured (frozen in place, never lost), a
+    // short psychedelic reveal sequence plays, then the ball ejects back into play. Full behavior
+    // lives in main() (visionGate state, startVisionGateCapture()/endVisionGateCapture()) - this
+    // block is geometry/scoring/timing constants only, so every tunable number lives in one place.
+    //
+    // Position checked against every neighboring obstacle's real footprint before picking numbers
+    // (same discipline as ORBITS' own clearance math above) - this is genuinely the last open
+    // pocket left on the board: squeezed between the boss bumper (BUMPER_CLUSTER[0], below), the
+    // power-up orb (POWERUP_POS, left), Saturn's collider (above), and the right orbit's guide
+    // rail (right). That tightness is a feature, not a compromise - a "difficult" signature shot
+    // should require real precision, not just be another open target. See buildObstacles() for
+    // the physical mechanism: a small trigger sphere (the actual capture volume) sits inside a
+    // 3-post ring - left/right/far posts only, deliberately leaving the near (-Z, bumper-cluster-
+    // facing) side open as the shot's approach mouth, the same "raised back and sides, open front"
+    // shape a real pinball scoop has. Posts are real CYLINDER colliders (Havok has no torus
+    // primitive - confirmed by the existing bumper/Saturn/comet decorative rings in this file
+    // never getting a PhysicsAggregate at all), so a near-miss clips a post and bounces away
+    // rather than sailing through untouched.
+    const VISION_GATE_POS = { x: 0.045, z: 0.235 };
+    const VISION_GATE_RADIUS_M = 0.015; // the actual capture trigger
+    const VISION_GATE_COLLAR_RADIUS_M = 0.02; // ring radius the 3 guard posts sit on
+    // Awarded once per successful capture - deliberately the single biggest configurable bonus on
+    // the board (bigger than Saturn's 3000, just under a mission completion's 5000), matching a
+    // signature feature's weight. Kept as its own named constant, not folded into MISSION_
+    // COMPLETE_BONUS or SCORE_SATURN, specifically so it stays independently tunable.
+    const SCORE_VISION_GATE = 4000;
+    // Total capture->eject duration. Short enough to stay "a beat," not a cutscene - about 3x a
+    // mission-complete's own camera beat (500ms), the biggest existing moment on the board, since
+    // this is meant to read as bigger still without genuinely interrupting pinball flow.
+    const VISION_GATE_SEQUENCE_MS = 1800;
+    // Debounces the entry trigger itself, on top of the visionGate.active state guard (see
+    // main()) - two independent layers, not one. Deliberately set LONGER than VISION_GATE_
+    // SEQUENCE_MS, not just "a normal debounce window" - it's set once, at the moment capture
+    // starts, and needs to still be covering the trigger mesh at the moment the ball is ejected
+    // back into real physics right next to it (see endVisionGateCapture()). Without that margin,
+    // the cooldown from the ORIGINAL entry would already have expired by eject time, and a ball
+    // that hasn't yet physically cleared the trigger's small radius could immediately re-arm a
+    // second capture on itself.
+    const COOLDOWN_VISION_GATE_MS = VISION_GATE_SEQUENCE_MS + 300;
+    const VISION_GATE_EJECT_SPEED_MS = 550 * PX_TO_M; // ~0.519 m/s eject kick
+    const HEX_VISION_GATE = 0xaa00ff; // vivid violet - "third eye" adjacent to COLOR_CHAKRA's own palette (which the capture sequence cycles through) without duplicating any single existing identity color
+
+    // ===================================
     // Plunger / launch lane (babylon-prompts/05-*.md). Per that stage's own recommendation, this
     // is a kinematic-animated plunger mesh (no physics body of its own) plus a directly-set ball
     // velocity on release - not a simulated spring - for the same determinism reasons the 2D
@@ -996,7 +1051,8 @@
     const HEX_BACKGROUND = 0x1a0033;
 
     let COLOR_BALL, COLOR_EYEBALL, COLOR_FLIPPER, COLOR_WALL, COLOR_BUMPERS, COLOR_CHAKRA,
-        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_ORBIT_LAMP, COLOR_BACKGROUND;
+        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_ORBIT_LAMP,
+        COLOR_VISION_GATE, COLOR_BACKGROUND;
 
     // Device-tier gate, ported from PerformanceManager.detectPerformance() in ../index.js -
     // simplified to the single boolean the doc asks for ("structured so they *can* be gated...
@@ -2354,10 +2410,110 @@
             });
         });
 
+        // VISION GATE - see its own block comment (near VISION_GATE_POS' declaration) for the
+        // layout/clearance reasoning and why the "physical rim" is a 3-post ring, not a torus
+        // (Havok has no torus primitive - none of this file's existing decorative rings, Saturn's
+        // included, ever get a PhysicsAggregate).
+        const visionGateMat = new BABYLON.PBRMaterial('visionGateMat', scene);
+        visionGateMat.albedoColor = COLOR_VISION_GATE;
+        visionGateMat.metallic = 0.3;
+        visionGateMat.roughness = 0.25;
+        visionGateMat.emissiveColor = COLOR_VISION_GATE.scale(0.4); // dim "at rest" glow - startVisionGateCapture() in main() brightens/cycles this well past resting value, endVisionGateCapture() restores it
+
+        // Sunken well - a dark disc set slightly below the playfield surface, reading as an
+        // actual hole/portal rather than a flat decal. Purely decorative, like every other
+        // "housing" piece on the board.
+        const well = BABYLON.MeshBuilder.CreateCylinder('visionGateWell', {
+            diameter: VISION_GATE_COLLAR_RADIUS_M * 1.7,
+            height: 0.006,
+            tessellation: 24
+        }, scene);
+        well.position.set(VISION_GATE_POS.x, -0.005, VISION_GATE_POS.z);
+        const wellMat = new BABYLON.PBRMaterial('visionGateWellMat', scene);
+        wellMat.albedoColor = new BABYLON.Color3(0.02, 0, 0.05);
+        wellMat.metallic = 0.1;
+        wellMat.roughness = 0.6;
+        well.material = wellMat;
+
+        // Glowing rim ring - decorative only (see the block comment above), but the visual "this
+        // is a real fixture, not a flat marker" cue, and the mesh startVisionGateCapture()'s
+        // psychedelic color-cycle actually animates. Deliberately sized well past the physical
+        // guard posts' own footprint (2.6x VISION_GATE_COLLAR_RADIUS_M, vs the posts sitting
+        // right on it) - verified via Playwright screenshot that the posts/well alone, sized to
+        // fit this gate's tight real-estate, read as visually lost against the boss bumper/orbit
+        // rail/comet crowding it from the fixed gameplay camera. The ring has no clearance
+        // constraint of its own (no PhysicsAggregate), so it can extend past them for real
+        // distinctiveness without risking any of the physical layout's verified clearances.
+        const ring = BABYLON.MeshBuilder.CreateTorus('visionGateRing', {
+            diameter: VISION_GATE_COLLAR_RADIUS_M * 2.6,
+            thickness: 0.007,
+            tessellation: 24
+        }, scene);
+        ring.position.set(VISION_GATE_POS.x, 0.01, VISION_GATE_POS.z);
+        ring.rotation.x = Math.PI / 2; // lay flat against the table plane
+
+        // Vertical light beacon - a thin, tall emissive-only spire standing up from the gate,
+        // reading clearly against the open dark sky above the table instead of competing with
+        // the crowded playfield at the gate's own height. Same material/color-cycle target as the
+        // ring (see startVisionGateCapture()) - between the two, the gate is identifiable from
+        // across the whole board, not just up close.
+        const beacon = BABYLON.MeshBuilder.CreateCylinder('visionGateBeacon', {
+            diameter: 0.006,
+            height: 0.16,
+            tessellation: 12
+        }, scene);
+        beacon.position.set(VISION_GATE_POS.x, 0.08, VISION_GATE_POS.z);
+        const beaconMat = new BABYLON.PBRMaterial('visionGateBeaconMat', scene);
+        beaconMat.albedoColor = COLOR_VISION_GATE;
+        beaconMat.emissiveColor = COLOR_VISION_GATE.scale(0.5);
+        beaconMat.alpha = 0.55; // translucent - reads as a beam of light, not a solid post
+        beacon.material = beaconMat;
+        ring.material = visionGateMat;
+
+        // 3 guard posts (left/right/far), deliberately leaving the near (-Z, bumper-cluster-
+        // facing) side open as the shot's approach mouth - the same "raised back and sides, open
+        // front" shape a real scoop has. Real physics (cylinders, unlike the ring above), so a
+        // near-miss clips one and bounces away instead of sailing through untouched. Feedback
+        // reuses the existing generic 'wall' handling, same as every other guide rail/post added
+        // in earlier features.
+        [
+            { x: VISION_GATE_POS.x - VISION_GATE_COLLAR_RADIUS_M, z: VISION_GATE_POS.z },
+            { x: VISION_GATE_POS.x + VISION_GATE_COLLAR_RADIUS_M, z: VISION_GATE_POS.z },
+            { x: VISION_GATE_POS.x, z: VISION_GATE_POS.z + VISION_GATE_COLLAR_RADIUS_M }
+        ].forEach((postPos, i) => {
+            const post = BABYLON.MeshBuilder.CreateCylinder('visionGatePost' + i, {
+                diameter: 0.009,
+                height: 0.026
+            }, scene);
+            post.position.set(postPos.x, 0.013, postPos.z);
+            post.material = housingMat;
+            post.metadata = { kind: 'wall' };
+            new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.5, friction: 0.4 }, scene);
+        });
+
+        // The actual capture trigger - centered at the ball's own resting height (not the well's
+        // sunken visual depth) so its overlap volume genuinely intersects the ball's collision
+        // sphere as it rolls across the playfield surface. Invisible in normal play, translucent
+        // debug overlay under ?dev=1, same convention as every other trigger added so far.
+        const visionGateTrigger = BABYLON.MeshBuilder.CreateSphere('visionGateTrigger', {
+            diameter: VISION_GATE_RADIUS_M * 2
+        }, scene);
+        visionGateTrigger.position.set(VISION_GATE_POS.x, 0.015, VISION_GATE_POS.z);
+        const triggerMat = new BABYLON.PBRMaterial('visionGateTriggerMat', scene);
+        triggerMat.albedoColor = new BABYLON.Color3(0.8, 0.3, 1);
+        triggerMat.alpha = 0.35;
+        triggerMat.emissiveColor = new BABYLON.Color3(0.8, 0.3, 1).scale(0.5);
+        visionGateTrigger.material = triggerMat;
+        visionGateTrigger.isVisible = devMode;
+        visionGateTrigger.metadata = { kind: 'visionGate' };
+        const visionGateAggregate = new BABYLON.PhysicsAggregate(visionGateTrigger, BABYLON.PhysicsShapeType.SPHERE, { mass: 0 }, scene);
+        visionGateAggregate.shape.isTrigger = true;
+
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
-        // Saturn's rings every frame, and drive the power-up orb's spawn/despawn cycle - the
-        // pieces of obstacle geometry later code needs a direct mesh reference to.
-        return { missionTargetMeshes, saturnRings, powerUpMesh };
+        // Saturn's rings every frame, drive the power-up orb's spawn/despawn cycle, and run the
+        // Vision Gate's own capture sequence against a direct mesh reference (the ring, not the
+        // trigger - the ring is what's actually visible and worth flashing/sparkling).
+        return { missionTargetMeshes, saturnRings, powerUpMesh, visionGateMesh: ring };
     }
 
     // Drain zone (Stage 6, babylon-prompts/06-*.md) - see the block comment above SCORE_ATTACK_
@@ -2406,6 +2562,7 @@
         COLOR_MISSION_ACTIVE = hexToColor3(HEX_MISSION_ACTIVE);
         COLOR_LANE_LAMP = hexToColor3(HEX_LANE_LAMP);
         COLOR_ORBIT_LAMP = hexToColor3(HEX_ORBIT_LAMP);
+        COLOR_VISION_GATE = hexToColor3(HEX_VISION_GATE);
         COLOR_BACKGROUND = hexToColor3(HEX_BACKGROUND);
 
         const engine = new BABYLON.Engine(canvas, true);
@@ -2453,7 +2610,12 @@
         // is conditional. Full mobile performance tuning remains Stage 11's job.
         const highFidelity = detectHighFidelity();
         const glowLayer = new BABYLON.GlowLayer('glow', scene);
-        glowLayer.intensity = highFidelity ? 0.8 : 0.5;
+        // Named (not just assigned inline) so the Vision Gate's temporary glow boost
+        // (startVisionGateCapture() in main()) has a real "what does resting look like" value to
+        // restore, rather than assuming "whatever it happened to be right before" - this is the
+        // only place glowLayer.intensity is ever set outside that one feature.
+        const restGlowIntensity = highFidelity ? 0.8 : 0.5;
+        glowLayer.intensity = restGlowIntensity;
 
         if (highFidelity) {
             const pipeline = new BABYLON.DefaultRenderingPipeline('defaultPipeline', true, scene, [camera]);
@@ -2963,7 +3125,7 @@
         const stats = {
             bumperHits: 0, cometHits: 0, saturnHits: 0, targetHits: 0, laneHits: 0,
             missionsCompleted: 0, powerUpsCollected: 0, inlaneHits: 0, outlaneHits: 0,
-            leftOrbitShots: 0, rightOrbitShots: 0
+            leftOrbitShots: 0, rightOrbitShots: 0, visionGateCaptures: 0
         };
 
         // Mission/rank progression state (improvement-prompts/05-*.md). rank is an index into
@@ -2979,6 +3141,19 @@
         // partial shot (entered, stalled, rolled back without reaching the top) can't score, and a
         // stale arm from a much earlier pass can't retroactively count a later, unrelated hit.
         const orbitState = { left: { armedAt: null }, right: { armedAt: null } };
+
+        // VISION GATE capture state (see its own block comment near VISION_GATE_POS' declaration
+        // for the full feature design). `active` is the single source of truth handleTriggerHit()
+        // checks before starting a new capture - both a debounce layer on top of the trigger's
+        // own cooldown, and what guarantees the ball can never be captured twice at once (so it
+        // can never appear lost or duplicated). `ball` is deliberately a reference to the same
+        // {mesh, aggregate, stuckTimeMs} shape createBall()/updateBallPhysics() already use, not
+        // hardcoded to "the" global mainBall - startVisionGateCapture()/endVisionGateCapture()
+        // both take a `ball` parameter and operate purely through it, so a future multiball
+        // system could call them for whichever ball entered the gate without changing either
+        // function. `colorTimers`/`sparkle` are just handles this file's own code needs to clean
+        // up if a capture is cut short (see startNewGame()) rather than running to completion.
+        const visionGate = { active: false, ball: null, colorTimers: [], sparkle: null };
 
         // Score-multiplier power-up state (board redesign) - `active` is the real source of truth
         // for whether the orb is currently hittable (checked in handleTriggerHit()), `timerMs`
@@ -3056,6 +3231,127 @@
                 obstacles.powerUpMesh.setEnabled(true);
                 powerUp.timerMs = POWERUP_ACTIVE_DURATION_MS;
             }
+        }
+
+        // VISION GATE - see its own block comment (near VISION_GATE_POS' declaration) for the
+        // full design. Called from handleTriggerHit()'s 'visionGate' branch with the ball that
+        // entered (mainBall today; written to take a `ball` parameter rather than close over
+        // mainBall directly, so a future multiball system can reuse this unchanged).
+        function startVisionGateCapture(ball) {
+            const body = ball.aggregate.body;
+            body.setLinearVelocity(BABYLON.Vector3.Zero());
+            body.setAngularVelocity(BABYLON.Vector3.Zero());
+            // Snap to the gate's own center at a slightly sunken height, reading as "held inside
+            // the well" rather than resting on top of it - then go kinematic so nothing (gravity,
+            // the tilt, a stray nearby collision) can move it until endVisionGateCapture() runs.
+            // This is the "pause only that ball's movement, not the entire game" mechanism -
+            // scene.physicsEnabled stays true throughout, so flippers/other geometry keep
+            // stepping normally; only this one body stops responding to forces.
+            ball.mesh.position.set(VISION_GATE_POS.x, 0.008, VISION_GATE_POS.z);
+            body.setMotionType(BABYLON.PhysicsMotionType.ANIMATED);
+
+            visionGate.active = true;
+            visionGate.ball = ball;
+
+            addScore(SCORE_VISION_GATE);
+            stats.visionGateCaptures++;
+            // No MISSION_DEFS entry uses type 'visionGate' yet (this task only asks that the
+            // feature be ABLE to participate in missions later) - progressMission() already no-ops
+            // for any type the active mission isn't selected on, so calling it unconditionally
+            // here costs nothing today and means a future mission definition needs zero changes
+            // to this function to start working.
+            progressMission('visionGate');
+            backglass.showMessage('VISION GATE', VISION_GATE_SEQUENCE_MS - 100);
+
+            triggerCameraShake(300, 0.008);
+            triggerCameraPunch(400, cameraForwardDir.scale(0.012));
+            playVisionGateSound();
+            spawnHitBurst(scene, particleTexture, obstacles.visionGateMesh, highFidelity);
+            // buildChakraSparkle() already no-ops (returns null) under reduced motion - no extra
+            // guard needed here, just the null-check before disposing it later.
+            visionGate.sparkle = buildChakraSparkle(scene, particleTexture, obstacles.visionGateMesh, highFidelity);
+
+            // A brief scene-wide bloom boost - reusing the existing GlowLayer (see the doc's
+            // "existing glow... systems" requirement) rather than standing up a second, separate
+            // effect. Not gated by reduced-motion: this is a brightness change, not motion/
+            // flashing, so it doesn't carry the same photosensitivity concern the color-cycle
+            // below deliberately treats more strictly.
+            glowLayer.intensity = restGlowIntensity + 0.4;
+
+            startVisionGateColorCycle();
+
+            setTimeout(() => {
+                // Same pendingDrainAction pattern used for the drain->reset delay: a plain JS
+                // timer isn't gated by scene.physicsEnabled, so pausing mid-sequence must defer
+                // the eject rather than let it fire invisibly underneath the pause overlay.
+                if (isPaused) {
+                    pendingVisionGateEject = endVisionGateCapture;
+                } else {
+                    endVisionGateCapture();
+                }
+            }, VISION_GATE_SEQUENCE_MS);
+        }
+
+        // Cycles the gate ring's emissive color through COLOR_CHAKRA for the "psychedelic"
+        // reveal. Under reduced motion this is deliberately NOT just slowed (this file's usual
+        // "ambient motion reduced, not eliminated" pattern, e.g. updateSaturnRotation()) - rapid
+        // color flashing is a specific photosensitivity trigger, not general vestibular motion,
+        // so it's replaced outright with one steady bright color instead of a dimmer cycle.
+        function startVisionGateColorCycle() {
+            const mat = obstacles.visionGateMesh.material;
+            if (window.SPIRITBALL_reducedMotion) {
+                mat.emissiveColor = COLOR_VISION_GATE.scale(1.3);
+                return;
+            }
+            const steps = COLOR_CHAKRA.length;
+            const stepMs = VISION_GATE_SEQUENCE_MS / steps;
+            for (let i = 0; i < steps; i++) {
+                const timer = setTimeout(() => {
+                    mat.emissiveColor = COLOR_CHAKRA[i].scale(1.2);
+                }, i * stepMs);
+                visionGate.colorTimers.push(timer);
+            }
+        }
+
+        // Ends an in-progress capture: restores the gate's rest-state visuals, cleans up the
+        // sparkle particle system, and ejects the captured ball back into real (dynamic) physics.
+        function endVisionGateCapture() {
+            visionGate.colorTimers.forEach(clearTimeout);
+            visionGate.colorTimers = [];
+            obstacles.visionGateMesh.material.emissiveColor = COLOR_VISION_GATE.scale(0.4);
+            glowLayer.intensity = restGlowIntensity;
+
+            if (visionGate.sparkle) {
+                const sparkle = visionGate.sparkle;
+                sparkle.stop();
+                setTimeout(() => {
+                    if (!sparkle.isDisposed) sparkle.dispose();
+                }, (sparkle.maxLifeTime + 0.15) * 1000);
+                visionGate.sparkle = null;
+            }
+
+            const ball = visionGate.ball;
+            visionGate.ball = null;
+            visionGate.active = false;
+            // Defensive only - the ball is kinematic and off-screen state changes (drain, new
+            // game) can't reach a frozen body, but startNewGame() clears visionGate.active/ball
+            // directly on a hard reset, so this can legitimately be null if that raced ahead of
+            // this timer somehow.
+            if (!ball || !ball.aggregate.body) return;
+
+            const body = ball.aggregate.body;
+            // Repositioned back toward -Z before going dynamic again - the gate's own open mouth
+            // (the 3 guard posts only cover left/right/far, see buildObstacles()), and already
+            // outside the trigger's own radius (0.015m) so the instant physics resumes, the ball
+            // isn't still sitting inside the volume it just fired. Checked clear of both nearby
+            // obstacles at this exact offset: ~0.067m from the boss bumper's center (needs >
+            // 0.0435m combined radii) and ~0.046m from the power-up orb's (needs > 0.0295m) -
+            // real margin on both, unlike ejecting toward Saturn/the orbit rail's much tighter
+            // quarters on the other sides of this gate.
+            ball.mesh.position.set(VISION_GATE_POS.x, BALL_REST_Y_M, VISION_GATE_POS.z - 0.03);
+            body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
+            body.setLinearVelocity(new BABYLON.Vector3(-0.05, 0, -VISION_GATE_EJECT_SPEED_MS));
+            clampBodySpeed(body, MAX_BALL_SPEED_MS);
         }
 
         // Selects AND starts a mission in one action (see MISSION_DEFS' comment for why) -
@@ -3439,6 +3735,16 @@
                 // is being hidden/despawned in the same frame.
                 if (!powerUp.active) return;
                 collectPowerUp();
+            } else if (meta.kind === 'visionGate') {
+                // Debounced two independent ways - the shared isOnCooldown() gate above
+                // (COOLDOWN_VISION_GATE_MS) plus visionGate.active itself. This is the one
+                // trigger in the game that must never let two captures overlap (it would mean
+                // trying to freeze/score/eject against a ball that's already mid-sequence), so it
+                // gets the same "active flag as the real source of truth" pattern powerUp.active
+                // already uses, on top of - not instead of - the normal per-mesh cooldown.
+                if (visionGate.active) return;
+                setCooldown(mesh, COOLDOWN_VISION_GATE_MS);
+                startVisionGateCapture(mainBall);
             }
         }
 
@@ -3450,6 +3756,13 @@
         // end up display:flex at the same time as pauseOverlay). pendingDrainAction defers that
         // action until resumeGame() actually runs it, instead of letting it fire invisibly.
         let pendingDrainAction = null;
+
+        // Same reasoning as pendingDrainAction above, for the Vision Gate's own post-capture
+        // eject timer (see startVisionGateCapture() in main()) - a plain JS setTimeout isn't
+        // gated by scene.physicsEnabled either, so pausing mid-sequence must defer the eject
+        // rather than let a kinematic-to-dynamic switch + velocity kick fire invisibly underneath
+        // the pause overlay.
+        let pendingVisionGateEject = null;
 
         // Ported from checkDrain() in ../index.js: lose a life, end this ball's turn. No
         // GameOverScene equivalent exists yet (Stage 12), so hitting 0 lives just resets lives
@@ -3604,6 +3917,13 @@
                 pendingDrainAction = null;
                 action();
             }
+            // Same deferred-action pattern for a Vision Gate eject that would otherwise have
+            // fired mid-pause - see pendingVisionGateEject's own declaration comment.
+            if (pendingVisionGateEject) {
+                const eject = pendingVisionGateEject;
+                pendingVisionGateEject = null;
+                eject();
+            }
         }
 
         function openControlsScreen() {
@@ -3623,6 +3943,28 @@
             // pendingDrainAction comment) - starting fresh here makes it stale; left set, it
             // would incorrectly fire against this new game's state on a future pause/resume.
             pendingDrainAction = null;
+            // Same "starting fresh makes any deferred/in-progress state stale" reasoning as
+            // pendingDrainAction above, extended to a Vision Gate capture that might genuinely be
+            // in progress (color-cycle timers running, sparkle alive, ball held kinematic) at the
+            // moment of a hard reset (e.g. the dev "RESET BALL TO PLUNGER" button, or a future
+            // menu path). Restoring the ball to DYNAMIC unconditionally here - not just when
+            // visionGate.active is true - is deliberate: it's a correct no-op on an already-
+            // dynamic ball, and guarantees resetBallToPlunger() below (which assumes a normal
+            // dynamic body and doesn't itself touch motion type) can never leave the ball
+            // permanently frozen.
+            pendingVisionGateEject = null;
+            visionGate.colorTimers.forEach(clearTimeout);
+            visionGate.colorTimers = [];
+            if (visionGate.sparkle) {
+                visionGate.sparkle.stop();
+                if (!visionGate.sparkle.isDisposed) visionGate.sparkle.dispose();
+                visionGate.sparkle = null;
+            }
+            visionGate.active = false;
+            visionGate.ball = null;
+            obstacles.visionGateMesh.material.emissiveColor = COLOR_VISION_GATE.scale(0.4);
+            glowLayer.intensity = restGlowIntensity;
+            mainBall.aggregate.body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
             score = 0;
             lives = STARTING_LIVES;
             stats.bumperHits = 0;
@@ -3636,6 +3978,7 @@
             stats.outlaneHits = 0;
             stats.leftOrbitShots = 0;
             stats.rightOrbitShots = 0;
+            stats.visionGateCaptures = 0;
             orbitState.left.armedAt = null;
             orbitState.right.armedAt = null;
             // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
@@ -3748,6 +4091,7 @@
                 ['Outlane Hits', stats.outlaneHits],
                 ['Left Orbit Shots', stats.leftOrbitShots],
                 ['Right Orbit Shots', stats.rightOrbitShots],
+                ['Vision Gate Captures', stats.visionGateCaptures],
                 ['Power-Ups Collected', stats.powerUpsCollected]
             ];
             statLines.forEach(([label, value]) => {
@@ -3785,7 +4129,16 @@
             if (!isPaused) {
                 updateFlipperMotor(leftFlipper, deltaMs);
                 updateFlipperMotor(rightFlipper, deltaMs);
-                updateBallPhysics(mainBall, deltaMs);
+                // Skipped while the Vision Gate holds the ball (visionGate.active) - not just a
+                // nicety: updateBallPhysics()'s own anti-stuck kick fires after STUCK_TIME_
+                // THRESHOLD_MS (450ms) of near-zero speed, which a deliberately-frozen kinematic
+                // ball would trip well before VISION_GATE_SEQUENCE_MS (1800ms) elapses, yanking it
+                // out of the gate mid-sequence with a random kick. The ball is never actually
+                // "stuck" here - it's being held on purpose - so this is the correct guard, not a
+                // workaround.
+                if (!visionGate.active) {
+                    updateBallPhysics(mainBall, deltaMs);
+                }
                 testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
                 updateBallTrail(ballTrail, mainBall, highFidelity);
 
