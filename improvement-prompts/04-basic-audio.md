@@ -43,3 +43,66 @@ current build.
 - No console errors or startup failures related to audio, including on first load before any user
   gesture (autoplay policies).
 - A mute/volume control exists and is reachable from the controls or pause screen.
+
+## Implementation note
+
+**Approach.** Went with the raw Web Audio API rather than Babylon's `Sound`/`AudioEngine` wrapper.
+All effects are procedurally synthesized at play-time — no audio files were added — consistent with
+the starfield/particle/font precedent cited above. Two building blocks cover every effect:
+
+- `playTone(freq, durationS, opts)` — an `OscillatorNode` (sine by default) through a `GainNode`
+  with an exponential-decay envelope, optionally sweeping frequency via
+  `exponentialRampToValueAtTime` (used for the launch's rising pitch sweep). Cheap, and a sine tone
+  with a fast decay reads as a "pling"/"blip" which suits bumpers, targets, and lanes well.
+- `playNoiseClick(durationS, volume)` — a short `AudioBufferSourceNode` filled with generated white
+  noise, for the percussive, non-tonal sounds (flipper solenoid click, wall thud, drain).
+
+Both route through a single `masterGainNode` (`AudioContext.destination` ← `masterGainNode` ←
+individual per-sound gain envelopes), so mute is just `masterGainNode.gain.value = 0/1` — one place
+to silence everything, including any sound already mid-decay.
+
+**Autoplay-policy compliance.** `getAudioContext()` lazily constructs the `AudioContext` (and
+resumes it if suspended) only on first call, and every playback function call goes through it. The
+context is never touched at page/script load. Verified via Playwright
+(`audio-01-noerrors.js`) that a page load with **zero** user interaction produces no console errors
+or thrown exceptions — the game simply plays silently until the first real gesture (a launch,
+flipper press, etc.) creates/resumes the context.
+
+**Events wired:**
+- `playLaunchSound(powerPercent)` — rising frequency sweep, sweep range/duration scaled by launch
+  power — on `handleLaunchRelease()`.
+- `playFlipperSound()` — noise click — on the leading edge of `activateFlipper()` (only on
+  active-state transition, not every frame it's held).
+- `playHitSound(pitch)` — tone, pitch varied per obstacle type (bumper 660Hz, satellite 880Hz,
+  slingshot 520Hz, mission target 740Hz, re-entry lane 990Hz) — on `handlePhysicalHit()` /
+  `handleTriggerHit()`.
+- `playWallSound()` — noise click, quieter/duller than the flipper click — on wall and
+  flipper-body physical contact.
+- `playDrainSound()` — descending tone — on `handleDrain()`.
+- `playGameOverSound()` — short descending tone sequence — first statement in
+  `showGameOverScreen()`.
+
+All playback calls are wrapped in try/catch; a synthesis failure is swallowed (audio is decorative,
+never allowed to break gameplay).
+
+**Mute control.** A `🔊 SOUND: ON` / `🔇 SOUND: OFF` toggle button was added to the Controls screen
+(`#mute-toggle-btn`, styled by the existing generic `.screen-overlay button` rule — no new CSS).
+State persists via `localStorage['spiritball-muted']` and is restored on load, applied to
+`masterGainNode.gain.value` immediately so it also affects in-flight/already-mid-decay sounds, not
+just future ones.
+
+**Verification (Playwright, headless Chromium):**
+- `audio-01-noerrors.js` — page load, no gesture: zero console/page errors.
+- `audio-02-play.js` — real launch (Space) + dev ball-drop hit attempts: zero errors; controls-
+  screen mute toggle flips the button label and persists `spiritball-muted` to `localStorage`.
+- `audio-03-gain-check.js` — confirmed `masterGainNode.gain.value` is `1` during normal play, drops
+  to `0` immediately on mute via the real UI flow, and restores to `1` on un-mute.
+- `audio-04-persist-reload.js` — pre-set `localStorage['spiritball-muted'] = 'true'`, reloaded the
+  page fresh: mute button correctly reads `🔇 SOUND: OFF` on load, confirming the persisted
+  preference (not just the live in-session toggle) is honored.
+- Full regression suite re-run after these changes (`flipper-test.js`, `ccd-test2.js`,
+  `hud-check.js`, plus a 10s plunger-rest recheck): all pass, zero errors — the audio module adds
+  no side effects to physics or existing UI state.
+
+A temporary `window.__DEBUG_AUDIO` hook (exposing `getAudioContext`/`getMasterGain` for the gain
+tests above) was added during development and removed before commit.
