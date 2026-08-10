@@ -1118,8 +1118,14 @@
         mesh.rotation.x = 0.4;
         mesh.material = mat;
 
+        // Score/lives (improvement-prompts/07-*.md) deliberately live ONLY on #player-hud now,
+        // not here - see that DOM element's own comment in index.html for the full reasoning
+        // (guaranteed-legible on any device/camera angle vs. this panel's "cabinet flavor" role).
+        // The backglass keeps everything the DOM HUD doesn't show: the high score to beat, rank,
+        // active mission progress, and transient hit messages - genuinely complementary now,
+        // not a second "SCORE 0" competing with the first.
         const state = {
-            score: 0, highScore: 0, lives: STARTING_LIVES, message: '', messageTimer: null,
+            highScore: 0, message: '', messageTimer: null,
             // Mission/rank progression (improvement-prompts/05-*.md) - missionName is null when
             // no mission is active, matching the original 2D HUD's "Select Mission" idle state.
             rank: RANK_NAMES[0], missionName: null, missionProgress: 0, missionRequired: 0
@@ -1138,28 +1144,21 @@
 
             ctx.textBaseline = 'top';
             ctx.textAlign = 'left';
-            ctx.font = 'bold 30px monospace';
-            ctx.fillStyle = '#00ffff';
-            ctx.fillText('SCORE ' + state.score, 16, 16);
-
-            ctx.font = 'bold 20px monospace';
+            // HIGH SCORE is now the headline number here (score itself lives on #player-hud) -
+            // the one score-related fact worth featuring on the cabinet is the target to beat.
+            ctx.font = 'bold 28px monospace';
             ctx.fillStyle = '#ffd700';
-            ctx.fillText('HI ' + state.highScore, 16, 58);
+            ctx.fillText('HIGH SCORE ' + state.highScore, 16, 16);
 
-            ctx.textAlign = 'right';
-            ctx.fillStyle = '#ff0099';
-            ctx.fillText('BALLS ' + state.lives, width - 16, 58);
-            ctx.textAlign = 'left';
-
-            ctx.font = 'bold 16px monospace';
+            ctx.font = 'bold 18px monospace';
             ctx.fillStyle = '#00ff99';
-            ctx.fillText('RANK: ' + state.rank, 16, 92);
+            ctx.fillText('RANK: ' + state.rank, 16, 58);
 
             if (state.missionName) {
                 ctx.fillStyle = '#ffaa00';
                 ctx.fillText(
                     'MISSION: ' + state.missionName + ' ' + state.missionProgress + '/' + state.missionRequired,
-                    16, 114
+                    16, 84
                 );
             }
 
@@ -2394,7 +2393,6 @@
         function addScore(points) {
             score += points;
             setScore(score);
-            backglass.state.score = score;
             if (score > backglass.state.highScore) {
                 backglass.state.highScore = score;
                 localStorage.setItem(highScoreKey, String(score));
@@ -2594,7 +2592,6 @@
             ballInPlay = false;
             lives--;
             setLives(lives);
-            backglass.state.lives = lives;
             backglass.showMessage('DRAINED!', 1400); // no Grim Reaper visual yet (Stage 12) - this is the stand-in
             triggerCameraShake(400, 0.008); // matches checkDrain()'s cameraShake(400, 0.008)
             flashScreen(200, 255, 0, 0); // matches checkDrain()'s cameraFlash(200, 255, 0, 0, true) - red
@@ -2757,8 +2754,6 @@
             backglass.state.missionProgress = 0;
             setScore(0);
             setLives(lives);
-            backglass.state.score = 0;
-            backglass.state.lives = lives;
             backglass.redraw();
             resetBallToPlunger();
             isPaused = false;

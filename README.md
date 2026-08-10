@@ -74,6 +74,9 @@ each of these:
   elements — pop bumpers, mounted drop targets, a ringed satellite, wedge-housed slingshot
   kickers, and railed lane guides — via decorative companion meshes with no physics changes
   (`improvement-prompts/06-*.md`).
+- The player HUD and the 3D backglass no longer both show score: the HUD is the sole score/lives
+  readout (guaranteed legible on any device), and the backglass shows high score, rank, mission
+  progress, and hit messages instead (`improvement-prompts/07-*.md`).
 
 ## Contributing / continuing development
 
