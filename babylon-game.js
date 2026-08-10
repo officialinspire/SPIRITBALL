@@ -1328,8 +1328,6 @@
     // 07-*.md, not a separately-tracked color). Always fires regardless of reduced-motion - this
     // IS the "hit confirmed" feedback the doc says must stay intact; only its particle COUNT is
     // reduced on low-tier devices, which is a performance gate, not a motion gate.
-    // disposeOnStop cleans itself up automatically once its burst particles finish dying, so
-    // repeated hits don't accumulate leaked particle systems.
     function spawnHitBurst(scene, texture, mesh, highFidelity) {
         const color = mesh.material.albedoColor || mesh.material.diffuseColor;
         const burst = new BABYLON.ParticleSystem('hitBurst', highFidelity ? 30 : 12, scene);
@@ -1353,6 +1351,24 @@
         burst.disposeOnStop = true;
         burst.start();
         burst.stop();
+        // Bug fix (improvement-prompts/09-*.md's memory-leak check): disposeOnStop relies on the
+        // scene's own per-frame cleanup queue picking a system up once its particles finish
+        // dying (Scene._toBeDisposed, processed once per rendered frame in Babylon's own
+        // source) - confirmed via Playwright that under sustained hit-heavy load (a realistic
+        // rapid-bumper rally, ~50+ bursts alive at once) this reliably failed to happen at all:
+        // dozens of finished burst systems stayed registered in scene.particleSystems
+        // indefinitely, even after 5+ real seconds with nothing left to animate, while a single
+        // isolated burst disposed correctly within 3s. Likely a feedback loop specific to very
+        // low real frame rates (many concurrent systems compete for the same per-frame update
+        // budget, further slowing an already-slow frame rate, which in turn delays how much
+        // simulated particle-aging time each frame actually represents) - exactly the kind of
+        // low-end-device condition this prompt exists to profile for. A guaranteed explicit
+        // dispose after the system's own maximum particle lifetime closes that gap regardless of
+        // the underlying cause, with no visual cost (particles have already finished animating by
+        // then either way) and no risk of double-disposing (guarded by the isDisposed check).
+        setTimeout(() => {
+            if (!burst.isDisposed) burst.dispose();
+        }, (burst.maxLifeTime + 0.15) * 1000);
     }
 
     // Creates one physics-driven ball at the given position. Shared by the main game ball and

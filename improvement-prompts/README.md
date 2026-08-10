@@ -31,7 +31,7 @@ work on next, not this order:
 | 6 | `06-obstacle-geometry-polish.md` | ✅ Done — decorative companion meshes (skirts/collars/housings/rails) give every obstacle a distinct pinball-element silhouette, with zero changes to any collider. |
 | 7 | `07-hud-and-backglass-reconciliation.md` | ✅ Done — DOM HUD is the sole score/lives readout; the backglass now shows only what the HUD doesn't (high score, rank, mission progress, messages). |
 | 8 | `08-pwa-icon-and-manifest-refresh.md` | ✅ Done — replaced the flat "cosmic eyeball" icon with a procedurally-generated glowing neon orb + ring, pulled from the game's own actual color palette. |
-| 9 | `09-mobile-performance-profiling.md` | Device-tier performance gating exists but has never been validated against real low-end hardware. |
+| 9 | `09-mobile-performance-profiling.md` | ✅ Done — no real device reachable, so profiled via CPU-throttling/device-signal proxies; confirmed the `highFidelity` gate works correctly and found/fixed a real particle-system disposal leak under sustained hit load. |
 | 10 | `10-accessibility-pass.md` | Reduced-motion, color-contrast, and touch-target-sizing were built but never verified in practice. |
 
 ## What changed that makes these possible now
