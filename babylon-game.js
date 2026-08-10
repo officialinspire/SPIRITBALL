@@ -2203,15 +2203,25 @@
         // calls out the exact same scenario).
         function handleLaunchPress() {
             endAttractMode(); // first launch input ends attract mode, even if this press turns out to be a no-op below
-            if (ballInPlay) return;
+            if (ballInPlay || isPaused) return;
             plungerCharging = true;
             plungerChargeElapsedMs = 0;
             plungerPower = PLUNGER_MIN_POWER_MS;
             vibrateDevice(15); // matches handleLaunchPress()'s vibrate(15) in ../index.js - light tick: charging started
         }
 
+        // Bug fix (playtest audit): the isPaused guard matters specifically for the keyboard path
+        // - a player can hold Space (charging), tap Escape to pause with Space still physically
+        // down, then release Space while the pause menu is showing. Nothing about the pause
+        // overlay blocks a global `keyup` listener the way it blocks mobile touch controls (CSS
+        // z-index only stops pointer events, not keyboard events), so without this guard the ball
+        // would launch - complete with the LAUNCH! message, camera shake/punch, and sound -
+        // while still paused, purely because physics itself was frozen (scene.physicsEnabled =
+        // false), not because launching was actually blocked. Confirmed via Playwright: releasing
+        // Space mid-pause produced backglass.state.message === 'LAUNCH!' while the pause overlay
+        // was still showing.
         function handleLaunchRelease() {
-            if (ballInPlay) return;
+            if (ballInPlay || isPaused) return;
             if (!plungerCharging) {
                 plungerPower = PLUNGER_MIN_POWER_MS;
             }
@@ -2246,6 +2256,20 @@
         // isPaused/gameOverActive/menuOverlay/resumeGame()/startNewGame() are declared later in
         // this function (the screens module below) but safely readable here via closure, since
         // this callback only ever fires after main()'s full synchronous setup has completed.
+        // Bug fix (playtest audit): handleLaunchRelease() deliberately launches even without a
+        // matching handleLaunchPress() (see its own comment - "release immediately after a
+        // reset" needs to work if the key was already held down through a drain). But that same
+        // leniency meant the Space keyup from a restart-after-Game-Over or a resume-from-pause
+        // tap - keydowns that intentionally do NOT call handleLaunchPress(), since they're
+        // consumed by startNewGame()/resumeGame() instead - fell through to handleLaunchRelease()
+        // anyway, silently auto-launching the ball at minimum power the instant the game
+        // resumed/restarted, before the player had any chance to charge a real shot. Confirmed via
+        // Playwright: a single Space tap to resume from pause (or to restart after Game Over)
+        // left the launch button's "ready" class false immediately after, i.e. already launched.
+        // suppressNextLaunchRelease marks exactly those two keydown branches so the very next
+        // keyup is a no-op instead of an unintended launch, without touching the legitimate
+        // "held through a drain" case (which never sets this flag).
+        let suppressNextLaunchRelease = false;
         window.addEventListener('keydown', (e) => {
             if (e.code !== 'Space') return;
             e.preventDefault(); // stop the page from scrolling on spacebar
@@ -2256,16 +2280,23 @@
             }
             if (gameOverActive) {
                 startNewGame();
+                suppressNextLaunchRelease = true;
                 return;
             }
             if (isPaused) {
                 resumeGame();
+                suppressNextLaunchRelease = true;
                 return;
             }
             handleLaunchPress();
         });
         window.addEventListener('keyup', (e) => {
-            if (e.code === 'Space') handleLaunchRelease();
+            if (e.code !== 'Space') return;
+            if (suppressNextLaunchRelease) {
+                suppressNextLaunchRelease = false;
+                return;
+            }
+            handleLaunchRelease();
         });
 
         // --- Mobile controls (Stage 11, babylon-prompts/11-*.md) ---
@@ -2431,13 +2462,19 @@
             mission.state = 'idle';
             mission.selectedIndex = null;
             mission.progress = 0;
+            // Bug fix (playtest audit): at max rank (Fleet Admiral), mission.rank was already
+            // capped by this same Math.min() below, but the message always read "RANK UP: Fleet
+            // Admiral" regardless - misleading every time a mission completed after reaching max
+            // rank, since no rank-up actually happened. Confirmed via a forced-max-rank Playwright
+            // test. Now only shown when the rank index genuinely changed.
+            const rankedUp = mission.rank < RANK_NAMES.length - 1;
             mission.rank = Math.min(mission.rank + 1, RANK_NAMES.length - 1);
             stats.missionsCompleted++;
             backglass.state.missionName = null;
             backglass.state.missionProgress = 0;
             backglass.state.rank = RANK_NAMES[mission.rank];
             addScore(MISSION_COMPLETE_BONUS);
-            backglass.showMessage('RANK UP: ' + RANK_NAMES[mission.rank], 1600);
+            backglass.showMessage(rankedUp ? 'RANK UP: ' + RANK_NAMES[mission.rank] : 'MISSION COMPLETE!', 1600);
             // A stronger beat than any regular hit's - completing a mission and ranking up is the
             // single biggest moment the game currently has, deserves to read as one.
             triggerCameraShake(500, 0.01);
@@ -2582,6 +2619,15 @@
             }
         }
 
+        // Bug fix (playtest audit): handleDrain()'s post-drain setTimeout below is a plain JS
+        // timer, not gated by scene.physicsEnabled the way real physics stepping is - confirmed
+        // via Playwright that pausing during its 1500ms window did NOT stop it from firing
+        // underneath the pause overlay (resetBallToPlunger()/showGameOverScreen() would run while
+        // the player couldn't see it happening, and in the Game-Over case, gameOverOverlay could
+        // end up display:flex at the same time as pauseOverlay). pendingDrainAction defers that
+        // action until resumeGame() actually runs it, instead of letting it fire invisibly.
+        let pendingDrainAction = null;
+
         // Ported from checkDrain() in ../index.js: lose a life, end this ball's turn. No
         // GameOverScene equivalent exists yet (Stage 12), so hitting 0 lives just resets lives
         // and score in place after the same pause the 2D version used before showing Grim
@@ -2600,16 +2646,23 @@
             triggerCameraPunch(400, new BABYLON.Vector3(0, -0.03, 0));
             playDrainSound();
             setTimeout(() => {
-                if (lives <= 0) {
-                    // Stage 12: was "reset lives/score in place" (Stage 6's documented
-                    // simplification, made before any Game Over screen existed to show final
-                    // results on). Now shows the real Game Over screen instead; NEW GAME/restart
-                    // input there is what actually resets state - see showGameOverScreen().
-                    showGameOverScreen();
-                    return;
+                const action = () => {
+                    if (lives <= 0) {
+                        // Stage 12: was "reset lives/score in place" (Stage 6's documented
+                        // simplification, made before any Game Over screen existed to show final
+                        // results on). Now shows the real Game Over screen instead; NEW GAME/restart
+                        // input there is what actually resets state - see showGameOverScreen().
+                        showGameOverScreen();
+                        return;
+                    }
+                    backglass.redraw();
+                    resetBallToPlunger();
+                };
+                if (isPaused) {
+                    pendingDrainAction = action;
+                } else {
+                    action();
                 }
-                backglass.redraw();
-                resetBallToPlunger();
             }, 1500);
         }
 
@@ -2720,6 +2773,14 @@
             scene.physicsEnabled = true;
             pauseOverlay.style.display = 'none';
             controlsOverlay.style.display = 'none';
+            // Run any drain outcome (game over or ball reset) that was deferred because it would
+            // otherwise have fired invisibly underneath the pause overlay - see handleDrain()'s
+            // pendingDrainAction comment.
+            if (pendingDrainAction) {
+                const action = pendingDrainAction;
+                pendingDrainAction = null;
+                action();
+            }
         }
 
         function openControlsScreen() {
@@ -2735,6 +2796,10 @@
         // Matches restartGame()'s scene.start('GameScene') in ../index.js - straight back into
         // gameplay, no menu detour. Resets all run state, not just the ball's position.
         function startNewGame() {
+            // Discard any drain outcome deferred by a pause mid-delay (see handleDrain()'s
+            // pendingDrainAction comment) - starting fresh here makes it stale; left set, it
+            // would incorrectly fire against this new game's state on a future pause/resume.
+            pendingDrainAction = null;
             score = 0;
             lives = STARTING_LIVES;
             stats.bumperHits = 0;
