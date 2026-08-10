@@ -85,6 +85,15 @@ each of these:
   throttling doesn't reach this sandbox's software-rendering bottleneck, documented honestly) and
   confirmed to gate a real, substantial cost difference. That same pass found and fixed a real
   particle-system memory leak under sustained rapid-hit load (`improvement-prompts/09-*.md`).
+- Accessibility: the reduced-motion gate, HUD color contrast, and the neon palette's colorblind-
+  safety have all been verified against real rendered output (not just source values), touch
+  targets confirmed to meet the 44x44px guideline at real mobile viewport sizes, ARIA added to the
+  score/lives HUD and all 4 screen overlays, and a real pinch-zoom regression (present since the 3D
+  rewrite, already fixed once in the old 2D game) found and fixed
+  (`improvement-prompts/10-*.md`).
+
+All 10 items in the original `improvement-prompts/` roadmap are now done — see that directory's
+own README for a summary and where to pick up next.
 
 ## Contributing / continuing development
 

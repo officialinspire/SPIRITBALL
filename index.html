@@ -2,9 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <!-- viewport-fit=cover for safe-area insets, no pinch-zoom since this is a full-screen game,
-         PWA/homescreen hints. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <!-- viewport-fit=cover for safe-area insets, PWA/homescreen hints. Pinch-zoom is intentionally
+         NOT disabled (improvement-prompts/10-*.md) - the 2D game already fixed this exact issue
+         (archive/release-prompts/12-*.md: user-scalable=no/maximum-scale=1.0 blocks low-vision
+         users from zooming to read HUD/menu text) but the 3D rewrite's index.html never carried
+         the fix forward. touch-action: none on the flipper-zone/launch-btn control elements below
+         already prevents pinch/double-tap-zoom gestures specifically on those, so re-enabling zoom
+         elsewhere doesn't interfere with flipper/launch responsiveness. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
     <meta name="theme-color" content="#05010f">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -542,9 +547,13 @@
     <canvas id="renderCanvas"></canvas>
     <div id="flash-overlay"></div>
 
+    <!-- aria-live regions (improvement-prompts/10-*.md): role="status" + aria-live="polite" on
+         each row so assistive tech announces score/lives changes without interrupting whatever
+         the user is doing; aria-atomic="true" so the whole "Score 1500" line reads together
+         instead of just a bare, contextless number when only the value span's text changes. -->
     <div id="player-hud">
-        <div><span class="hud-label">Score</span><span class="hud-value" id="hud-score">0</span></div>
-        <div><span class="hud-label">Lives</span><span class="hud-value" id="hud-lives">3</span></div>
+        <div role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Score</span><span class="hud-value" id="hud-score">0</span></div>
+        <div role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Lives</span><span class="hud-value" id="hud-lives">3</span></div>
     </div>
 
     <div id="status-panel">
@@ -587,25 +596,31 @@
 
     <button id="pause-btn" aria-label="Pause Game">⏸</button>
 
+    <!-- role="dialog" + aria-modal + aria-labelledby (improvement-prompts/10-*.md) on every
+         full-screen overlay below, referencing each one's own heading id, so assistive tech
+         announces which screen is showing. Full focus-trapping (moving/returning DOM focus,
+         Tab-cycling containment) is a substantial addition beyond this pass's scope - noted as a
+         follow-up in that prompt's implementation note rather than attempted here. -->
+
     <!-- Menu/title screen (Stage 12) - shown until the first launch input, translucent so the
          idle attract-mode orbit camera (10-*.md) is visible behind it. -->
-    <div id="menu-overlay" class="screen-overlay">
-        <h1 class="pulse-text">SPIRITBALL</h1>
+    <div id="menu-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="menu-overlay-heading">
+        <h1 id="menu-overlay-heading" class="pulse-text">SPIRITBALL</h1>
         <p class="tagline">DMT Vision Quest Pinball</p>
         <p class="highscore-line" id="menu-highscore">HIGH SCORE: 0</p>
         <p class="start-instructions pulse-text" id="menu-start-instructions">PRESS SPACE TO START</p>
     </div>
 
-    <div id="pause-overlay" class="screen-overlay">
-        <h1>GAME PAUSED</h1>
+    <div id="pause-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="pause-overlay-heading">
+        <h1 id="pause-overlay-heading">GAME PAUSED</h1>
         <button id="pause-resume-btn">▶ RESUME GAME</button><br>
         <button id="pause-newgame-btn">🔄 NEW GAME</button><br>
         <button id="pause-controls-btn">ℹ CONTROLS</button>
         <p class="hint">ESC or TAP RESUME to continue</p>
     </div>
 
-    <div id="controls-overlay" class="screen-overlay">
-        <h1>CONTROLS</h1>
+    <div id="controls-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="controls-overlay-heading">
+        <h1 id="controls-overlay-heading">CONTROLS</h1>
         <div id="controls-rows"></div>
         <!-- Mute control (improvement-prompts/04-*.md) - the natural home for this per that
              prompt's own instruction, matching where the 2D game's Sound/Music toggle used to
@@ -615,8 +630,8 @@
         <button id="controls-back-btn">◄ BACK</button>
     </div>
 
-    <div id="gameover-overlay" class="screen-overlay">
-        <h1>GAME OVER</h1>
+    <div id="gameover-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="gameover-overlay-heading">
+        <h1 id="gameover-overlay-heading">GAME OVER</h1>
         <p>FINAL SCORE</p>
         <p id="gameover-score">0</p>
         <p class="highscore-line" id="gameover-highscore-line"></p>
