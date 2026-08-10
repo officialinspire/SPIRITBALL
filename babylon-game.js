@@ -1194,6 +1194,24 @@
             scene
         );
         aggregate.shape.filterMembershipMask = COLLISION_CATEGORY_BALL;
+        // Found via improvement-prompts/03-*.md's real-device QA pass: disablePreStep defaults to
+        // true (see the flipper/plunger's own comments on this same property), meaning
+        // mesh.position.set() has NO effect on this DYNAMIC body once it's been simulated even
+        // once - Havok keeps writing its own simulated position back to the mesh every step,
+        // silently overriding any direct position change. This made resetBallToPlunger() (used
+        // after every drain, by the dev reset button, and on every new game) completely
+        // non-functional for the position half of what it's supposed to do - confirmed via direct
+        // Playwright position sampling showing the ball's position genuinely unchanged in the
+        // instant after calling it, only drifting back toward the plunger later purely by
+        // coincidence (the same downhill gravity tilt that motivated improvement 2's plunger-
+        // collision fix). setLinearVelocity()/setAngularVelocity() were never affected by this -
+        // those are direct body API calls, not mesh-transform-mediated - which is why the launch
+        // mechanic (also just a velocity injection) always worked fine and this went unnoticed.
+        // Setting this false is a normal no-op every other frame (the mesh position already
+        // matches wherever Havok itself just wrote it), and only actually does anything on the
+        // rare frames something explicitly changes mesh.position - exactly the teleport behavior
+        // every reset/dev-button code path already assumed it was getting.
+        aggregate.body.disablePreStep = false;
 
         return { mesh, aggregate, stuckTimeMs: 0 };
     }

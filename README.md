@@ -61,9 +61,11 @@ each of these:
 - No sound or music at all.
 - No mission/rank progression system — bumpers/targets/lanes score points, but there's no overall
   game goal beyond survival and high score.
-- Several visual/physics features (materials, particles, backglass, mobile controls, pause/menu
-  screens) have only been verified via automated headless-browser testing, not extensive real
-  hands-on play across real devices.
+- Materials/lighting/glow, particles, the backglass, camera juice, scoring, drain/lives/Game-Over,
+  pause/resume, reduced-motion, and high-score persistence have all been verified against the real
+  running game (not just assumed from source) — see `improvement-prompts/03-*.md`. Mobile
+  multi-touch interaction specifically still hasn't been verified on a real device (no touch
+  hardware in this sandbox) — everything else in that checklist has.
 - Obstacle geometry (bumpers, targets, lanes, slingshots) is simple primitive shapes, not
   pinball-shaped models.
 
