@@ -577,6 +577,20 @@
         { x: 0.13, z: -0.30, mirror: -1 }
     ]; // directly above/outside each flipper, like real slingshot kickers
 
+    // Active slingshot kick: like the bumpers' applyBumperKick(), a real slingshot kicker
+    // actively punches the ball away rather than just bouncing it off restitution. Two separate
+    // tunable components (see applySlingshotKick() in main()): a lateral "away from the face"
+    // push using the same ball-relative direction math as the bumpers (naturally mirrors
+    // correctly for both the left and right slingshot, since it's derived from each mesh's own
+    // position), plus a fixed up-table (+Z) bias applied unconditionally on top. The bias is
+    // deliberately larger than the kick speed so the combined kick's net Z contribution can
+    // never end up negative (toward the flippers/drain) regardless of the ball's approach angle -
+    // a ball coming off a flipper shot approaches a slingshot from below (more negative Z), where
+    // the away-from-face component alone would often point further down-table, not the "feed the
+    // ball back into play" behavior a real slingshot has.
+    const SLINGSHOT_KICK_SPEED_MS = 520 * PX_TO_M; // ~0.491 m/s, away-from-face lateral push
+    const SLINGSHOT_KICK_UPTABLE_BIAS_MS = 600 * PX_TO_M; // ~0.567 m/s, unconditional +Z addition - larger than SLINGSHOT_KICK_SPEED_MS by design, see comment above
+
     const REENTRY_LANE_RADIUS_M = 0.016;
     const REENTRY_LANES = [
         { x: -0.14, z: 0.40 },
@@ -1932,7 +1946,6 @@
             mesh.position.set(def.x, 0.015, def.z);
             mesh.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20); // angled inward, like a real slingshot kicker
             mesh.material = slingshotMat;
-            mesh.metadata = { kind: 'slingshot' };
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
 
             // Kicker housing: a triangular-prism wedge (a cylinder with 3-sided tessellation is a
@@ -1949,7 +1962,16 @@
             housing.position.set(def.x, 0.013, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.15);
             housing.rotation.x = Math.PI / 2; // lay the prism flat, matching the table plane
             housing.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20) + Math.PI / 2;
-            housing.material = housingMat;
+            // A per-instance clone, not the shared housingMat every other decorative housing/
+            // skirt/rail uses - the new active-kick "rubber snap" flash (see snapSlingshot() in
+            // main()) brightens this material directly, and it must only affect this one
+            // slingshot's housing, not every object on the board that happens to share housingMat.
+            housing.material = housingMat.clone('slingshotHousingMat' + i);
+
+            // Referenced by snapSlingshot() (in main(), via the collider mesh's metadata below) so
+            // the hit handler - which only ever receives the collider mesh from the collision
+            // event - can reach this decorative housing without a separate scene lookup.
+            mesh.metadata = { kind: 'slingshot', housing };
         });
 
         // Unlit state: dim yellow-ish neutral (no direct 2D equivalent - the 2D lanes start
@@ -2813,6 +2835,69 @@
             clampBodySpeed(body, MAX_BALL_SPEED_MS);
         }
 
+        // Slingshot active kick - same "add to existing velocity, then clamp" shape as
+        // applyBumperKick() above, but with two separately-tunable directional components (see
+        // SLINGSHOT_KICK_SPEED_MS/SLINGSHOT_KICK_UPTABLE_BIAS_MS's comment for why the up-table
+        // bias can't just be folded into the ball-relative direction the way the bumper kick is).
+        function applySlingshotKick(mesh) {
+            const body = mainBall.aggregate.body;
+            if (!body) return;
+
+            const dx = mainBall.mesh.position.x - mesh.position.x;
+            const dz = mainBall.mesh.position.z - mesh.position.z;
+            const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+            if (horizontalDist < 1e-4) return; // ball reported dead-center over the slingshot - no well-defined push direction, skip rather than divide by ~0
+            const dirX = dx / horizontalDist;
+            const dirZ = dz / horizontalDist;
+
+            // Added to the ball's existing velocity, not substituted for it, same reasoning as
+            // applyBumperKick(). The up-table bias is a flat addition, not scaled by direction -
+            // it's what guarantees a positive net Z push regardless of approach angle (see the
+            // constants' comment).
+            const v = body.getLinearVelocity();
+            body.setLinearVelocity(new BABYLON.Vector3(
+                v.x + dirX * SLINGSHOT_KICK_SPEED_MS,
+                v.y,
+                v.z + dirZ * SLINGSHOT_KICK_SPEED_MS + SLINGSHOT_KICK_UPTABLE_BIAS_MS
+            ));
+
+            // Same shared safety ceiling as the bumper kick - see clampBodySpeed()'s comment.
+            // Combined with this branch only ever running once per COOLDOWN_SLINGSHOT_MS per
+            // slingshot (the isOnCooldown()/setCooldown() gate in handlePhysicalHit() below), a
+            // ball resting against a slingshot can never accumulate velocity frame over frame:
+            // Havok's own per-frame contact response isn't touched here, and this kick only fires
+            // on the discrete COLLISION_STARTED event through the cooldown gate, not every frame
+            // of continued contact.
+            clampBodySpeed(body, MAX_BALL_SPEED_MS);
+        }
+
+        // Fast "rubber snap" visual, layered on top of the shared pulseMesh() flash already used
+        // for every obstacle kind's hit feedback (kept as-is below - see the "reuse existing VFX"
+        // requirement). Distinct from pulseMesh() in two ways: it's a directional squash-and-
+        // stretch along the rubber face's own local width instead of a uniform scale-up, and it
+        // brightens the slingshot's own decorative housing (its per-instance material clone, see
+        // buildObstacles()) rather than the collider mesh - together reading as the rubber face
+        // physically recoiling, not just a generic hit flash. Snaps back faster (90ms) than
+        // pulseMesh()'s 100ms, matching the "fast" spec.
+        function snapSlingshot(mesh) {
+            const housing = mesh.metadata.housing;
+
+            const originalScale = mesh.scaling.clone();
+            mesh.scaling.x = originalScale.x * 1.5;
+            mesh.scaling.z = originalScale.z * 0.6;
+
+            const housingMat = housing.material;
+            const originalHousingEmissive = housingMat.emissiveColor ? housingMat.emissiveColor.clone() : null;
+            if (originalHousingEmissive) {
+                housingMat.emissiveColor = new BABYLON.Color3(1, 0.6, 1); // bright magenta-white, echoing the slingshot's own magenta identity rather than pulseMesh()'s plain white
+            }
+
+            setTimeout(() => {
+                if (!mesh.isDisposed()) mesh.scaling.copyFrom(originalScale);
+                if (originalHousingEmissive && !housing.isDisposed()) housingMat.emissiveColor.copyFrom(originalHousingEmissive);
+            }, 90);
+        }
+
         function handlePhysicalHit(mesh) {
             const meta = mesh.metadata;
             if (!meta || isOnCooldown(mesh)) return;
@@ -2863,7 +2948,9 @@
             } else if (meta.kind === 'slingshot') {
                 setCooldown(mesh, COOLDOWN_SLINGSHOT_MS);
                 addScore(SCORE_SLINGSHOT);
+                applySlingshotKick(mesh);
                 pulseMesh(mesh);
+                snapSlingshot(mesh); // extra "rubber snap" flourish on top of the shared pulseMesh() flash - see its comment
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + SCORE_SLINGSHOT, 600);
                 triggerCameraShake(120, 0.005); // matches hitSlingshot()'s cameraShake(120, 0.005)
