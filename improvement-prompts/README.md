@@ -32,7 +32,13 @@ work on next, not this order:
 | 7 | `07-hud-and-backglass-reconciliation.md` | ✅ Done — DOM HUD is the sole score/lives readout; the backglass now shows only what the HUD doesn't (high score, rank, mission progress, messages). |
 | 8 | `08-pwa-icon-and-manifest-refresh.md` | ✅ Done — replaced the flat "cosmic eyeball" icon with a procedurally-generated glowing neon orb + ring, pulled from the game's own actual color palette. |
 | 9 | `09-mobile-performance-profiling.md` | ✅ Done — no real device reachable, so profiled via CPU-throttling/device-signal proxies; confirmed the `highFidelity` gate works correctly and found/fixed a real particle-system disposal leak under sustained hit load. |
-| 10 | `10-accessibility-pass.md` | Reduced-motion, color-contrast, and touch-target-sizing were built but never verified in practice. |
+| 10 | `10-accessibility-pass.md` | ✅ Done — reduced-motion gate confirmed via a frame-rate-independent check, color contrast/colorblind-safety verified from real rendered pixels, touch targets confirmed at real mobile viewport size, ARIA added to the HUD and all 4 screen overlays, and a real regression (pinch-zoom disabled) found and fixed. |
+
+All 10 items in this original roadmap are now done. See each file's own "Implementation note" for
+what was actually built/found/fixed and how it was verified - several turned up real bugs beyond
+what their own prompt anticipated (a major ball-reset bug in `03-*.md`, a particle-system memory
+leak in `09-*.md`, a pinch-zoom regression in `10-*.md`). Further post-rewrite work can continue
+as new numbered prompts in this same directory, following the same format.
 
 ## What changed that makes these possible now
 
