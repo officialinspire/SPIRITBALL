@@ -77,6 +77,9 @@ each of these:
 - The player HUD and the 3D backglass no longer both show score: the HUD is the sole score/lives
   readout (guaranteed legible on any device), and the backglass shows high score, rank, mission
   progress, and hit messages instead (`improvement-prompts/07-*.md`).
+- The PWA/favicon icons now show a glowing neon orb + ring (matching the game's actual current
+  visual palette) instead of the old 2D "cosmic eyeball" sprite, which no longer matched even the
+  ball's own current look (`improvement-prompts/08-*.md`).
 
 ## Contributing / continuing development
 
