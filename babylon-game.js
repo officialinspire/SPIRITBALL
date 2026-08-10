@@ -258,6 +258,15 @@
         setTimeout(() => playTone(220, 0.4, { type: 'triangle', volume: 0.16 }), 360);
     }
 
+    // Ascending fanfare (the reverse shape of playGameOverSound()'s descending sting) for mission
+    // completion/rank-up (improvement-prompts/05-*.md) - the biggest positive beat the game has.
+    function playRankUpSound() {
+        playTone(392, 0.15, { type: 'square', volume: 0.15 });
+        setTimeout(() => playTone(523, 0.15, { type: 'square', volume: 0.15 }), 130);
+        setTimeout(() => playTone(659, 0.15, { type: 'square', volume: 0.15 }), 260);
+        setTimeout(() => playTone(784, 0.35, { type: 'square', volume: 0.17 }), 390);
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -593,16 +602,13 @@
     // ===================================
     // Scoring, collision/trigger detection, and the drain zone (babylon-prompts/06-*.md).
     //
-    // SCOPE DECISION for this pass, made explicitly rather than silently: the full mission FSM in
-    // ../index.js (mission select/start/complete/abort, fuel depletion, rank-up, the mission-
-    // target-selects-mission flow) is deeply tied to Phaser UI that doesn't exist in this build
-    // yet (popups, HUD text, mission-select feedback - that's Stage 12's job). Porting that logic
-    // now, with nothing able to display it, would be dead code nobody could verify. What IS
-    // ported for real this stage: the point values, the physical-vs-trigger collision
-    // architecture the doc asks for, per-object hit cooldowns (ported from
-    // isOnCooldown()/setCooldown()), and the drain zone (ball-loss detection), all driving a
-    // minimal score/lives readout on the existing dev status panel. Mission logic is deferred to
-    // whenever Stage 12's real UI exists to show it.
+    // SCOPE DECISION made back in Stage 6, now superseded: the full mission FSM in ../index.js
+    // (mission select/start/complete/abort, fuel depletion, rank-up, the mission-target-selects-
+    // mission flow) was deferred every stage since because it needed real UI to show it. Stage 12
+    // built that UI (backglass, HUD) but still didn't build the FSM itself - see
+    // improvement-prompts/05-mission-fsm-and-rank-system.md, implemented below (mission
+    // select/progress/complete + rank state live on the `mission` object and backglass.state,
+    // declared further down where `stats`/`backglass` are in scope).
     //
     // Point values ported directly from CONFIG.scores in ../index.js (not redesigned).
     const SCORE_ATTACK_BUMPER = 500;
@@ -610,6 +616,32 @@
     const SCORE_MISSION_TARGET = 750;
     const SCORE_REENTRY_LANE = 2000;
     const SCORE_SLINGSHOT = 100;
+    const MISSION_COMPLETE_BONUS = 5000;
+
+    // Rank names ported from the classic "3D Pinball for Windows - Space Cadet" progression this
+    // table's own layout is explicitly modeled on (see buildObstacles()'s "authentic
+    // Space-Cadet-inspired" comment) - the same rank ladder archive/KNOWN_ISSUES.md item 3
+    // references ("LT Commander -> Fleet Admiral", ranks 4-8 there matching indices 4-8 here).
+    const RANK_NAMES = [
+        'Cadet', 'Ensign', 'Lieutenant JG', 'Lieutenant', 'Lt. Commander',
+        'Commander', 'Captain', 'Commodore', 'Admiral', 'Fleet Admiral'
+    ];
+
+    // One mission slot per mission-target index (0-2, see MISSION_TARGET_BANK), each tied to a
+    // distinct scoring category so progress can only come from deliberate play toward the
+    // selected mission, not incidental hits of other types - the spirit of the original
+    // CONFIG.missions[rank][index] table (archive/KNOWN_ISSUES.md items 3 and 5) without its
+    // separate launch-ramp "start" step, which has no equivalent object in this 3D build (a
+    // mission-target hit selects AND starts in one action here - a deliberate simplification,
+    // not an oversight).
+    const MISSION_DEFS = [
+        { type: 'bumper', name: 'BUMPER RUN' },
+        { type: 'satellite', name: 'SATELLITE SWEEP' },
+        { type: 'lane', name: 'RE-ENTRY CIRCUIT' }
+    ];
+    function missionRequiredCount(rank) {
+        return 3 + rank; // scales with rank so later missions take deliberately more effort
+    }
 
     // Cooldown durations ported from setupCollisions()'s setCooldown() calls in ../index.js.
     const COOLDOWN_BUMPER_MS = 300;
@@ -1086,7 +1118,12 @@
         mesh.rotation.x = 0.4;
         mesh.material = mat;
 
-        const state = { score: 0, highScore: 0, lives: STARTING_LIVES, message: '', messageTimer: null };
+        const state = {
+            score: 0, highScore: 0, lives: STARTING_LIVES, message: '', messageTimer: null,
+            // Mission/rank progression (improvement-prompts/05-*.md) - missionName is null when
+            // no mission is active, matching the original 2D HUD's "Select Mission" idle state.
+            rank: RANK_NAMES[0], missionName: null, missionProgress: 0, missionRequired: 0
+        };
 
         function redraw() {
             ctx.fillStyle = '#05000f';
@@ -1113,6 +1150,18 @@
             ctx.fillStyle = '#ff0099';
             ctx.fillText('BALLS ' + state.lives, width - 16, 58);
             ctx.textAlign = 'left';
+
+            ctx.font = 'bold 16px monospace';
+            ctx.fillStyle = '#00ff99';
+            ctx.fillText('RANK: ' + state.rank, 16, 92);
+
+            if (state.missionName) {
+                ctx.fillStyle = '#ffaa00';
+                ctx.fillText(
+                    'MISSION: ' + state.missionName + ' ' + state.missionProgress + '/' + state.missionRequired,
+                    16, 114
+                );
+            }
 
             if (state.message) {
                 ctx.font = 'bold 32px monospace';
@@ -2223,7 +2272,13 @@
         // target/re-entry-lane; the 2D statistics object also tracks obstacle/inlane/outlane hits
         // that have no 3D equivalent yet). Feeds the Game Over screen's stat lines (Stage 12).
         // Bookkeeping only, not the deferred mission FSM itself.
-        const stats = { bumperHits: 0, satelliteHits: 0, targetHits: 0, laneHits: 0 };
+        const stats = { bumperHits: 0, satelliteHits: 0, targetHits: 0, laneHits: 0, missionsCompleted: 0 };
+
+        // Mission/rank progression state (improvement-prompts/05-*.md). rank is an index into
+        // RANK_NAMES; state is 'idle' (no mission active - a target hit will select+start one) or
+        // 'active' (progress is accumulating toward `required`, gated by MISSION_DEFS'
+        // selectedIndex-matched type in progressMission() below).
+        const mission = { state: 'idle', selectedIndex: null, progress: 0, required: 0, rank: 0 };
         const statusScore = document.getElementById('status-score');
         const statusLives = document.getElementById('status-lives');
         const hudScore = document.getElementById('hud-score');
@@ -2251,6 +2306,51 @@
                 localStorage.setItem(highScoreKey, String(score));
             }
             backglass.redraw();
+        }
+
+        // Selects AND starts a mission in one action (see MISSION_DEFS' comment for why) -
+        // triggered by hitting a mission target while no mission is active.
+        function startMission(index) {
+            mission.state = 'active';
+            mission.selectedIndex = index;
+            mission.progress = 0;
+            mission.required = missionRequiredCount(mission.rank);
+            backglass.state.missionName = MISSION_DEFS[index].name;
+            backglass.state.missionProgress = 0;
+            backglass.state.missionRequired = mission.required;
+            backglass.showMessage('MISSION: ' + MISSION_DEFS[index].name, 900);
+        }
+
+        // Called from the hit handlers below with the scoring category that just happened
+        // ('bumper'/'satellite'/'lane') - only counts toward an active mission's OWN type, so
+        // progress can't come from unrelated incidental scoring (see MISSION_DEFS' comment).
+        function progressMission(type) {
+            if (mission.state !== 'active' || MISSION_DEFS[mission.selectedIndex].type !== type) return;
+            mission.progress++;
+            backglass.state.missionProgress = mission.progress;
+            if (mission.progress >= mission.required) {
+                completeMission();
+            } else {
+                backglass.redraw();
+            }
+        }
+
+        function completeMission() {
+            mission.state = 'idle';
+            mission.selectedIndex = null;
+            mission.progress = 0;
+            mission.rank = Math.min(mission.rank + 1, RANK_NAMES.length - 1);
+            stats.missionsCompleted++;
+            backglass.state.missionName = null;
+            backglass.state.missionProgress = 0;
+            backglass.state.rank = RANK_NAMES[mission.rank];
+            addScore(MISSION_COMPLETE_BONUS);
+            backglass.showMessage('RANK UP: ' + RANK_NAMES[mission.rank], 1600);
+            // A stronger beat than any regular hit's - completing a mission and ranking up is the
+            // single biggest moment the game currently has, deserves to read as one.
+            triggerCameraShake(500, 0.01);
+            triggerCameraPunch(500, new BABYLON.Vector3(0, 0.02, -0.03));
+            playRankUpSound();
         }
 
         // Per-object hit cooldown, ported from isOnCooldown()/setCooldown() in ../index.js
@@ -2305,6 +2405,7 @@
                 backglass.showMessage('+' + SCORE_ATTACK_BUMPER, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
                 triggerCameraShake(120, 0.006); // matches hitAttackBumper()'s cameraShake(120, 0.006)
                 playHitSound(660);
+                progressMission('bumper');
             } else if (meta.kind === 'satellite') {
                 setCooldown(mesh, COOLDOWN_SATELLITE_MS);
                 addScore(SCORE_SATELLITE);
@@ -2314,6 +2415,7 @@
                 backglass.showMessage('SATELLITE!', 900);
                 triggerCameraShake(120, 0.005); // matches hitSatellite()'s cameraShake(120, 0.005)
                 playHitSound(880);
+                progressMission('satellite');
             } else if (meta.kind === 'slingshot') {
                 setCooldown(mesh, COOLDOWN_SLINGSHOT_MS);
                 addScore(SCORE_SLINGSHOT);
@@ -2354,12 +2456,17 @@
                 stats.targetHits++;
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
-                // hitMissionTarget() in ../index.js shows "Selected: {missionName}" here - no
-                // mission-select state exists yet (Stage 6's scope decision), so a generic
-                // acknowledgement stands in until Stage 12 gives this a real mission to name.
-                backglass.showMessage('TARGET!', 700);
                 triggerCameraShake(60, 0.002); // matches hitMissionTarget()'s cameraShake(60, 0.002)
                 playHitSound(740);
+                // hitMissionTarget() in ../index.js shows "Selected: {missionName}" here - now a
+                // real mission-select state exists (improvement-prompts/05-*.md): an idle target
+                // hit selects+starts this index's mission; a hit while one is already active is
+                // just a normal scored hit (matches the original - selecting doesn't interrupt).
+                if (mission.state === 'idle') {
+                    startMission(meta.index);
+                } else {
+                    backglass.showMessage('TARGET!', 700);
+                }
             } else if (meta.kind === 'reentryLane') {
                 setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
                 addScore(SCORE_REENTRY_LANE);
@@ -2379,6 +2486,7 @@
                 backglass.showMessage('RE-ENTRY!', 800);
                 triggerCameraShake(80, 0.003); // matches hitReentryLane()'s cameraShake(80, 0.003)
                 playHitSound(990);
+                progressMission('lane');
             }
         }
 
@@ -2441,11 +2549,10 @@
         // mounted-panel treatment is reserved for the in-gameplay backglass, 09-*.md, which earns
         // its 3D-ness by being part of the cabinet during play).
         //
-        // Scope note: Final Rank and mission-progress stats from GameOverScene in ../index.js are
-        // deliberately NOT shown - this stage builds the screens, not the mission FSM itself
-        // (still deferred, per Stage 6's decision), and a "Final Rank" with no rank-progression
-        // system behind it would just be a permanently-fake "Rookie." Only the hit-count stats
-        // that genuinely exist (see the `stats` object above) are shown.
+        // Final Rank and a Missions Completed stat line (see showGameOverScreen() below) were
+        // deliberately NOT shown when this stage was built - no mission FSM existed yet, so a
+        // "Final Rank" would've just been a permanently-fake "Rookie." Both now show real,
+        // earned values - see improvement-prompts/05-*.md.
         const menuOverlay = document.getElementById('menu-overlay');
         const pauseOverlay = document.getElementById('pause-overlay');
         const controlsOverlay = document.getElementById('controls-overlay');
@@ -2543,6 +2650,17 @@
             stats.satelliteHits = 0;
             stats.targetHits = 0;
             stats.laneHits = 0;
+            stats.missionsCompleted = 0;
+            // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
+            // score/lives/stats above - resets on every new game, not a permanent meta-progression.
+            mission.state = 'idle';
+            mission.selectedIndex = null;
+            mission.progress = 0;
+            mission.required = 0;
+            mission.rank = 0;
+            backglass.state.rank = RANK_NAMES[0];
+            backglass.state.missionName = null;
+            backglass.state.missionProgress = 0;
             setScore(0);
             setLives(lives);
             backglass.state.score = 0;
@@ -2611,6 +2729,10 @@
             gameOverActive = true;
             playGameOverSound();
             document.getElementById('gameover-score').textContent = String(score);
+            // Final Rank (improvement-prompts/05-*.md) - previously deliberately omitted per
+            // Stage 12's implementation note, since no real rank-progression system existed yet
+            // to back it; backglass.state.rank now holds this run's genuine final rank.
+            document.getElementById('gameover-rank-line').textContent = 'FINAL RANK: ' + backglass.state.rank;
 
             const hsLine = document.getElementById('gameover-highscore-line');
             if (score >= backglass.state.highScore) {
@@ -2624,6 +2746,7 @@
             const statsEl = document.getElementById('gameover-stats');
             statsEl.innerHTML = '';
             const statLines = [
+                ['Missions Completed', stats.missionsCompleted],
                 ['Bumper Hits', stats.bumperHits],
                 ['Satellite Hits', stats.satelliteHits],
                 ['Target Hits', stats.targetHits],

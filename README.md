@@ -61,8 +61,10 @@ each of these:
 - Sound effects (launch, flipper, obstacle hits, drain, game-over) are procedurally synthesized via
   the Web Audio API, with a mute control on the Controls screen (`improvement-prompts/04-*.md`).
   There's still no background music.
-- No mission/rank progression system — bumpers/targets/lanes score points, but there's no overall
-  game goal beyond survival and high score.
+- Mission/rank progression exists: hitting a mission target selects and starts one of 3 missions
+  (bumper/satellite/re-entry-lane focused), completing it awards a score bonus and advances a
+  Space-Cadet-style rank (Cadet through Fleet Admiral), shown on the backglass and as "Final Rank"
+  on the Game Over screen (`improvement-prompts/05-*.md`).
 - Materials/lighting/glow, particles, the backglass, camera juice, scoring, drain/lives/Game-Over,
   pause/resume, reduced-motion, and high-score persistence have all been verified against the real
   running game (not just assumed from source) — see `improvement-prompts/03-*.md`. Mobile
