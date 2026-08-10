@@ -80,6 +80,11 @@ each of these:
 - The PWA/favicon icons now show a glowing neon orb + ring (matching the game's actual current
   visual palette) instead of the old 2D "cosmic eyeball" sprite, which no longer matched even the
   ball's own current look (`improvement-prompts/08-*.md`).
+- The `highFidelity` device-tier gate (bloom/particle density) has been profiled against
+  low-end/high-end device-signal proxies (no real device reachable in this sandbox - CPU
+  throttling doesn't reach this sandbox's software-rendering bottleneck, documented honestly) and
+  confirmed to gate a real, substantial cost difference. That same pass found and fixed a real
+  particle-system memory leak under sustained rapid-hit load (`improvement-prompts/09-*.md`).
 
 ## Contributing / continuing development
 
