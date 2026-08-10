@@ -58,7 +58,9 @@ attract-mode camera, mobile touch controls, and menu/pause/controls/game-over sc
 Known gaps and rough edges — see `improvement-prompts/` for the scoped, actionable version of
 each of these:
 
-- No sound or music at all.
+- Sound effects (launch, flipper, obstacle hits, drain, game-over) are procedurally synthesized via
+  the Web Audio API, with a mute control on the Controls screen (`improvement-prompts/04-*.md`).
+  There's still no background music.
 - No mission/rank progression system — bumpers/targets/lanes score points, but there's no overall
   game goal beyond survival and high score.
 - Materials/lighting/glow, particles, the backglass, camera juice, scoring, drain/lives/Game-Over,

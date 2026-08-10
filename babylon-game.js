@@ -130,6 +130,134 @@
         }
     }
 
+    // ===================================
+    // Audio (improvement-prompts/04-*.md) - procedurally synthesized via the Web Audio API, no
+    // external files/CDN, consistent with this project's established pattern (the starfield
+    // skybox, particle texture, and UI fonts all made this same call - see
+    // babylon-prompts/07-*.md/08-*.md's implementation notes). The 2D game never had working
+    // audio either - its Sound/Music toggle was removed entirely rather than implemented,
+    // becoming this build's Controls screen (archive/release-prompts/04-*.md) - so there's
+    // nothing to port, this is new.
+    //
+    // The AudioContext is created lazily, on the first actual play call - never at page load -
+    // so this never fights browser autoplay-policy restrictions (most browsers block audio
+    // before a user gesture). The earliest possible call site is already a real gesture (tap-to-
+    // start/Space to dismiss the menu triggers the launch sound), so no separate "unlock" hook is
+    // needed. Every play function is wrapped defensively - audio is decorative, a failure here
+    // must never break gameplay (same philosophy as vibrateDevice() above).
+    // ===================================
+    let audioCtx = null;
+    let masterGainNode = null;
+    let audioMuted = localStorage.getItem('spiritball-muted') === 'true';
+
+    function getAudioContext() {
+        if (!audioCtx) {
+            try {
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                if (!Ctx) return null;
+                audioCtx = new Ctx();
+                masterGainNode = audioCtx.createGain();
+                masterGainNode.gain.value = audioMuted ? 0 : 1;
+                masterGainNode.connect(audioCtx.destination);
+            } catch (e) {
+                return null;
+            }
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {});
+        }
+        return audioCtx;
+    }
+
+    function setAudioMuted(muted) {
+        audioMuted = muted;
+        localStorage.setItem('spiritball-muted', String(muted));
+        if (masterGainNode) masterGainNode.gain.value = muted ? 0 : 1;
+    }
+
+    function isAudioMuted() {
+        return audioMuted;
+    }
+
+    // A short tone with an exponential decay (percussive "pling" feel), optionally sweeping
+    // frequency from freq to opts.freqEnd over the tone's duration - used for the launch (rising
+    // sweep) and obstacle hits (flat or slightly falling pitch, varied per type).
+    function playTone(freq, durationS, opts) {
+        const ctx = getAudioContext();
+        if (!ctx) return;
+        try {
+            const type = (opts && opts.type) || 'sine';
+            const freqEnd = (opts && opts.freqEnd) || freq;
+            const volume = (opts && opts.volume) || 0.2;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(Math.max(freq, 1), ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 1), ctx.currentTime + durationS);
+            gain.gain.setValueAtTime(volume, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + durationS);
+            osc.connect(gain);
+            gain.connect(masterGainNode);
+            osc.start();
+            osc.stop(ctx.currentTime + durationS);
+        } catch (e) { /* decorative only - never let a failure break gameplay */ }
+    }
+
+    // A short burst of white noise with a decay envelope baked directly into the buffer - a
+    // percussive "thock"/"click" feel for physical contacts (flipper solenoid, wall) where a
+    // pure tone would sound too musical/soft.
+    function playNoiseClick(durationS, volume) {
+        const ctx = getAudioContext();
+        if (!ctx) return;
+        try {
+            const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * durationS));
+            const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+            }
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            const gain = ctx.createGain();
+            gain.gain.value = volume;
+            source.connect(gain);
+            gain.connect(masterGainNode);
+            source.start();
+        } catch (e) { /* ignore */ }
+    }
+
+    function playLaunchSound(powerPercent) {
+        // Rising sweep, low -> high - stronger launches sweep further and land louder.
+        playTone(140, 0.22, { type: 'triangle', freqEnd: 140 + powerPercent * 500, volume: 0.15 + powerPercent * 0.1 });
+    }
+
+    function playFlipperSound() {
+        playNoiseClick(0.05, 0.12);
+    }
+
+    function playWallSound() {
+        playNoiseClick(0.03, 0.05);
+    }
+
+    // One shared "hit" sound, pitched differently per obstacle type (see call sites) so they're
+    // distinguishable by ear without needing a separate synthesis routine per type - matches this
+    // prompt's own suggestion ("can reuse pitch/tone variation instead of building N separate
+    // sounds").
+    function playHitSound(pitch) {
+        playTone(pitch, 0.15, { type: 'square', freqEnd: pitch * 0.6, volume: 0.14 });
+    }
+
+    function playDrainSound() {
+        playTone(300, 0.5, { type: 'sawtooth', freqEnd: 50, volume: 0.18 });
+    }
+
+    function playGameOverSound() {
+        // Three-note descending sting.
+        playTone(392, 0.18, { type: 'triangle', volume: 0.16 });
+        setTimeout(() => playTone(330, 0.18, { type: 'triangle', volume: 0.16 }), 180);
+        setTimeout(() => playTone(220, 0.4, { type: 'triangle', volume: 0.16 }), 360);
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -1346,6 +1474,11 @@
     }
 
     function activateFlipper(flipper) {
+        // Only on the actual off->on transition - browser key-repeat fires keydown repeatedly
+        // while a key is held, and this function has no other guard against being called many
+        // times per real button press (updateFlipperMotor() handles that idempotently for the
+        // physics side, but a sound effect needs its own check to avoid replaying rapidly).
+        if (!flipper.active) playFlipperSound();
         flipper.active = true;
     }
 
@@ -1961,6 +2094,7 @@
             triggerCameraShake(150, 0.002 + powerPercent * 0.005);
             triggerCameraPunch(300, cameraForwardDir.scale(0.02 + powerPercent * 0.02));
             vibrateDevice(20 + Math.round(powerPercent * 40)); // matches launchBall()'s power-scaled vibrate() in ../index.js
+            playLaunchSound(powerPercent);
         }
 
         // SPACE has multiple jobs depending on screen state, matching the 2D game's single-
@@ -2170,6 +2304,7 @@
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + SCORE_ATTACK_BUMPER, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
                 triggerCameraShake(120, 0.006); // matches hitAttackBumper()'s cameraShake(120, 0.006)
+                playHitSound(660);
             } else if (meta.kind === 'satellite') {
                 setCooldown(mesh, COOLDOWN_SATELLITE_MS);
                 addScore(SCORE_SATELLITE);
@@ -2178,6 +2313,7 @@
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('SATELLITE!', 900);
                 triggerCameraShake(120, 0.005); // matches hitSatellite()'s cameraShake(120, 0.005)
+                playHitSound(880);
             } else if (meta.kind === 'slingshot') {
                 setCooldown(mesh, COOLDOWN_SLINGSHOT_MS);
                 addScore(SCORE_SLINGSHOT);
@@ -2185,11 +2321,13 @@
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + SCORE_SLINGSHOT, 600);
                 triggerCameraShake(120, 0.005); // matches hitSlingshot()'s cameraShake(120, 0.005)
+                playHitSound(520);
             } else if (meta.kind === 'wall') {
                 // No score/pulse/burst - walls aren't scored in the 2D game either, just a very
                 // light shake on contact (setupCollisions()'s wall collider: cameraShake(40, 0.003)).
                 setCooldown(mesh, COOLDOWN_WALL_MS);
                 triggerCameraShake(40, 0.003);
+                playWallSound();
             } else if (meta.kind === 'flipper') {
                 // Not a literal port - the 2D shake here (updateFlipperPower()'s manual ball-
                 // velocity injection, cameraShake(150, 0.008)) belongs to a mechanic that doesn't
@@ -2198,6 +2336,7 @@
                 // impactful" - fires on any ball-flipper contact, not just an active-swing hit.
                 setCooldown(mesh, COOLDOWN_FLIPPER_MS);
                 triggerCameraShake(150, 0.008);
+                playWallSound(); // ball-vs-flipper contact, distinct from activateFlipper()'s solenoid click
             }
         }
 
@@ -2220,6 +2359,7 @@
                 // acknowledgement stands in until Stage 12 gives this a real mission to name.
                 backglass.showMessage('TARGET!', 700);
                 triggerCameraShake(60, 0.002); // matches hitMissionTarget()'s cameraShake(60, 0.002)
+                playHitSound(740);
             } else if (meta.kind === 'reentryLane') {
                 setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
                 addScore(SCORE_REENTRY_LANE);
@@ -2238,6 +2378,7 @@
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('RE-ENTRY!', 800);
                 triggerCameraShake(80, 0.003); // matches hitReentryLane()'s cameraShake(80, 0.003)
+                playHitSound(990);
             }
         }
 
@@ -2258,6 +2399,7 @@
             // Quick downward dip - a 3D-only "snap toward the void" beat with no 2D equivalent
             // (that camera couldn't move through space at all).
             triggerCameraPunch(400, new BABYLON.Vector3(0, -0.03, 0));
+            playDrainSound();
             setTimeout(() => {
                 if (lives <= 0) {
                     // Stage 12: was "reset lives/score in place" (Stage 6's documented
@@ -2420,6 +2562,19 @@
         document.getElementById('pause-controls-btn').addEventListener('click', openControlsScreen);
         document.getElementById('controls-back-btn').addEventListener('click', backFromControlsScreen);
 
+        // Mute toggle (improvement-prompts/04-*.md) - reflects the persisted isAudioMuted() state
+        // on load, not just after the first toggle, so returning players see their previous
+        // choice immediately rather than a stale "ON" until they touch it once.
+        const muteToggleBtn = document.getElementById('mute-toggle-btn');
+        function updateMuteButtonLabel() {
+            muteToggleBtn.textContent = isAudioMuted() ? '🔇 SOUND: OFF' : '🔊 SOUND: ON';
+        }
+        updateMuteButtonLabel();
+        muteToggleBtn.addEventListener('click', () => {
+            setAudioMuted(!isAudioMuted());
+            updateMuteButtonLabel();
+        });
+
         function togglePauseFromButton(e) {
             e.preventDefault();
             if (isPaused) {
@@ -2454,6 +2609,7 @@
         // place - see this stage's implementation note). ---
         function showGameOverScreen() {
             gameOverActive = true;
+            playGameOverSound();
             document.getElementById('gameover-score').textContent = String(score);
 
             const hsLine = document.getElementById('gameover-highscore-line');
