@@ -243,8 +243,8 @@
     // distinguishable by ear without needing a separate synthesis routine per type - matches this
     // prompt's own suggestion ("can reuse pitch/tone variation instead of building N separate
     // sounds").
-    function playHitSound(pitch) {
-        playTone(pitch, 0.15, { type: 'square', freqEnd: pitch * 0.6, volume: 0.14 });
+    function playHitSound(pitch, volume = 0.14) {
+        playTone(pitch, 0.15, { type: 'square', freqEnd: pitch * 0.6, volume });
     }
 
     function playDrainSound() {
@@ -528,6 +528,14 @@
         { x: 0.08, z: 0.06 },
         { x: 0, z: -0.02 }
     ]; // 4 bumpers in a tight diamond near table center, matching CONFIG.attackBumperCount in ../index.js
+
+    // Active pop-bumper kick: bumpers previously only ever bounced the ball via Havok's own
+    // restitution (set in buildObstacles()) - a real pop bumper actively fires the ball away on
+    // contact instead of just passively reflecting it. applyBumperKick() (in main(), used only by
+    // handlePhysicalHit()'s 'bumper' branch) adds a horizontal velocity kick of this magnitude on
+    // top of that existing restitution bounce. One tunable constant, not a magic number buried in
+    // the hit handler.
+    const BUMPER_KICK_SPEED_MS = 480 * PX_TO_M; // ~0.453 m/s added away from the bumper center
 
     const TARGET_RADIUS_M = 0.014;
     const MISSION_TARGET_BANK = [
@@ -1501,6 +1509,21 @@
         return { mesh, aggregate, stuckTimeMs: 0 };
     }
 
+    // Shared speed ceiling enforcement - uniformly rescales a body's velocity down to maxSpeed if
+    // it's currently over, leaving direction untouched. Used every frame by updateBallPhysics()
+    // below (see MAX_BALL_SPEED_MS's comment for why this JS-side clamp is the real defense) and,
+    // on demand, by applyBumperKick() in main() so a pop-bumper kick can never push the ball past
+    // the same ceiling normal play already respects. Returns the pre-clamp speed.
+    function clampBodySpeed(body, maxSpeed) {
+        const v = body.getLinearVelocity();
+        const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+        if (speed > maxSpeed) {
+            const scale = maxSpeed / speed;
+            body.setLinearVelocity(new BABYLON.Vector3(v.x * scale, v.y * scale, v.z * scale));
+        }
+        return speed;
+    }
+
     // Per-frame ball physics maintenance: max-speed clamp (see MAX_BALL_SPEED_MS's comment for
     // why this - not Havok CCD, which this build doesn't have - is the real defense) and the
     // anti-stuck recovery, ported from checkBallStuck() in ../index.js. Deliberately mirrors
@@ -1510,13 +1533,7 @@
     function updateBallPhysics(ball, deltaMs) {
         if (!ball.aggregate.body) return;
 
-        const v = ball.aggregate.body.getLinearVelocity();
-        const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-
-        if (speed > MAX_BALL_SPEED_MS) {
-            const scale = MAX_BALL_SPEED_MS / speed;
-            ball.aggregate.body.setLinearVelocity(new BABYLON.Vector3(v.x * scale, v.y * scale, v.z * scale));
-        }
+        const speed = clampBodySpeed(ball.aggregate.body, MAX_BALL_SPEED_MS);
 
         if (speed < STUCK_SPEED_THRESHOLD_MS) {
             ball.stuckTimeMs += deltaMs;
@@ -2731,9 +2748,9 @@
         // Lightweight scale-pulse as this stage's hit feedback - a 3D-appropriate stand-in for
         // the 2D version's tween-based flash (Stage 8's particle/VFX system will do this properly
         // later; this is enough to make a hit feel registered in the meantime).
-        function pulseMesh(mesh) {
+        function pulseMesh(mesh, scale = 1.3) {
             const original = mesh.scaling.clone();
-            mesh.scaling.scaleInPlace(1.3);
+            mesh.scaling.scaleInPlace(scale);
             // Emissive flash to near-white on top of the scale pulse - the doc's "briefly
             // intensify... the object's emissive color" hit-reactivity spec, mirroring the 2D
             // version's setTint(0xffffff) flash in hitAttackBumper() etc. Only meshes with a
@@ -2750,13 +2767,52 @@
             }, 100);
         }
 
-        // Physical hits: bumpers/satellite/slingshots already bounce the ball via restitution
-        // (set in buildObstacles()) - this only adds the score/cooldown/feedback layer on top,
-        // it does NOT set the ball's velocity by hand the way the 2D version's hitAttackBumper()/
-        // hitSatellite()/hitSlingshot() did. That manual angle-based bounce was a workaround for
-        // Arcade Physics circles not imparting real force on overlap; real rigid-body contact
-        // response in Havok makes it unnecessary, not just redundant - see 04-*.md's flipper
-        // implementation note for the same reasoning applied to flippers.
+        // Physical hits: comet/slingshots already bounce the ball via restitution (set in
+        // buildObstacles()) - for those kinds this only adds the score/cooldown/feedback layer on
+        // top, it does NOT set the ball's velocity by hand the way the 2D version's hitSatellite()/
+        // hitSlingshot() did. That manual angle-based bounce was a workaround for Arcade Physics
+        // circles not imparting real force on overlap; real rigid-body contact response in Havok
+        // makes it unnecessary, not just redundant - see 04-*.md's flipper implementation note for
+        // the same reasoning applied to flippers. Bumpers are the one deliberate exception: real
+        // pop bumpers actively fire the ball away rather than just reflecting it, so the 'bumper'
+        // branch below adds a real, controlled velocity kick on top of the restitution bounce via
+        // applyBumperKick() - see its comment for how that kick is kept bounded.
+        function applyBumperKick(mesh) {
+            const body = mainBall.aggregate.body;
+            if (!body) return;
+
+            // Horizontal (X/Z) direction from the bumper's center to the ball's current position -
+            // "horizontal" deliberately excludes Y so the kick can't launch the ball vertically off
+            // the table, just push it away across the playfield the way a real pop bumper does.
+            const dx = mainBall.mesh.position.x - mesh.position.x;
+            const dz = mainBall.mesh.position.z - mesh.position.z;
+            const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+            // Degenerate case (ball reported dead-center over the bumper, horizontally) - no
+            // well-defined push direction, so skip the kick rather than divide by ~0. The
+            // restitution bounce and normal scoring/feedback still happen either way.
+            if (horizontalDist < 1e-4) return;
+            const dirX = dx / horizontalDist;
+            const dirZ = dz / horizontalDist;
+
+            // Added to the ball's existing velocity, not substituted for it - a fast incoming shot
+            // keeps carrying its own momentum through the hit instead of every hit collapsing to
+            // the same fixed exit speed regardless of how the ball arrived (a glancing graze gets a
+            // gentler net result than a square hit at speed, matching how a real pop bumper feels).
+            const v = body.getLinearVelocity();
+            body.setLinearVelocity(new BABYLON.Vector3(
+                v.x + dirX * BUMPER_KICK_SPEED_MS,
+                v.y,
+                v.z + dirZ * BUMPER_KICK_SPEED_MS
+            ));
+
+            // Re-clamped through the same ceiling updateBallPhysics() enforces every frame (see
+            // clampBodySpeed()'s comment), applied immediately rather than waiting for next frame -
+            // this is what actually bounds the kick: no incoming speed, kick magnitude, or run of
+            // repeated bumper hits (each individual bumper is still separately rate-limited by its
+            // own COOLDOWN_BUMPER_MS below) can ever push the ball past MAX_BALL_SPEED_MS.
+            clampBodySpeed(body, MAX_BALL_SPEED_MS);
+        }
+
         function handlePhysicalHit(mesh) {
             const meta = mesh.metadata;
             if (!meta || isOnCooldown(mesh)) return;
@@ -2767,11 +2823,17 @@
                 const points = meta.boss ? SCORE_BOSS_BUMPER : SCORE_ATTACK_BUMPER;
                 addScore(points);
                 stats.bumperHits++;
-                pulseMesh(mesh);
+                applyBumperKick(mesh);
+                // Feedback bumped slightly (pulse scale, shake, sound volume) above the shared
+                // defaults now that bumpers actively kick the ball - the hit should read as a
+                // touch punchier than a passive bounce, without changing scoring or any other
+                // obstacle kind's feedback (all other pulseMesh()/playHitSound() call sites are
+                // untouched, defaulting back to their original 1.3x/0.14 values).
+                pulseMesh(mesh, 1.4);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + points, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
-                triggerCameraShake(120, meta.boss ? 0.008 : 0.006); // matches hitAttackBumper()'s cameraShake(120, 0.006), boss hits a bit harder
-                playHitSound(meta.boss ? 440 : 660);
+                triggerCameraShake(130, meta.boss ? 0.009 : 0.007); // was 120/0.008/0.006 - a bit stronger, matching the new active-kick feel
+                playHitSound(meta.boss ? 440 : 660, 0.17);
                 progressMission('bumper');
             } else if (meta.kind === 'comet') {
                 setCooldown(mesh, COOLDOWN_COMET_MS);
