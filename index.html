@@ -34,7 +34,12 @@
            (the dev/debug panel below): until this was added, the ONLY place score/lives were
            ever shown was inside that dev panel, alongside test buttons - not acceptable for a
            real playable build. Small and out of the way (top-right, opposite the dev panel's
-           top-left corner) so it never blocks the table. */
+           top-left corner) so it never blocks the table.
+           Division of labor vs. the 3D-mounted backglass (improvement-prompts/07-*.md): this HUD
+           is the guaranteed-legible, always-in-the-same-place readout for score/lives regardless
+           of device/camera angle - the backglass no longer duplicates them, and instead shows
+           what THIS can't (high score, rank, mission progress, hit messages), so the two read as
+           one deliberate display instead of two competing "SCORE 0"s. */
         #player-hud {
             position: fixed;
             top: 12px;

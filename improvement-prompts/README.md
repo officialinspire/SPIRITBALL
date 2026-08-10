@@ -29,7 +29,7 @@ work on next, not this order:
 | 4 | `04-basic-audio.md` | ✅ Done — procedurally-synthesized (Web Audio API) sound effects for launch/flipper/hits/drain/game-over, plus a persisted mute control on the Controls screen. |
 | 5 | `05-mission-fsm-and-rank-system.md` | ✅ Done — real mission select/progress/complete FSM and a Space-Cadet-style rank ladder, wired to the backglass and Game Over's new Final Rank line. |
 | 6 | `06-obstacle-geometry-polish.md` | ✅ Done — decorative companion meshes (skirts/collars/housings/rails) give every obstacle a distinct pinball-element silhouette, with zero changes to any collider. |
-| 7 | `07-hud-and-backglass-reconciliation.md` | The new player HUD and the 3D backglass both show score - redundant, needs a real design decision. |
+| 7 | `07-hud-and-backglass-reconciliation.md` | ✅ Done — DOM HUD is the sole score/lives readout; the backglass now shows only what the HUD doesn't (high score, rank, mission progress, messages). |
 | 8 | `08-pwa-icon-and-manifest-refresh.md` | The app icon still matches the old 2D "cosmic eyeball" sprite, not the new 3D visual identity. |
 | 9 | `09-mobile-performance-profiling.md` | Device-tier performance gating exists but has never been validated against real low-end hardware. |
 | 10 | `10-accessibility-pass.md` | Reduced-motion, color-contrast, and touch-target-sizing were built but never verified in practice. |
