@@ -318,6 +318,17 @@
         setTimeout(() => playTone(880, 0.22, { type: 'square', volume: 0.18 }), 220);
     }
 
+    // Rollover-lane bank cleared (user-requested upgrade) - two rising triangle sweeps plus a
+    // settling sine note and a noise click, distinct in shape from playTargetBankCompleteSound()'s
+    // flat square-wave notes so the two "you cleared a bank" stings don't read as the same sound
+    // with different pitches.
+    function playLaneBankCompleteSound() {
+        playTone(300, 0.16, { type: 'triangle', freqEnd: 600, volume: 0.17 });
+        setTimeout(() => playTone(500, 0.16, { type: 'triangle', freqEnd: 1000, volume: 0.18 }), 120);
+        setTimeout(() => playTone(750, 0.28, { type: 'sine', volume: 0.2 }), 240);
+        playNoiseClick(0.1, 0.1);
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -907,6 +918,15 @@
     // three meshes (see dropMissionTarget()'s comment in main()).
     const SCORE_TARGET_BANK_COMPLETE = 2500;
     const SCORE_REENTRY_LANE = 2000;
+    // Rollover-lane bank upgrade (user-requested) - a separate, configurable bonus for lighting
+    // all of REENTRY_LANES, on top of each individual lane's own SCORE_REENTRY_LANE hit.
+    // Deliberately independent of mission.progress/MISSION_COMPLETE_BONUS (see laneBank's own
+    // block comment in main() - "so it can later feed multiplier progression" is the whole
+    // reason this stays a separate constant/counter rather than folding into the mission FSM).
+    const SCORE_LANE_BANK_COMPLETE = 3000;
+    // How long the bank stays visibly all-lit before resetLaneBank() clears it for another cycle
+    // - long enough to read as a deliberate "you did it" beat, not an instant flicker.
+    const LANE_BANK_RESET_DELAY_MS = 400;
     const SCORE_SLINGSHOT = 100;
     const SCORE_SATURN = 3000; // the new giant Saturn centerpiece - the single biggest non-mission scoring hit on the board, matching its size/prominence
     const MISSION_COMPLETE_BONUS = 5000;
@@ -2225,7 +2245,11 @@
         // Unlit state: dim yellow-ish neutral (no direct 2D equivalent - the 2D lanes start
         // unlit/grey and only take on a color once hit). Lit state (CONFIG.colors.missionActive,
         // green) is applied per-lane in handleTriggerHit() in main(), matching hitReentryLane()'s
-        // persistent lane.setFillStyle() recoloring in ../index.js, not just a brief pulse.
+        // persistent lane.setFillStyle() recoloring in ../index.js, not just a brief pulse. Rollover-
+        // lane bank upgrade: these two Color3 pairs are also reused verbatim by setLaneLit() in
+        // main() to un-light a lane back to this exact rest look on resetLaneBank() - the values
+        // must stay in sync between the two spots.
+        const reentryLaneMeshes = [];
         REENTRY_LANES.forEach((pos, i) => {
             const laneMat = new BABYLON.PBRMaterial('laneMat' + i, scene);
             laneMat.albedoColor = new BABYLON.Color3(0.5, 0.5, 0.15);
@@ -2241,6 +2265,7 @@
             }, scene);
             mesh.position.set(pos.x, 0.01, pos.z);
             mesh.material = laneMat;
+            reentryLaneMeshes.push(mesh);
             mesh.metadata = { kind: 'reentryLane', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.5 }, scene);
             aggregate.shape.isTrigger = true; // overlap, not collider, in setupCollisions()
@@ -2554,7 +2579,7 @@
         // Saturn's rings every frame, drive the power-up orb's spawn/despawn cycle, and run the
         // Vision Gate's own capture sequence against a direct mesh reference (the ring, not the
         // trigger - the ring is what's actually visible and worth flashing/sparkling).
-        return { missionTargetMeshes, missionTargetLamps, saturnRings, powerUpMesh, visionGateMesh: ring };
+        return { missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, saturnRings, powerUpMesh, visionGateMesh: ring };
     }
 
     // Drain zone (Stage 6, babylon-prompts/06-*.md) - see the block comment above SCORE_ATTACK_
@@ -2798,8 +2823,18 @@
         // here since it's needed just to test flippers at all). window-level listeners, not
         // canvas-focused, so no click-to-focus step is needed first.
         window.addEventListener('keydown', (e) => {
-            if (e.code === 'ArrowLeft') activateFlipper(leftFlipper);
-            if (e.code === 'ArrowRight') activateFlipper(rightFlipper);
+            // Optional "lane change" mechanic (rotateLaneLamps()) - checked on the off->on edge,
+            // BEFORE activateFlipper() flips flipper.active to true, same guard activateFlipper()
+            // itself uses to fire its solenoid sound only once per real press, not once per
+            // browser key-repeat event.
+            if (e.code === 'ArrowLeft') {
+                if (!leftFlipper.active) rotateLaneLamps(-1);
+                activateFlipper(leftFlipper);
+            }
+            if (e.code === 'ArrowRight') {
+                if (!rightFlipper.active) rotateLaneLamps(1);
+                activateFlipper(rightFlipper);
+            }
         });
         window.addEventListener('keyup', (e) => {
             if (e.code === 'ArrowLeft') deactivateFlipper(leftFlipper);
@@ -3079,6 +3114,7 @@
         const leftZone = document.getElementById('flipper-zone-left');
         const leftFlipperStart = (e) => {
             e.preventDefault();
+            if (!leftFlipper.active) rotateLaneLamps(-1); // "lane change" - see the keydown handler's comment
             activateFlipper(leftFlipper);
             leftZone.classList.add('pressed');
         };
@@ -3097,6 +3133,7 @@
         const rightZone = document.getElementById('flipper-zone-right');
         const rightFlipperStart = (e) => {
             e.preventDefault();
+            if (!rightFlipper.active) rotateLaneLamps(1); // "lane change" - see the keydown handler's comment
             activateFlipper(rightFlipper);
             rightZone.classList.add('pressed');
         };
@@ -3166,7 +3203,8 @@
         const stats = {
             bumperHits: 0, cometHits: 0, saturnHits: 0, targetHits: 0, laneHits: 0,
             missionsCompleted: 0, powerUpsCollected: 0, inlaneHits: 0, outlaneHits: 0,
-            leftOrbitShots: 0, rightOrbitShots: 0, visionGateCaptures: 0, targetBankCompletions: 0
+            leftOrbitShots: 0, rightOrbitShots: 0, visionGateCaptures: 0, targetBankCompletions: 0,
+            laneBankCompletions: 0
         };
 
         // Mission/rank progression state (improvement-prompts/05-*.md). rank is an index into
@@ -3188,6 +3226,17 @@
         // separate mechanic that doesn't feed mission.progress and isn't reset by it, only reset
         // alongside it (see resetDropTargetBank()'s call sites).
         const dropTargetBank = MISSION_TARGET_BANK.map(() => ({ dropped: false, animMs: 0 }));
+
+        // Rollover-lane bank state (re-entry lanes upgraded from a one-way permanent recolor into
+        // a real lit-bank mechanic, user-requested) - one entry per REENTRY_LANES index. `lit` is
+        // the lamp's ON/OFF state: passing through an unlit lane lights it (and counts toward the
+        // bank); an already-lit lane still scores its normal SCORE_REENTRY_LANE hit but doesn't
+        // relight or recount (see handleTriggerHit()'s 'reentryLane' branch). Deliberately kept
+        // fully independent of `mission`/`dropTargetBank` above - lighting a lane still calls
+        // progressMission('lane') exactly as before (unchanged), but the bank-complete bonus below
+        // is its own separate mechanic with its own stats counter, precisely so it can later feed
+        // multiplier progression without any mission-FSM coupling.
+        const laneBank = REENTRY_LANES.map(() => ({ lit: false }));
 
         // Orbit shot state (one entry per side) - `armedAt` is the timestamp (performance.now()-
         // style ms) of the last valid entrance hit, or null if the entrance hasn't fired (or its
@@ -3676,6 +3725,45 @@
             });
         }
 
+        // Recolors one re-entry lane to its lit or unlit rest look - the same two Color3 pairs
+        // buildObstacles() sets at construction time (see its comment there; must stay in sync).
+        function setLaneLit(index, lit) {
+            const mat = obstacles.reentryLaneMeshes[index].material;
+            if (lit) {
+                mat.albedoColor = COLOR_MISSION_ACTIVE;
+                mat.emissiveColor = COLOR_MISSION_ACTIVE.scale(0.5);
+            } else {
+                mat.albedoColor = new BABYLON.Color3(0.5, 0.5, 0.15);
+                mat.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.05);
+            }
+        }
+
+        // Un-lights every lane for another cycle - called after LANE_BANK_RESET_DELAY_MS from a
+        // completed bank (see handleTriggerHit()'s 'reentryLane' branch) and unconditionally from
+        // startNewGame(), same "per-run state" treatment as dropTargetBank/mission/orbitState.
+        function resetLaneBank() {
+            laneBank.forEach((lane, i) => {
+                lane.lit = false;
+                setLaneLit(i, false);
+            });
+        }
+
+        // Optional "lane change" skill mechanic (classic pinball - a flipper press rotates which
+        // lanes are lit, letting a player shift their progress into a more useful pattern without
+        // needing to physically hit anything). Rotates the lit/unlit PATTERN circularly by one
+        // position; doesn't change how many lanes are lit, just which ones. Call sites (the four
+        // flipper-input handlers below) already gate this to the actual off->on press edge, same
+        // guard activateFlipper() uses for its own one-shot sound.
+        function rotateLaneLamps(dir) {
+            if (!ballInPlay) return;
+            const n = laneBank.length;
+            const previousLit = laneBank.map((lane) => lane.lit);
+            laneBank.forEach((lane, i) => {
+                lane.lit = previousLit[(((i - dir) % n) + n) % n];
+                setLaneLit(i, lane.lit);
+            });
+        }
+
         function handlePhysicalHit(mesh) {
             const meta = mesh.metadata;
             if (!meta || isOnCooldown(mesh)) return;
@@ -3800,22 +3888,38 @@
                 setCooldown(mesh, COOLDOWN_REENTRY_LANE_MS);
                 addScore(SCORE_REENTRY_LANE);
                 stats.laneHits++;
-                // Persistent recolor to "lit" green MUST happen before pulseMesh(), not after -
+                // Rollover-lane bank upgrade: only an unlit lane actually lights (and counts
+                // toward the bank) - an already-lit lane still scores the hit above but doesn't
+                // relight or recount, matching the "passing through an unlit lane lights it"
+                // requirement. The recolor - when it happens - MUST run before pulseMesh() below,
+                // same ordering constraint the original persistent-recolor comment always had:
                 // pulseMesh() captures whatever emissiveColor is current when it's called and
-                // restores exactly that after its 100ms flash, so recoloring afterward would get
-                // silently clobbered back to the old unlit color by that restore. Matches
-                // hitReentryLane()'s lane.setFillStyle(CONFIG.colors.missionActive, ...) in
-                // ../index.js - stays lit, not just a brief pulse like the other obstacle types
-                // (07-*.md's new touch, since Stages 4-6 only had the unlit placeholder color).
-                mesh.material.albedoColor = COLOR_MISSION_ACTIVE;
-                mesh.material.emissiveColor = COLOR_MISSION_ACTIVE.scale(0.5);
+                // restores exactly that after its 100ms flash, so recoloring after would get
+                // silently clobbered back to the old color by that restore.
+                const newlyLit = !laneBank[meta.index].lit;
+                if (newlyLit) {
+                    laneBank[meta.index].lit = true;
+                    setLaneLit(meta.index, true);
+                }
                 pulseMesh(mesh);
                 // After the recolor, not before - the burst should match the new lit-green state.
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('RE-ENTRY!', 800);
                 triggerCameraShake(80, 0.003); // matches hitReentryLane()'s cameraShake(80, 0.003)
                 playHitSound(990);
+                // Unchanged from before this upgrade - still feeds the 'RE-ENTRY CIRCUIT' mission
+                // on every scoring hit, lit or not. Kept fully separate from the bank-complete
+                // check below (see laneBank's own block comment for why).
                 progressMission('lane');
+                if (newlyLit && laneBank.every((lane) => lane.lit)) {
+                    addScore(SCORE_LANE_BANK_COMPLETE);
+                    stats.laneBankCompletions++;
+                    backglass.showMessage('LANE BANK COMPLETE!', 1200);
+                    triggerCameraShake(280, 0.006);
+                    triggerCameraPunch(280, new BABYLON.Vector3(0, 0.018, -0.022));
+                    playLaneBankCompleteSound();
+                    setTimeout(resetLaneBank, LANE_BANK_RESET_DELAY_MS);
+                }
             } else if (meta.kind === 'inlane' || meta.kind === 'outlane') {
                 // Not mission-tied (unlike 'reentryLane' above, whose 'lane' mission type belongs
                 // specifically to the top-of-table reentry lanes) - see SIDE_LANES' block comment
@@ -4115,11 +4219,15 @@
             stats.rightOrbitShots = 0;
             stats.visionGateCaptures = 0;
             stats.targetBankCompletions = 0;
+            stats.laneBankCompletions = 0;
             orbitState.left.armedAt = null;
             orbitState.right.armedAt = null;
             // Drop-target bank (user-requested upgrade) - per-run state, same reasoning as
             // mission/rank/power-up above.
             resetDropTargetBank();
+            // Rollover-lane bank (user-requested upgrade) - same per-run reasoning; a fresh game
+            // shouldn't inherit a previous run's lit lanes.
+            resetLaneBank();
             // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
             // score/lives/stats above - resets on every new game, not a permanent meta-progression.
             mission.state = 'idle';
@@ -4232,7 +4340,8 @@
                 ['Right Orbit Shots', stats.rightOrbitShots],
                 ['Vision Gate Captures', stats.visionGateCaptures],
                 ['Power-Ups Collected', stats.powerUpsCollected],
-                ['Target Bank Clears', stats.targetBankCompletions]
+                ['Target Bank Clears', stats.targetBankCompletions],
+                ['Lane Bank Clears', stats.laneBankCompletions]
             ];
             statLines.forEach(([label, value]) => {
                 if (value > 0) {
