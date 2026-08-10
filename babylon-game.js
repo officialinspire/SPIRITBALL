@@ -599,6 +599,77 @@
     ]; // 3 lanes near the top wall, matching CONFIG.reentryLaneCount
 
     // ===================================
+    // Lower-table inlanes/outlanes - real pinball return paths between the slingshots and the
+    // flippers, plus their dangerous outer-edge counterparts. NOT the same feature as
+    // REENTRY_LANES above (those are 3 top-of-table lanes, their own distinct mission-tied
+    // mechanic) - kept fully separate (own metadata.kind values, own mission-free scoring, no
+    // shared state) to avoid conflating the two.
+    //
+    // Geometry derived from ground-truth values read directly off the live scene (Playwright,
+    // not hand-derived trig) rather than assumed from the flipper's rest-angle math, which is
+    // easy to get subtly wrong (see createFlipper()'s own rotation-convention caveat elsewhere in
+    // this file): left flipper's pivot sits at (-0.045, -0.36), its resting mesh center at
+    // (-0.0515, -0.397), and its extrapolated resting tip around (-0.058, -0.434) - almost
+    // touching the drain trigger's own inner edge (z=-0.4297, see DRAIN_ZONE_CENTER_Y_PX). The
+    // left slingshot (x=-0.13) has a real oriented footprint of roughly x=[-0.158,-0.102] once its
+    // 20-degree rotation is accounted for, and leftWall's inner face sits at x~-0.2267.
+    //
+    // Layout (left side; SIDE_LANES' mirror flips everything for the right):
+    //   [leftWall -0.2267] -- OUTLANE (trigger @ -0.185) -- [divider rail @ -0.145] -- INLANE
+    //   (trigger @ -0.095, bounded on its inner side by an angled guide tapering from -0.14 down
+    //   to -0.06 - see INLANE_GUIDE_TOP_X_M/INLANE_GUIDE_BOTTOM_X_M) -- open onto the flipper's
+    //   own approach beyond that.
+    // Z runs from LANE_Z_TOP_M (just clear of the slingshot's own footprint) to LANE_Z_BOTTOM_M
+    // (within the flipper's operating Z range, but the divider/guide both stay far enough out in
+    // X at every point along their length - divider fixed at 0.145, guide tapering only as far in
+    // as 0.06, vs the flipper's own -0.058..+0.02 sweep envelope - that neither can ever
+    // physically overlap the flipper mechanism at any angle). Below LANE_Z_BOTTOM_M, both lanes
+    // are left open (no wall) - gravity/tilt alone carries an outlane ball into the existing
+    // full-width drainZone trigger exactly the way any unguided ball past the flippers already
+    // does today, and an inlane ball - already redirected inward by the guide by this point -
+    // rolls onto the open playfield directly in front of the flipper.
+    //
+    // "Do not make unavoidable drains": which lane (if either) a ball even enters at the top
+    // depends entirely on its incoming trajectory off the slingshot/bumpers, not a forced funnel -
+    // nothing upstream of LANE_Z_TOP_M steers the ball toward one side or the other. The divider
+    // and guide only take over ONCE a ball has already committed to the inlane/outlane region,
+    // and even then only shape which of the two existing outcomes (flipper approach vs. drain) it
+    // heads toward - they don't create a new drain path that wasn't already there (any ball past
+    // the flippers with nothing to stop it was always going to reach the same full-width
+    // drainZone trigger, lanes or not).
+    const LANE_Z_TOP_M = -0.33; // ~0.0175m clear of the slingshot's own lower edge (~-0.3125)
+    const LANE_Z_BOTTOM_M = -0.40; // divider rail's far end - see block comment for the X-clearance reasoning
+    const LANE_DIVIDER_X_M = 0.145; // mirrored per side
+    const LANE_TRIGGER_Z_M = -0.365; // mid-lane, between LANE_Z_TOP_M and LANE_Z_BOTTOM_M
+    const INLANE_TRIGGER_X_M = 0.095; // mirrored - inboard of the divider, toward the flipper
+    const OUTLANE_TRIGGER_X_M = 0.185; // mirrored - outboard of the divider, toward the wall
+    const LANE_TRIGGER_WIDTH_M = 0.03;
+    const LANE_TRIGGER_DEPTH_M = 0.025;
+    // The inlane's own inner guide rail - a real physical wall, not just an open gap. An early
+    // build left the inlane's inner edge fully open on the theory that gravity/tilt alone would
+    // carry the ball toward the flipper; verified via Playwright that this was wrong (a ball
+    // dropped anywhere in the channel just fell straight down in Z with zero X drift and missed
+    // the flipper entirely, landing in the drain - tilt only accelerates -Z here, nothing biases
+    // X without an actual collision to redirect it). This angled rail is what actually satisfies
+    // "inlanes should naturally feed toward their corresponding flipper": it starts almost flush
+    // with the divider (so the inlane's mouth, right where a ball exits the slingshot area, has no
+    // gap a ball could fall through untouched) and tapers inward as Z decreases, ending near the
+    // flipper's own resting reach (left flipper's extrapolated rest-tip sits around x=-0.058 - see
+    // SIDE_LANES' block comment) - so a ball riding this rail down arrives close enough for the
+    // flipper to actually reach it, matching how a real inlane guide is shaped, not just labeled.
+    const INLANE_GUIDE_TOP_X_M = 0.14; // mirrored - almost flush with LANE_DIVIDER_X_M (0.145)
+    const INLANE_GUIDE_BOTTOM_X_M = 0.06; // mirrored - tapers inward to near the flipper's reach
+    // mirror is a plain position-sign multiplier here (unlike SLINGSHOTS'/BUMPER_CLUSTER's own
+    // `mirror`, which only flips rotation handedness - their X positions are hardcoded per-entry
+    // instead) - left is negative X throughout this file (see FLIPPER_GAP_HALF_M's left pivot at
+    // -FLIPPER_GAP_HALF_M, SLINGSHOTS[0] at x=-0.13), so left must be mirror:-1 against the
+    // positive-valued LANE_DIVIDER_X_M/INLANE_TRIGGER_X_M/OUTLANE_TRIGGER_X_M constants above.
+    const SIDE_LANES = [
+        { side: 'left', mirror: -1 },
+        { side: 'right', mirror: 1 }
+    ];
+
+    // ===================================
     // Plunger / launch lane (babylon-prompts/05-*.md). Per that stage's own recommendation, this
     // is a kinematic-animated plunger mesh (no physics body of its own) plus a directly-set ball
     // velocity on release - not a simulated spring - for the same determinism reasons the 2D
@@ -706,6 +777,11 @@
     const SCORE_SLINGSHOT = 100;
     const SCORE_SATURN = 3000; // the new giant Saturn centerpiece - the single biggest non-mission scoring hit on the board, matching its size/prominence
     const MISSION_COMPLETE_BONUS = 5000;
+    const SCORE_INLANE = 300;
+    // Outlane rollover deliberately scores MORE than the inlane, not less - a common real-pinball
+    // choice (the ball is very likely about to drain down that path with no ball-save/kickback
+    // implemented yet to rescue it), so the outlane isn't purely a punishment with zero upside.
+    const SCORE_OUTLANE = 500;
 
     // Rank names ported from the classic "3D Pinball for Windows - Space Cadet" progression this
     // table's own layout is explicitly modeled on (see buildObstacles()'s "authentic
@@ -739,6 +815,7 @@
     const COOLDOWN_MISSION_TARGET_MS = 500;
     const COOLDOWN_REENTRY_LANE_MS = 1000;
     const COOLDOWN_SATURN_MS = 500; // new giant Saturn - a bit longer than the regular bumpers, matching its "big, deliberate hit" feel rather than rapid-fire pinging
+    const COOLDOWN_SIDE_LANE_MS = 600; // shared by all 4 new inlane/outlane rollovers, same one-constant-per-mechanic pattern as COOLDOWN_REENTRY_LANE_MS
     // Not present in the 2D cooldown map (walls/flippers there fire shake unconditionally, every
     // physics-substep-worth of contact) - added here (Stage 10) specifically to keep grinding
     // contact from shaking the camera every single frame, matching the doc's own "don't add
@@ -848,10 +925,15 @@
     // comet needed its own look, not a second "Saturn-colored" object on the board.
     const HEX_COMET = 0x66e0ff;
     const HEX_MISSION_ACTIVE = 0x00ff00;
+    // Classic amber/gold pinball insert-lamp color - deliberately distinct from HEX_MISSION_ACTIVE
+    // (green), so the new inlane/outlane lamps read as their own thing, not a re-skin of the
+    // reentry lanes' mission-tied "lit" state (a genuinely different mechanic, see SIDE_LANES'
+    // block comment).
+    const HEX_LANE_LAMP = 0xffaa00;
     const HEX_BACKGROUND = 0x1a0033;
 
     let COLOR_BALL, COLOR_EYEBALL, COLOR_FLIPPER, COLOR_WALL, COLOR_BUMPERS, COLOR_CHAKRA,
-        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_BACKGROUND;
+        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_BACKGROUND;
 
     // Device-tier gate, ported from PerformanceManager.detectPerformance() in ../index.js -
     // simplified to the single boolean the doc asks for ("structured so they *can* be gated...
@@ -1718,6 +1800,12 @@
     // behavior - nothing outside this function needed to change.
     // ===================================
     function buildObstacles(scene) {
+        // Same dev-mode flag setDevPanelVisible() checks at module load - re-read here (cheap,
+        // stateless) rather than threaded through as a parameter, purely to decide whether the new
+        // inlane/outlane rollover triggers below render their (otherwise invisible) hitbox as a
+        // translucent debug overlay.
+        const devMode = new URLSearchParams(window.location.search).has('dev');
+
         // Shared dark-metallic material for every non-colliding "housing/bracket/rail" decoration
         // below (bumper skirts, target mounting posts, slingshot housings, lane guide rails) - one
         // material instance reused everywhere it's needed, keeping them visually unified as
@@ -2012,6 +2100,113 @@
             });
         });
 
+        // Lower-table inlanes/outlanes - see SIDE_LANES' block comment (near its declaration) for
+        // the full layout reasoning and the real-scene-measured geometry it's based on.
+        SIDE_LANES.forEach((laneDef) => {
+            const mirror = laneDef.mirror;
+            const dividerX = mirror * LANE_DIVIDER_X_M;
+            const dividerCenterZ = (LANE_Z_TOP_M + LANE_Z_BOTTOM_M) / 2;
+
+            // Divider rail - separates the outlane from the inlane. The outlane's own outer edge
+            // reuses the already-existing leftWall/rightWall (no new wall needed there). Shares
+            // housingMat like every other decorative guide rail on the board, and its own hit
+            // feedback reuses the existing generic 'wall' handling in handlePhysicalHit() - a
+            // guide rail is still a wall to the ball, no new feedback code needed for it.
+            const divider = BABYLON.MeshBuilder.CreateBox('laneDivider' + laneDef.side, {
+                width: 0.006,
+                height: 0.022,
+                depth: Math.abs(LANE_Z_TOP_M - LANE_Z_BOTTOM_M)
+            }, scene);
+            divider.position.set(dividerX, 0.011, dividerCenterZ);
+            divider.material = housingMat;
+            divider.metadata = { kind: 'wall' };
+            new BABYLON.PhysicsAggregate(divider, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+
+            // End posts, capping the divider top/bottom - real guide rails read as bounded by
+            // round posts, not a bare floating box segment, and give the ball a rounder surface to
+            // deflect off if it clips the very top/bottom of the rail. Also physical (same 'wall'
+            // feedback reuse as the rail itself), not just decorative.
+            [LANE_Z_TOP_M, LANE_Z_BOTTOM_M].forEach((postZ, i) => {
+                const post = BABYLON.MeshBuilder.CreateCylinder('laneDivider' + laneDef.side + 'Post' + i, {
+                    diameter: 0.016,
+                    height: 0.03
+                }, scene);
+                post.position.set(dividerX, 0.015, postZ);
+                post.material = housingMat;
+                post.metadata = { kind: 'wall' };
+                new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            });
+
+            // Inlane inner guide - see INLANE_GUIDE_TOP_X_M/INLANE_GUIDE_BOTTOM_X_M's comment for
+            // why this exists as a real angled wall instead of an open gap. Built the same way
+            // every other angled wall in this file is (buildTable()'s leftSlant/rightSlant/
+            // leftGuide/rightGuide): long axis along local X before rotation, rotation.y then
+            // aims that axis at the real world-space direction between the two endpoints. That
+            // rotation formula (rotationY = atan2(-dz, dx)) was derived empirically against this
+            // exact Babylon build via a live probe (mesh.getDirection(Axis.X) on both a controlled
+            // test box and the real, already-rendered leftSlant wall), not assumed from Babylon's
+            // documented convention - the same kind of sign ambiguity toWorldRotationY's own
+            // comment flags for 2D->3D rotation mapping generally.
+            {
+                const guideTopX = mirror * INLANE_GUIDE_TOP_X_M;
+                const guideBottomX = mirror * INLANE_GUIDE_BOTTOM_X_M;
+                const dx = guideBottomX - guideTopX;
+                const dz = LANE_Z_BOTTOM_M - LANE_Z_TOP_M;
+                const guideLength = Math.sqrt(dx * dx + dz * dz);
+                const guideRotationY = Math.atan2(-dz, dx);
+
+                const guide = BABYLON.MeshBuilder.CreateBox('inlaneGuide' + laneDef.side, {
+                    width: guideLength,
+                    height: 0.022,
+                    depth: 0.006
+                }, scene);
+                guide.position.set((guideTopX + guideBottomX) / 2, 0.011, dividerCenterZ);
+                guide.rotation.y = guideRotationY;
+                guide.material = housingMat;
+                guide.metadata = { kind: 'wall' };
+                new BABYLON.PhysicsAggregate(guide, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            }
+
+            // Inlane/outlane rollover triggers, each with its own indicator lamp insert. The lamp
+            // (a flat disc, like a real backlit playfield insert) is the lane's only always-visible
+            // presence - the trigger box itself has no real-pinball shape of its own, so it stays
+            // invisible in normal play and only renders (translucent, color-coded) when ?dev=1, to
+            // make the actual hitbox extent inspectable during development.
+            [
+                { kind: 'inlane', x: mirror * INLANE_TRIGGER_X_M, debugColor: new BABYLON.Color3(0.2, 1, 0.4) },
+                { kind: 'outlane', x: mirror * OUTLANE_TRIGGER_X_M, debugColor: new BABYLON.Color3(1, 0.2, 0.3) }
+            ].forEach((laneKind) => {
+                const lampMat = new BABYLON.PBRMaterial(laneKind.kind + 'LampMat' + laneDef.side, scene);
+                lampMat.albedoColor = COLOR_LANE_LAMP.scale(0.3);
+                lampMat.metallic = 0.2;
+                lampMat.roughness = 0.4;
+                lampMat.emissiveColor = COLOR_LANE_LAMP.scale(0.12); // faint glow at rest, like a real backlit-but-unlit insert
+                const lamp = BABYLON.MeshBuilder.CreateCylinder(laneKind.kind + 'Lamp' + laneDef.side, {
+                    diameterTop: LANE_TRIGGER_WIDTH_M * 0.6,
+                    diameterBottom: LANE_TRIGGER_WIDTH_M * 0.6,
+                    height: 0.003
+                }, scene);
+                lamp.position.set(laneKind.x, 0.011, LANE_TRIGGER_Z_M);
+                lamp.material = lampMat;
+
+                const triggerMat = new BABYLON.PBRMaterial(laneKind.kind + 'TriggerMat' + laneDef.side, scene);
+                triggerMat.albedoColor = laneKind.debugColor;
+                triggerMat.alpha = 0.35;
+                triggerMat.emissiveColor = laneKind.debugColor.scale(0.5);
+                const trigger = BABYLON.MeshBuilder.CreateBox(laneKind.kind + laneDef.side, {
+                    width: LANE_TRIGGER_WIDTH_M,
+                    height: 0.02,
+                    depth: LANE_TRIGGER_DEPTH_M
+                }, scene);
+                trigger.position.set(laneKind.x, 0.01, LANE_TRIGGER_Z_M);
+                trigger.material = triggerMat;
+                trigger.isVisible = devMode;
+                trigger.metadata = { kind: laneKind.kind, side: laneDef.side, lamp };
+                const aggregate = new BABYLON.PhysicsAggregate(trigger, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
+                aggregate.shape.isTrigger = true;
+            });
+        });
+
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
         // Saturn's rings every frame, and drive the power-up orb's spawn/despawn cycle - the
         // pieces of obstacle geometry later code needs a direct mesh reference to.
@@ -2062,6 +2257,7 @@
         COLOR_SATURN_RING = hexToColor3(HEX_SATURN_RING);
         COLOR_COMET = hexToColor3(HEX_COMET);
         COLOR_MISSION_ACTIVE = hexToColor3(HEX_MISSION_ACTIVE);
+        COLOR_LANE_LAMP = hexToColor3(HEX_LANE_LAMP);
         COLOR_BACKGROUND = hexToColor3(HEX_BACKGROUND);
 
         const engine = new BABYLON.Engine(canvas, true);
@@ -2618,7 +2814,7 @@
         // Bookkeeping only, not the deferred mission FSM itself.
         const stats = {
             bumperHits: 0, cometHits: 0, saturnHits: 0, targetHits: 0, laneHits: 0,
-            missionsCompleted: 0, powerUpsCollected: 0
+            missionsCompleted: 0, powerUpsCollected: 0, inlaneHits: 0, outlaneHits: 0
         };
 
         // Mission/rank progression state (improvement-prompts/05-*.md). rank is an index into
@@ -2898,6 +3094,21 @@
             }, 90);
         }
 
+        // Brightens an inlane/outlane's indicator lamp insert to its full COLOR_LANE_LAMP amber on
+        // a rollover, then fades back to the dim at-rest glow set in buildObstacles() - the "lamp
+        // insert" half of this feature's own requirement, kept as a simple standalone flash
+        // (unlike the reentry lanes' persistent lit-green recolor - a deliberately different,
+        // mission-tied mechanic, see SIDE_LANES' block comment) since a rollover here isn't tied
+        // to any ongoing state that should stay visibly "on".
+        function flashLaneLamp(lamp) {
+            const mat = lamp.material;
+            const originalEmissive = mat.emissiveColor.clone();
+            mat.emissiveColor = COLOR_LANE_LAMP.clone();
+            setTimeout(() => {
+                if (!lamp.isDisposed()) mat.emissiveColor.copyFrom(originalEmissive);
+            }, 220);
+        }
+
         function handlePhysicalHit(mesh) {
             const meta = mesh.metadata;
             if (!meta || isOnCooldown(mesh)) return;
@@ -3018,6 +3229,21 @@
                 triggerCameraShake(80, 0.003); // matches hitReentryLane()'s cameraShake(80, 0.003)
                 playHitSound(990);
                 progressMission('lane');
+            } else if (meta.kind === 'inlane' || meta.kind === 'outlane') {
+                // Not mission-tied (unlike 'reentryLane' above, whose 'lane' mission type belongs
+                // specifically to the top-of-table reentry lanes) - see SIDE_LANES' block comment
+                // for why these stay a fully separate mechanic.
+                const isOutlane = meta.kind === 'outlane';
+                setCooldown(mesh, COOLDOWN_SIDE_LANE_MS);
+                const points = isOutlane ? SCORE_OUTLANE : SCORE_INLANE;
+                addScore(points);
+                if (isOutlane) stats.outlaneHits++; else stats.inlaneHits++;
+                pulseMesh(mesh);
+                flashLaneLamp(meta.lamp);
+                spawnHitBurst(scene, particleTexture, mesh, highFidelity);
+                backglass.showMessage((isOutlane ? 'OUTLANE! +' : 'INLANE! +') + points, 700);
+                triggerCameraShake(70, isOutlane ? 0.003 : 0.0025); // a modest rollover beat, not a collision - outlane a touch stronger, it's the more consequential of the two
+                playHitSound(isOutlane ? 430 : 600); // lower/more ominous pitch for the outlane, matching the existing "different obstacle kinds get different pitches" convention
             } else if (meta.kind === 'powerUp') {
                 // powerUp.active (see updatePowerUp()) is the real source of truth for whether
                 // this should count - guards against a trigger event that fires right as the orb
@@ -3217,6 +3443,8 @@
             stats.laneHits = 0;
             stats.missionsCompleted = 0;
             stats.powerUpsCollected = 0;
+            stats.inlaneHits = 0;
+            stats.outlaneHits = 0;
             // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
             // score/lives/stats above - resets on every new game, not a permanent meta-progression.
             mission.state = 'idle';
@@ -3323,6 +3551,8 @@
                 ['Saturn Hits', stats.saturnHits],
                 ['Target Hits', stats.targetHits],
                 ['Lane Hits', stats.laneHits],
+                ['Inlane Hits', stats.inlaneHits],
+                ['Outlane Hits', stats.outlaneHits],
                 ['Power-Ups Collected', stats.powerUpsCollected]
             ];
             statLines.forEach(([label, value]) => {
