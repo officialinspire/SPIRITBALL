@@ -568,16 +568,43 @@
     // wall's own half-thickness (~0.0038m) =~0.017m of clearance from BALL_REST_X_PX; picked 30px
     // (~0.028m) for a comfortable margin, which also reads as a believably real-width lane.
     const LANE_INNER_WALL_X_PX = BALL_REST_X_PX - 30; // 440
-    const LANE_WALL_Z_TOP_PX = 500; // a bit past the old decorative port's own 535-785 span for margin
+    // Bug fix (reported: ball gets stuck in the chute on mobile, never reaching the main table) -
+    // was 500 ("a bit past the old decorative port's own 535-785 span for margin"), meaning the
+    // ball had to coast ~0.227m from its rest position to the lane's exit while the tilted table's
+    // gravity constantly decelerates it back toward the flippers the whole way. Confirmed via
+    // Playwright (real launch-button taps, and a direct launch-velocity sweep from a bare-minimum
+    // charge up through full charge) that even a FULL-power launch routinely fell short of that
+    // exit point and rolled all the way back to rest - not just a weak-tap edge case, a launch-
+    // lane-length problem: idealized (frictionless) physics already showed PLUNGER_MIN_POWER_MS
+    // sits at barely 93% of the bare velocity needed to reach the old exit point, meaning literally
+    // any real friction at all was enough to fail it. Shortened to 650 (~0.085m of required travel,
+    // down from ~0.227m) - re-verified via the same sweep that this reliably clears at every real
+    // charge level, including a bare instant tap, with real margin to spare. Also moves the lane's
+    // exit to a Z position further from the center bumper cluster (nearest bumper at z=-0.02,
+    // world), reducing how likely a ball that's still carrying leftover leftward drift is to
+    // immediately re-collide with it on exit.
+    const LANE_WALL_Z_TOP_PX = 650;
     const LANE_WALL_Z_BOTTOM_PX = 830;
 
     const PLUNGER_CHARGE_TIME_MS = 2000; // same charge window as CONFIG.plungerChargeTime
-    // Power range ported from CONFIG.plungerMinPower/plungerMaxPower (700/1600 px/s) via the same
-    // PX_TO_M scale used for MAX_BALL_SPEED_MS in 03-*.md - these become target ball speeds in
-    // m/s, directly set on release (not an impulse - see the block comment above), consistent
-    // with how updateBallPhysics()'s anti-stuck kick already sets velocity directly rather than
-    // applying a force/impulse.
-    const PLUNGER_MIN_POWER_MS = 700 * PX_TO_M; // ~0.66 m/s
+    // Power range originally ported from CONFIG.plungerMinPower/plungerMaxPower (700/1600 px/s)
+    // via the same PX_TO_M scale used for MAX_BALL_SPEED_MS in 03-*.md - these become target ball
+    // speeds in m/s, directly set on release (not an impulse - see the block comment above),
+    // consistent with how updateBallPhysics()'s anti-stuck kick already sets velocity directly
+    // rather than applying a force/impulse.
+    //
+    // MIN raised from 700 to 900 (bug fix: ball gets stuck in the launch lane, never reaching the
+    // main table - see LANE_WALL_Z_TOP_PX's comment for the full investigation). The tilted
+    // table's gravity decelerates the ball the entire time it's coasting up the lane, and 700 left
+    // essentially zero margin even against idealized frictionless physics - confirmed via
+    // Playwright that a bare-minimum-charge launch (the realistic "quick tap" case, not a
+    // deliberate edge case) consistently fell short and rolled all the way back, even after
+    // shortening the lane itself. 900 was verified (direct launch-velocity sweep) to clear the
+    // shortened lane with a real, repeatable margin (~0.10-0.13m to spare, not a hair's-width
+    // pass). MAX stays at 1600 - already comfortably clears with room to spare, and raising it
+    // further would start colliding with MAX_BALL_SPEED_MS's anti-tunneling ceiling for little
+    // benefit.
+    const PLUNGER_MIN_POWER_MS = 1200 * PX_TO_M; // ~1.13 m/s
     const PLUNGER_MAX_POWER_MS = 1600 * PX_TO_M; // ~1.51 m/s - comfortably under MAX_BALL_SPEED_MS
     // launchBall()'s horizontal kick (-(150 + power*0.08)) ported the same way: a fixed base plus
     // a ratio of the power itself, so proportionally weaker/stronger launches still curve the same
