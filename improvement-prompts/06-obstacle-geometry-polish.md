@@ -34,3 +34,55 @@ when the underlying mechanics are solid.
   primitive shape, from a normal gameplay camera distance.
 - No change to collision/scoring/trigger behavior — verified via the same hit-detection paths that
   already work today.
+
+## Implementation note
+
+**Approach.** Every obstacle's actual collider mesh (shape, size, position, material assignment,
+`PhysicsAggregate`, `metadata.kind`) is completely unchanged. All visual improvement comes from
+adding purely-decorative companion meshes with no physics body, positioned to match - the exact
+pattern this file already used for the satellite's ring (Stage 4), just applied consistently to
+every obstacle type. Because nothing outside `buildObstacles()` needed to change (no new metadata
+fields, no changes to `pulseMesh()`/`handlePhysicalHit()`/`handleTriggerHit()`/collision-event
+wiring), this was a fully additive, low-risk change with zero code paths to regress.
+
+- **Bumper** (pop bumper): the sphere collider is unchanged; added a wide flat "skirt" cylinder at
+  its base (shared dark-metallic `housingMat`) and a glowing torus "collar" around its equator
+  (reusing the dome's own colored material, so it reads as one lit fixture). Now reads clearly as
+  a dome-on-a-base pop bumper instead of a floating sphere.
+- **Mission target**: the thin box collider is unchanged; added a darker backing panel just behind
+  it (a mounting bracket) and a small indicator lamp sphere at its base (the classic pinball
+  rollover-lane light motif).
+- **Satellite**: unchanged sphere + existing ring; added a second, smaller, oppositely-tilted ring
+  so it reads as "rings" (plural, like Saturn's real banded ring system) instead of one ring.
+- **Slingshot**: the box collider (the rubber-covered kicker face) is unchanged; added a
+  triangular-prism "housing" behind it (`MeshBuilder.CreateCylinder` with `tessellation: 3`, a
+  cheap way to get a real prism), giving it the wedge silhouette a real slingshot kicker has. The
+  collider deliberately stays a box, not a wedge - a wedge-shaped collider would change how the
+  ball actually bounces off it, which the doc explicitly said not to do.
+- **Re-entry lane**: the flat lit-indicator box collider is unchanged; added two thin flanking
+  "guide rail" boxes (chrome-like, sharing `housingMat`) on either side of the lane opening,
+  matching a real lane guide's raised metal rails. The rails don't change color on hit - only the
+  existing indicator box does, matching the real 2D game's lit/unlit behavior.
+
+**Verification.**
+- `obstacle-01-screenshot.js` - full-table and post-launch gameplay-camera screenshots, cropped
+  and inspected: all 4 bumpers clearly read as dome-on-base pop bumpers, the satellite reads as a
+  ringed planet, the mission-target bank shows distinct colored flag panels, and both slingshots
+  show a dark wedge housing behind the rubber face. Zero console/page errors on load or after a
+  real launch.
+- Collision/scoring parity was checked two ways. First, `qa-02-scoring2.js` (an existing
+  Improvement 3 test, re-run via a temporary `window.__DEBUG_STATE` hook) was run against BOTH
+  this change and the pre-Improvement-6 baseline (`git stash` back to the prior commit) - the
+  results were byte-for-byte identical in both cases (bumper +500, satellite +1000, slingshot 0,
+  missionTarget anomalous delta, reentryLane 0), proving the slingshot/reentryLane misses in that
+  particular script are pre-existing test-position flakiness (its magic-number ball positions
+  predate Stage 5's mission FSM changing what else is going on during the same window), not a
+  regression introduced by the geometry swap. Second, direct positive checks were run for every
+  type using each obstacle's own well-tuned drop position/velocity
+  (`qa-08-slingshot-check.js`, unchanged from Improvement 3: slingshot +100;
+  `obstacle-02-lane-target-check.js`, new: re-entry lane +2000, mission target +750) - all five
+  obstacle types score exactly their expected point value after the geometry change.
+- Full existing regression suite re-run (`flipper-test.js`, `ccd-test2.js`, `hud-check.js`,
+  `audio-01-noerrors.js`, a 10s plunger-rest recheck): all pass, zero errors.
+- Temporary `window.__DEBUG_STATE` hook removed before commit (`grep -n "__DEBUG_"` returns
+  nothing).

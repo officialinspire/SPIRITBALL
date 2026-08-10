@@ -70,8 +70,10 @@ each of these:
   running game (not just assumed from source) — see `improvement-prompts/03-*.md`. Mobile
   multi-touch interaction specifically still hasn't been verified on a real device (no touch
   hardware in this sandbox) — everything else in that checklist has.
-- Obstacle geometry (bumpers, targets, lanes, slingshots) is simple primitive shapes, not
-  pinball-shaped models.
+- Obstacle geometry (bumpers, targets, satellite, slingshots, lanes) now reads as real pinball
+  elements — pop bumpers, mounted drop targets, a ringed satellite, wedge-housed slingshot
+  kickers, and railed lane guides — via decorative companion meshes with no physics changes
+  (`improvement-prompts/06-*.md`).
 
 ## Contributing / continuing development
 
