@@ -179,6 +179,21 @@
         return audioMuted;
     }
 
+    // Continuous ball-rolling texture (user-requested) - tuning for updateRollingSound()/
+    // initRollingSound() further below. Mapped against the same MAX_BALL_SPEED_MS ceiling every
+    // other speed-based system in this file already uses, not a separately-invented range.
+    // Kept deliberately quiet (MAX_GAIN) - background texture, not a lead sound.
+    const ROLLING_SOUND_MIN_SPEED_MS = 0.03; // below this the ball reads as "at rest" - silent rather than a constant idle hiss
+    const ROLLING_SOUND_MAX_GAIN = 0.08;
+    const ROLLING_SOUND_MIN_FILTER_HZ = 140; // slow ball: dull low rumble
+    const ROLLING_SOUND_MAX_FILTER_HZ = 1600; // fast ball: brighter, rougher texture
+    const ROLLING_SOUND_MIN_RATE = 0.7;
+    const ROLLING_SOUND_MAX_RATE = 2.0;
+    // setTargetAtTime() time-constant - smooths frame-to-frame speed jitter into one continuous
+    // glide instead of a stepped/zippery sweep; also what makes the sound fade in/out cleanly
+    // rather than clicking on/off (see updateRollingSound()'s comment).
+    const ROLLING_SOUND_SMOOTHING_S = 0.09;
+
     // A short tone with an exponential decay (percussive "pling" feel), optionally sweeping
     // frequency from freq to opts.freqEnd over the tone's duration - used for the launch (rising
     // sweep) and obstacle hits (flat or slightly falling pitch, varied per type).
@@ -227,6 +242,11 @@
     }
 
     function playLaunchSound(powerPercent) {
+        // Plunger spring/launch (user-requested layer) - a short noise transient (the spring
+        // itself releasing, louder on a stronger charge) right under the existing rising sweep
+        // (the ball being carried away) - the sweep alone read as a pure electronic "whoosh" with
+        // no mechanical attack; this gives it a physical onset without changing its shape.
+        playNoiseClick(0.025, 0.08 + powerPercent * 0.05);
         // Rising sweep, low -> high - stronger launches sweep further and land louder.
         playTone(140, 0.22, { type: 'triangle', freqEnd: 140 + powerPercent * 500, volume: 0.15 + powerPercent * 0.1 });
     }
@@ -236,7 +256,12 @@
     }
 
     function playWallSound() {
+        // Ball hitting rail/wall (user-requested layer) - the existing noise click alone read as
+        // a flat tap; a very short, quiet resonant knock underneath gives the rail a touch of
+        // physical body without turning it into a musical tone or competing with the sharper
+        // dedicated impact sounds (bumper/slingshot/target) above.
         playNoiseClick(0.03, 0.05);
+        playTone(180, 0.04, { type: 'triangle', volume: 0.04 });
     }
 
     // One shared "hit" sound, pitched differently per obstacle type (see call sites) so they're
@@ -245,6 +270,47 @@
     // sounds").
     function playHitSound(pitch, volume = 0.14) {
         playTone(pitch, 0.15, { type: 'square', freqEnd: pitch * 0.6, volume });
+    }
+
+    // Pop-bumper solenoid (user-requested layer) - a fast noise "thwack" (the solenoid firing)
+    // immediately under a quick downward-pitched triangle (the rubber ring's brief resonance
+    // settling right after) - two short mechanical components instead of playHitSound()'s single
+    // square-wave blip, so a bumper reads as a physical spring-loaded fixture rather than just a
+    // differently-pitched ping. The boss bumper gets a lower, slightly louder version of the same
+    // two-part shape - a bigger fixture, not a different sound.
+    function playBumperSound(isBoss) {
+        const base = isBoss ? 150 : 220;
+        playNoiseClick(0.035, isBoss ? 0.16 : 0.13);
+        playTone(base, 0.09, { type: 'triangle', freqEnd: base * 0.5, volume: isBoss ? 0.17 : 0.14 });
+    }
+
+    // Slingshot snap (user-requested layer) - a very short, sharp noise burst plus a fast rising
+    // sawtooth chirp, shorter and higher than playBumperSound() above so the two "active kicker"
+    // mechanisms read as distinctly different fixtures (a slingshot's rubber-band snap is a much
+    // quicker, thinner sound than a pop bumper's springy thwack).
+    function playSlingshotSound() {
+        playNoiseClick(0.02, 0.13);
+        playTone(700, 0.06, { type: 'sawtooth', freqEnd: 1400, volume: 0.13 });
+    }
+
+    // Target/drop-target clack (user-requested layer) - a noise burst plus a low-mid percussive
+    // square-wave thock with no sweep, reading as a solid plastic/wood clack rather than
+    // playBumperSound()'s springy resonance or playSlingshotSound()'s thin snap - matches a drop
+    // target's own "flat panel physically dropping" feel.
+    function playTargetClackSound() {
+        playNoiseClick(0.03, 0.11);
+        playTone(320, 0.08, { type: 'square', freqEnd: 200, volume: 0.12 });
+    }
+
+    // Rollover switch click (user-requested layer) - deliberately the lightest/shortest/quietest
+    // of the physical-contact sounds here (a real rollover is a leaf switch brushed by the
+    // ball's own weight, not an active mechanism like the three above), just a brief noise tick
+    // plus a very short high sine blip. `pitch` keeps this file's existing per-side/per-lane
+    // pitch-variation convention (e.g. inlane vs. outlane) without needing a separate function
+    // per lane kind.
+    function playRolloverClickSound(pitch = 900) {
+        playNoiseClick(0.012, 0.06);
+        playTone(pitch, 0.04, { type: 'sine', volume: 0.08 });
     }
 
     function playDrainSound() {
@@ -382,6 +448,89 @@
     function playKickbackSound() {
         playNoiseClick(0.05, 0.14);
         setTimeout(() => playTone(260, 0.16, { type: 'sawtooth', freqEnd: 620, volume: 0.17 }), 30);
+    }
+
+    // ===================================
+    // Ball rolling intensity (user-requested layer) - the one sound in this file that has to run
+    // CONTINUOUSLY and track a smoothly-changing value (ball speed) instead of firing once per
+    // event, so it uses a fundamentally different technique from every play*Sound() function
+    // above: one persistent node graph (a looping noise buffer -> lowpass filter -> gain ->
+    // masterGainNode), built exactly ONCE by initRollingSound() and then left connected and
+    // playing for the rest of the session. updateRollingSound() (called every render-loop frame
+    // in main()) never creates a node - it only calls setTargetAtTime() on that same filter/gain/
+    // playbackRate three times a frame, satisfying "avoid creating excessive nodes every frame"
+    // by construction. setTargetAtTime()'s exponential glide toward a moving target is also what
+    // gives "start/stop cleanly and scale smoothly" for free: there's no discrete start or stop
+    // at all, just a continuously-updated target the sound eases toward - a to-rest ball or a
+    // paused game both just glide down to targetGain 0 the same way a fast one glides up.
+    // ===================================
+    let rollingSoundNodes = null;
+
+    // Lazy, one-time init - only ever actually invoked once updateRollingSound() below has real
+    // speed to report (i.e. after the ball's first genuine launch), so this can't spin up an
+    // AudioContext during attract mode before any tap/keypress - same mobile-autoplay-safe rule
+    // getAudioContext() already enforces for every other sound in this file.
+    function initRollingSound() {
+        if (rollingSoundNodes) return rollingSoundNodes;
+        const ctx = getAudioContext();
+        if (!ctx) return null;
+        try {
+            const bufferSize = Math.floor(ctx.sampleRate); // 1 second - a loop point in raw noise reads as inaudible (no coherent waveform to interrupt), no crossfade needed
+            const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.loop = true;
+
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = ROLLING_SOUND_MIN_FILTER_HZ;
+
+            const gain = ctx.createGain();
+            gain.gain.value = 0; // silent until updateRollingSound() reports real speed
+
+            source.connect(filter);
+            filter.connect(gain);
+            gain.connect(masterGainNode); // shared master gain, same as every other sound - respects mute automatically
+            source.start();
+
+            rollingSoundNodes = { source, filter, gain };
+        } catch (e) {
+            rollingSoundNodes = null; // decorative only - a failed init just means silence, never a crash
+        }
+        return rollingSoundNodes;
+    }
+
+    // Called every render-loop frame from main() with the main ball's physics body and whether
+    // it should currently be audible (ballInPlay && !isPaused - computed by the caller, not read
+    // from closure, matching this file's existing top-level update*() convention of taking state
+    // as parameters rather than reaching into main()'s scope). `active` false with no nodes yet
+    // built is the common "game hasn't started" case and exits before touching audio at all.
+    function updateRollingSound(body, active) {
+        if (!active && !rollingSoundNodes) return;
+        const nodes = initRollingSound();
+        if (!nodes || !body) return;
+        const ctx = audioCtx;
+
+        let targetGain = 0;
+        let targetFilterHz = ROLLING_SOUND_MIN_FILTER_HZ;
+        let targetRate = ROLLING_SOUND_MIN_RATE;
+        if (active) {
+            const v = body.getLinearVelocity();
+            const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+            if (speed >= ROLLING_SOUND_MIN_SPEED_MS) {
+                const t = Math.min(speed / MAX_BALL_SPEED_MS, 1);
+                targetGain = ROLLING_SOUND_MAX_GAIN * t;
+                targetFilterHz = ROLLING_SOUND_MIN_FILTER_HZ + (ROLLING_SOUND_MAX_FILTER_HZ - ROLLING_SOUND_MIN_FILTER_HZ) * t;
+                targetRate = ROLLING_SOUND_MIN_RATE + (ROLLING_SOUND_MAX_RATE - ROLLING_SOUND_MIN_RATE) * t;
+            }
+        }
+
+        nodes.gain.gain.setTargetAtTime(targetGain, ctx.currentTime, ROLLING_SOUND_SMOOTHING_S);
+        nodes.filter.frequency.setTargetAtTime(targetFilterHz, ctx.currentTime, ROLLING_SOUND_SMOOTHING_S);
+        nodes.source.playbackRate.setTargetAtTime(targetRate, ctx.currentTime, ROLLING_SOUND_SMOOTHING_S);
     }
 
     function setupResizeHandlers(engine) {
@@ -4427,7 +4576,7 @@
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + points, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
                 triggerCameraShake(130, meta.boss ? 0.009 : 0.007); // was 120/0.008/0.006 - a bit stronger, matching the new active-kick feel
-                playHitSound(meta.boss ? 440 : 660, 0.17);
+                playBumperSound(meta.boss); // pop-bumper solenoid layer, distinct from the generic playHitSound()
                 progressMission('bumper');
             } else if (meta.kind === 'comet') {
                 setCooldown(mesh, COOLDOWN_COMET_MS);
@@ -4467,7 +4616,7 @@
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + SCORE_SLINGSHOT, 600);
                 triggerCameraShake(120, 0.005); // matches hitSlingshot()'s cameraShake(120, 0.005)
-                playHitSound(520);
+                playSlingshotSound(); // slingshot snap layer, distinct from the generic playHitSound()
             } else if (meta.kind === 'wall') {
                 // No score/pulse/burst - walls aren't scored in the 2D game either, just a very
                 // light shake on contact (setupCollisions()'s wall collider: cameraShake(40, 0.003)).
@@ -4527,7 +4676,7 @@
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 triggerCameraShake(60, 0.002); // matches hitMissionTarget()'s cameraShake(60, 0.002)
-                playHitSound(740);
+                playTargetClackSound(); // target/drop-target clack layer, distinct from the generic playHitSound()
                 dropMissionTarget(meta.index);
                 // hitMissionTarget() in ../index.js shows "Selected: {missionName}" here - now a
                 // real mission-select state exists (improvement-prompts/05-*.md): an idle target
@@ -4571,7 +4720,7 @@
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('RE-ENTRY!', 800);
                 triggerCameraShake(80, 0.003); // matches hitReentryLane()'s cameraShake(80, 0.003)
-                playHitSound(990);
+                playRolloverClickSound(990); // rollover switch click layer, distinct from the generic playHitSound()
                 // Unchanged from before this upgrade - still feeds the 'RE-ENTRY CIRCUIT' mission
                 // on every scoring hit, lit or not. Kept fully separate from the bank-complete
                 // check below (see laneBank's own block comment for why).
@@ -4618,7 +4767,10 @@
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage((isOutlane ? 'OUTLANE! +' : 'INLANE! +') + points, 700);
                 triggerCameraShake(70, isOutlane ? 0.003 : 0.0025); // a modest rollover beat, not a collision - outlane a touch stronger, it's the more consequential of the two
-                playHitSound(isOutlane ? 430 : 600); // lower/more ominous pitch for the outlane, matching the existing "different obstacle kinds get different pitches" convention
+                // Rollover switch click layer, distinct from the generic playHitSound() - lower
+                // pitch for the outlane, matching the existing "different obstacle kinds get
+                // different pitches" convention.
+                playRolloverClickSound(isOutlane ? 430 : 600);
                 // Outlane kickback (fairness mechanics, user-requested) - on top of (not instead
                 // of) the normal outlane scoring above, only for the one designated side
                 // (KICKBACK_SIDE) and only while armed. Overwrites the OUTLANE! message just
@@ -5208,6 +5360,13 @@
                 }
                 updatePlungerVisual(plunger);
             }
+
+            // Ball rolling intensity (user-requested audio layer) - called every frame regardless
+            // of isPaused (unlike the block above), deliberately: it needs to keep running while
+            // paused so it can glide the rolling texture down to silence (active=false) instead
+            // of freezing mid-volume at whatever it last was when the pause hit. See
+            // updateRollingSound()'s own comment for why this never creates new audio nodes.
+            updateRollingSound(mainBall.aggregate.body, ballInPlay && !isPaused);
 
             if (attractModeActive) {
                 attractCamera.alpha += deltaMs * 0.00015; // slow continuous orbit
