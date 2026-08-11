@@ -353,6 +353,19 @@
         }
     }
 
+    // Upper-lane skill shot award (user-requested) - laneIndex 0 (SUPER SKILL SHOT, the hardest/
+    // best lane) gets the biggest three-note fanfare; laneIndex 2 (LAUNCH SHOT, the easy/common
+    // lane) gets a single short chime - so the sound itself telegraphs which tier was hit, same
+    // "bigger achievement, bigger sting" scaling as playComboSound()/playRankUpSound(), just keyed
+    // by lane instead of tier.
+    function playSkillShotSound(laneIndex) {
+        const notes = 3 - laneIndex;
+        const basePitch = 700 - laneIndex * 60;
+        for (let i = 0; i < notes; i++) {
+            setTimeout(() => playTone(basePitch * (1 + i * 0.35), 0.12, { type: 'triangle', freqEnd: basePitch * (1 + i * 0.35) * 1.3, volume: 0.16 }), i * 90);
+        }
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -905,6 +918,36 @@
     const PLUNGER_HORIZONTAL_BASE_MS = 150 * PX_TO_M;
     const PLUNGER_HORIZONTAL_RATIO = 0.08;
 
+    // ===================================
+    // Upper-lane skill shot (user-requested) - turns the plunger's existing variable charge
+    // power into an actual mechanic: three small lanes just past the shooter lane's exit, in the
+    // real gap between the bumper cluster's two rows (BUMPER_CLUSTER has one bumper at z=-0.02
+    // and a pair at z=0.06 - this sits at z=0.02, comfortably clear of both), reward depending on
+    // which one the ball's first clean launch passes through.
+    //
+    // The geometry below was chosen by direct trajectory sampling (Playwright: launching the
+    // ball at a spread of real charge durations and recording its actual position over time),
+    // the same empirical-not-assumed approach this file already uses for its guide-rail/orbit-
+    // rotation geometry - NOT by retuning any plunger constant (PLUNGER_MIN_POWER_MS/MAX_POWER_MS/
+    // HORIZONTAL_BASE_MS/HORIZONTAL_RATIO above are all untouched). That sampling turned up
+    // something genuinely useful for the "full power shouldn't be optimal" requirement: a bare-
+    // minimum tap AND a full-power launch both consistently landed in the easiest, outermost
+    // lane, while only a calibrated MID-range charge reliably reached the two better, more
+    // central lanes - so holding for maximum power is not the winning strategy here, a
+    // deliberately-timed medium charge is.
+    // ===================================
+    const SKILL_SHOT_WINDOW_MS = 2500; // short, per the request - how long the window stays armed after a launch
+    const SKILL_SHOT_Z_M = 0.02;
+    const SKILL_SHOT_DEPTH_M = 0.03;
+    const SCORE_SKILL_SHOT_SUPER = 2500; // hardest to reach (innermost lane) - biggest reward
+    const SCORE_SKILL_SHOT_MID = 1500;
+    const SCORE_SKILL_SHOT_SAFE = 800; // where both a weak tap and a full-power launch tend to land
+    const SKILL_SHOT_LANES = [
+        { x: 0.04, halfWidth: 0.02, label: 'SUPER SKILL SHOT', points: SCORE_SKILL_SHOT_SUPER },
+        { x: 0.08, halfWidth: 0.02, label: 'SKILL SHOT', points: SCORE_SKILL_SHOT_MID },
+        { x: 0.125, halfWidth: 0.025, label: 'LAUNCH SHOT', points: SCORE_SKILL_SHOT_SAFE }
+    ];
+
     // How far the plunger tip sits behind the ball's true rest spot (toWorldZ(BALL_REST_Z_PX),
     // used directly for the ball's own spawn/reset position - NOT plunger.baseZ, which used to be
     // the same value and meant the ball spawned inside the plunger's own collision volume once
@@ -1181,11 +1224,15 @@
     // (inlane/outlane) and HEX_MISSION_ACTIVE's green (reentry lanes), so the board's three
     // "lit insert" mechanics each read as visually distinct at a glance.
     const HEX_ORBIT_LAMP = 0x33ccff;
+    // Hot red-pink - the upper-lane skill shot's own identity (user-requested), distinct from
+    // every other "lit insert" color on the board (amber lane lamps, cyan orbit lamps, green
+    // mission-active), so a lit skill-shot lane reads as its own thing at a glance.
+    const HEX_SKILL_SHOT_LAMP = 0xff3366;
     const HEX_BACKGROUND = 0x1a0033;
 
     let COLOR_BALL, COLOR_EYEBALL, COLOR_FLIPPER, COLOR_WALL, COLOR_BUMPERS, COLOR_CHAKRA,
         COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_ORBIT_LAMP,
-        COLOR_VISION_GATE, COLOR_BACKGROUND;
+        COLOR_SKILL_SHOT_LAMP, COLOR_VISION_GATE, COLOR_BACKGROUND;
 
     // Device-tier gate, ported from PerformanceManager.detectPerformance() in ../index.js -
     // simplified to the single boolean the doc asks for ("structured so they *can* be gated...
@@ -2490,6 +2537,46 @@
             });
         });
 
+        // Upper-lane skill shot (user-requested) - see SKILL_SHOT_LANES' own block comment (near
+        // its declaration) for the full geometry reasoning. Same invisible-unless-dev trigger +
+        // always-visible lamp insert split as the inlane/outlane rollovers just above; the lamp
+        // starts dim/off (armSkillShot()/endSkillShot() in main() toggle it per-ball) since
+        // these lanes only matter for the short window right after a launch.
+        const skillShotLaneMeshes = [];
+        const skillShotLampMeshes = [];
+        SKILL_SHOT_LANES.forEach((laneDef, i) => {
+            const lampMat = new BABYLON.PBRMaterial('skillShotLampMat' + i, scene);
+            lampMat.albedoColor = COLOR_SKILL_SHOT_LAMP.scale(0.3);
+            lampMat.metallic = 0.2;
+            lampMat.roughness = 0.4;
+            lampMat.emissiveColor = COLOR_SKILL_SHOT_LAMP.scale(0.12); // faint glow at rest, like a real backlit-but-unlit insert
+            const lamp = BABYLON.MeshBuilder.CreateCylinder('skillShotLamp' + i, {
+                diameterTop: laneDef.halfWidth * 2 * 0.5,
+                diameterBottom: laneDef.halfWidth * 2 * 0.5,
+                height: 0.003
+            }, scene);
+            lamp.position.set(laneDef.x, 0.011, SKILL_SHOT_Z_M);
+            lamp.material = lampMat;
+            skillShotLampMeshes.push(lamp);
+
+            const triggerMat = new BABYLON.PBRMaterial('skillShotTriggerMat' + i, scene);
+            triggerMat.albedoColor = new BABYLON.Color3(1, 0.4, 0.6);
+            triggerMat.alpha = 0.35;
+            triggerMat.emissiveColor = new BABYLON.Color3(0.6, 0.15, 0.3);
+            const trigger = BABYLON.MeshBuilder.CreateBox('skillShotLane' + i, {
+                width: laneDef.halfWidth * 2,
+                height: 0.02,
+                depth: SKILL_SHOT_DEPTH_M
+            }, scene);
+            trigger.position.set(laneDef.x, 0.01, SKILL_SHOT_Z_M);
+            trigger.material = triggerMat;
+            trigger.isVisible = devMode;
+            trigger.metadata = { kind: 'skillShotLane', index: i, lamp };
+            const skillShotAggregate = new BABYLON.PhysicsAggregate(trigger, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
+            skillShotAggregate.shape.isTrigger = true;
+            skillShotLaneMeshes.push(trigger);
+        });
+
         // Upper-table LEFT ORBIT / RIGHT ORBIT skill shots - see ORBITS' block comment (near its
         // declaration) for the full layout reasoning. Each side gets one visible guide rail
         // (capped by end posts, same visual language as the inlane/outlane divider above) running
@@ -2677,7 +2764,7 @@
         // Saturn's rings every frame, drive the power-up orb's spawn/despawn cycle, and run the
         // Vision Gate's own capture sequence against a direct mesh reference (the ring, not the
         // trigger - the ring is what's actually visible and worth flashing/sparkling).
-        return { missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, saturnRings, powerUpMesh, visionGateMesh: ring };
+        return { missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes, saturnRings, powerUpMesh, visionGateMesh: ring };
     }
 
     // Drain zone (Stage 6, babylon-prompts/06-*.md) - see the block comment above SCORE_ATTACK_
@@ -2726,6 +2813,7 @@
         COLOR_MISSION_ACTIVE = hexToColor3(HEX_MISSION_ACTIVE);
         COLOR_LANE_LAMP = hexToColor3(HEX_LANE_LAMP);
         COLOR_ORBIT_LAMP = hexToColor3(HEX_ORBIT_LAMP);
+        COLOR_SKILL_SHOT_LAMP = hexToColor3(HEX_SKILL_SHOT_LAMP);
         COLOR_VISION_GATE = hexToColor3(HEX_VISION_GATE);
         COLOR_BACKGROUND = hexToColor3(HEX_BACKGROUND);
 
@@ -3093,6 +3181,13 @@
             plungerPower = PLUNGER_MIN_POWER_MS;
             plunger.chargePercent = 0;
             setLaunchReady(true);
+            // Upper-lane skill shot (user-requested) - defensive, unconditional reset, same
+            // pattern as the Vision Gate's own motion-type restore here: correct no-op if no
+            // shot is pending, and guarantees a dev "RESET BALL TO PLUNGER" tap or any other path
+            // into this function can never leave a stale window (or lit lamps) armed for the
+            // next ball. Force-reset, not endSkillShot() - a hard reset shouldn't retroactively
+            // award whatever lane happened to be pending.
+            forceResetSkillShot();
         }
 
         // Mirrors handleLaunchPress()/handleLaunchRelease() in ../index.js: power is purely a
@@ -3136,7 +3231,13 @@
             plungerCharging = false;
             plunger.chargePercent = 0;
             setLaunchReady(false);
-            backglass.showMessage('LAUNCH!', 600);
+            // Upper-lane skill shot (user-requested) - armed on every launch, not just the first
+            // of the game; "award once per ball" is enforced by skillShot.active itself (see its
+            // own block comment), not by anything here. Folded into the existing LAUNCH! message
+            // rather than a second showMessage() call right after it, which would just silently
+            // overwrite it (showMessage() has no queue - see its own comment).
+            armSkillShot();
+            backglass.showMessage('LAUNCH! SKILL SHOT READY', 900);
 
             // Power-scaled shake, matching launchBall()'s shakeIntensity = 0.002 + powerPercent*0.005
             // in ../index.js, plus a 3D-only push-in toward the ball (no 2D equivalent - that
@@ -3302,7 +3403,7 @@
             bumperHits: 0, cometHits: 0, saturnHits: 0, targetHits: 0, laneHits: 0,
             missionsCompleted: 0, powerUpsCollected: 0, inlaneHits: 0, outlaneHits: 0,
             leftOrbitShots: 0, rightOrbitShots: 0, visionGateCaptures: 0, targetBankCompletions: 0,
-            laneBankCompletions: 0, combosCompleted: 0, comboMaxTier: 0
+            laneBankCompletions: 0, combosCompleted: 0, comboMaxTier: 0, skillShotsAwarded: 0
         };
 
         // Mission/rank progression state (improvement-prompts/05-*.md). rank is an index into
@@ -3354,6 +3455,26 @@
         // escalating tier (COMBO x2, x3...) - see fireCombo() below.
         const comboProgress = COMBO_DEFS.map(() => ({ index: 0, lastAtMs: 0 }));
         const comboStreak = { tier: 0, lastAtMs: 0 };
+
+        // Upper-lane skill shot state (user-requested) - `active` is the real gate checked in
+        // handleTriggerHit()'s 'skillShotLane' branch and armed only by handleLaunchRelease()
+        // below (once per launch); `remainingMs` is the short timeout, counted down by
+        // updateSkillShot() from the render loop like every other continuous per-ball timer here
+        // (updatePowerUp()/updateDropTargetBank()/updateBonusCount()) rather than a bare
+        // setTimeout, so it pauses correctly with everything else instead of burning down during
+        // a paused game.
+        //
+        // `bestLaneIndex` is why a lane touch doesn't resolve the shot immediately: the three
+        // lanes sit side by side at the same depth (see SKILL_SHOT_LANES), the ball always
+        // travels across them in the same right-to-left order, and they're pure detectors (not
+        // physical blockers) - so a shot that carries far enough legitimately crosses more than
+        // one lane's trigger in a row. Each touch only ever UPGRADES bestLaneIndex to the better
+        // lane (see the 'skillShotLane' branch below); the window closing - via endSkillShot(),
+        // on a timeout or the ball entering normal play (the guard near the top of
+        // handlePhysicalHit()/handleTriggerHit()) - is what actually awards whichever lane ended
+        // up best, so "where the first clean launch lands" means the FURTHEST lane it reached,
+        // not just whichever one happened to be geometrically nearest.
+        const skillShot = { active: false, remainingMs: 0, bestLaneIndex: null };
 
         // Orbit shot state (one entry per side) - `armedAt` is the timestamp (performance.now()-
         // style ms) of the last valid entrance hit, or null if the entrance hasn't fired (or its
@@ -4038,9 +4159,74 @@
             comboStreak.lastAtMs = 0;
         }
 
+        function setSkillShotLampsLit(lit) {
+            obstacles.skillShotLampMeshes.forEach((lamp) => {
+                lamp.material.emissiveColor = lit ? COLOR_SKILL_SHOT_LAMP.scale(0.9) : COLOR_SKILL_SHOT_LAMP.scale(0.12);
+            });
+        }
+
+        // Called once, from handleLaunchRelease() - "award once per ball" starts here, since this
+        // is the only place that ever sets `active` true.
+        function armSkillShot() {
+            skillShot.active = true;
+            skillShot.remainingMs = SKILL_SHOT_WINDOW_MS;
+            skillShot.bestLaneIndex = null;
+            setSkillShotLampsLit(true);
+        }
+
+        // Closes the window - from a timeout, or the ball entering normal play - and awards
+        // whichever lane ended up best (see skillShot's own block comment for why a lane touch
+        // only upgrades bestLaneIndex instead of resolving immediately). Silent if no lane was
+        // ever reached (bestLaneIndex stays null): a plain timeout/normal-play exit with no
+        // skill-shot contact at all is a routine, expected outcome on most launches, not a
+        // failure worth announcing - the lamps simply going dark is the whole cue for that case.
+        function endSkillShot() {
+            if (!skillShot.active) return;
+            skillShot.active = false;
+            setSkillShotLampsLit(false);
+            if (skillShot.bestLaneIndex !== null) {
+                const laneDef = SKILL_SHOT_LANES[skillShot.bestLaneIndex];
+                addScore(laneDef.points);
+                stats.skillShotsAwarded++;
+                // Bonus/multiplier subsystem (established pattern) - a skill shot is a deliberate
+                // "major shot," on top of (not instead of) the addScore() above.
+                ballBonus.points += BONUS_MAJOR_SHOT_AMOUNT;
+                backglass.showMessage(laneDef.label + '! +' + laneDef.points, 1200);
+                triggerCameraShake(150, 0.004);
+                triggerCameraPunch(200, cameraForwardDir.scale(0.012));
+                playSkillShotSound(skillShot.bestLaneIndex);
+            }
+            skillShot.bestLaneIndex = null;
+        }
+
+        // Hard reset (dev "RESET BALL TO PLUNGER" button, a drain, or a new game via
+        // resetBallToPlunger() below) - deliberately does NOT award even if a lane had already
+        // been reached; the ball never got to actually finish that shot.
+        function forceResetSkillShot() {
+            skillShot.active = false;
+            skillShot.bestLaneIndex = null;
+            skillShot.remainingMs = 0;
+            setSkillShotLampsLit(false);
+        }
+
+        function updateSkillShot(deltaMs) {
+            if (!skillShot.active) return;
+            skillShot.remainingMs -= deltaMs;
+            if (skillShot.remainingMs <= 0) endSkillShot();
+        }
+
         function handlePhysicalHit(mesh) {
             const meta = mesh.metadata;
-            if (!meta || isOnCooldown(mesh)) return;
+            if (!meta) return;
+            // Upper-lane skill shot (user-requested): any real contact other than a structural
+            // wall means the ball has left its clean post-launch arc and entered normal play -
+            // close the window (awarding the best lane reached, if any - see endSkillShot()).
+            // Checked before the cooldown gate below on purpose: even an on-cooldown hit (e.g.
+            // grazing a bumper mid-cooldown) is still evidence normal play has started. 'wall' is
+            // exempt - guide rails/dividers are structural, not a deliberate shot, and a clean
+            // skill-shot launch can legitimately graze one.
+            if (skillShot.active && meta.kind !== 'wall') endSkillShot();
+            if (isOnCooldown(mesh)) return;
             if (meta.kind === 'bumper') {
                 setCooldown(mesh, COOLDOWN_BUMPER_MS);
                 // Board redesign: the boss bumper (index 0, see buildObstacles()) is worth more
@@ -4121,12 +4307,30 @@
         function handleTriggerHit(mesh) {
             const meta = mesh.metadata;
             if (!meta) return;
+            // Upper-lane skill shot (user-requested) - same "any real contact ends the window"
+            // reasoning as handlePhysicalHit()'s guard; 'skillShotLane' is exempt since touching
+            // one only ever upgrades the pending result (its own branch below), never closes the
+            // window by itself.
+            if (skillShot.active && meta.kind !== 'skillShotLane') endSkillShot();
             if (meta.kind === 'drainZone') {
                 handleDrain();
                 return;
             }
             if (isOnCooldown(mesh)) return;
-            if (meta.kind === 'missionTarget') {
+            if (meta.kind === 'skillShotLane') {
+                // Doesn't score or close the window here - see skillShot's own block comment for
+                // why: the three lanes sit side by side and the ball always crosses them in the
+                // same order, so a shot that carries far enough legitimately touches more than
+                // one. Only upgrade to this lane if it's worth more than whatever's pending, then
+                // acknowledge the touch with a brief flash (stays lit, doesn't dim - the window
+                // is still open) rather than the full award feedback, which only fires once,
+                // in endSkillShot(), when the window actually closes.
+                if (!skillShot.active) return;
+                if (skillShot.bestLaneIndex === null || SKILL_SHOT_LANES[meta.index].points > SKILL_SHOT_LANES[skillShot.bestLaneIndex].points) {
+                    skillShot.bestLaneIndex = meta.index;
+                }
+                flashLamp(meta.lamp, new BABYLON.Color3(1, 1, 1), 150);
+            } else if (meta.kind === 'missionTarget') {
                 // Drop-target bank upgrade: the trigger volume never moves once a target drops
                 // (see buildObstacles()'s comment - only the flag mesh sinks, in
                 // updateDropTargetBank()), so the ball can keep overlapping a dropped target's
@@ -4542,6 +4746,7 @@
             resetCombos();
             stats.combosCompleted = 0;
             stats.comboMaxTier = 0;
+            stats.skillShotsAwarded = 0;
             // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
             // score/lives/stats above - resets on every new game, not a permanent meta-progression.
             mission.state = 'idle';
@@ -4657,7 +4862,8 @@
                 ['Target Bank Clears', stats.targetBankCompletions],
                 ['Lane Bank Clears', stats.laneBankCompletions],
                 ['Combos', stats.combosCompleted],
-                ['Best Combo Tier', stats.comboMaxTier]
+                ['Best Combo Tier', stats.comboMaxTier],
+                ['Skill Shots', stats.skillShotsAwarded]
             ];
             statLines.forEach(([label, value]) => {
                 if (value > 0) {
@@ -4696,6 +4902,7 @@
                 updateFlipperMotor(rightFlipper, deltaMs);
                 updateDropTargetBank(deltaMs);
                 updateBonusCount(deltaMs);
+                updateSkillShot(deltaMs);
                 // Skipped while the Vision Gate holds the ball (visionGate.active) - not just a
                 // nicety: updateBallPhysics()'s own anti-stuck kick fires after STUCK_TIME_
                 // THRESHOLD_MS (450ms) of near-zero speed, which a deliberately-frozen kinematic
