@@ -706,6 +706,17 @@
         </p>
     </div>
 
-    <script src="babylon-game.js"></script>
+    <!-- type="module" (not a classic script) - babylon-game.js now imports js/config.js via a
+         real ES module `import` (see MODULARIZATION.md at the repo root). Module scripts defer
+         until after the document is parsed, same as the classic script this replaces already
+         effectively got by sitting at the very end of <body> - no behavior change there. The
+         vendored Havok/Babylon <script> tags above stay classic, synchronous scripts (unchanged);
+         since they appear earlier in the document and run immediately as the parser reaches them,
+         window.BABYLON/window.HavokPhysics are still guaranteed defined before this module (or
+         js/config.js, which it imports) ever executes - same load-order guarantee as before, just
+         via module-graph evaluation instead of a single synchronous script tag. Still just static
+         files - no bundler, no build step; GitHub Pages (or any static host) serves these exactly
+         as they are on disk. -->
+    <script type="module" src="babylon-game.js"></script>
 </body>
 </html>
