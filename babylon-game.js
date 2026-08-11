@@ -2913,9 +2913,19 @@ import {
         // plausible meters-of-camera-jitter amplitude for this table's ~0.5m scale, not
         // separately re-tuned per call site, so the existing 2D hierarchy (light taps vs. strong
         // hits) carries over directly.
+        //
+        // Tuning fix (user-reported - "reduce the shakiness so it's not over-dramatic"): this one
+        // multiplier is the single scale factor every one of the ~25 triggerCameraShake() call
+        // sites across the file passes through, so halving it here (4 -> 2) uniformly softens
+        // every hit's shake by 50% while preserving the carefully-tuned RELATIVE proportions
+        // between them (a boss bumper still shakes harder than a regular one, a drain still
+        // shakes harder than a rollover, etc.) - deliberately not hand-tuning all ~25 individual
+        // intensity values, which would risk losing that relative balance. Only the random-jitter
+        // shake is touched, not triggerCameraPunch() - that's a separate, smooth directional
+        // camera nudge (the launch push-in, the drain dip), not the "shakiness" being described.
         function triggerCameraShake(durationMs, intensity) {
             if (window.SPIRITBALL_reducedMotion) return;
-            const amplitude = intensity * 4;
+            const amplitude = intensity * 2;
             if (amplitude >= shakeAmplitudeM || durationMs >= shakeRemainingMs) {
                 shakeAmplitudeM = Math.max(shakeAmplitudeM, amplitude);
                 shakeDurationMs = durationMs;

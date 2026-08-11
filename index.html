@@ -402,9 +402,42 @@
         }
 
         #pause-overlay, #controls-overlay, #gameover-overlay {
+            background: rgba(5, 1, 15, 0.93);
+        }
+
+        /* UX pass (user-requested): pause/controls both have short, fixed-height content that
+           always fits a single screen, and previously used the same top-anchored
+           justify-content:flex-start + padding-top:8vh as #gameover-overlay - which has
+           meaningfully more content (score/high-score/rank/stat lines). That left pause/controls
+           with a large, unbalanced block of empty space below their buttons on most screens.
+           Centered here instead; #gameover-overlay keeps the original top-anchored treatment
+           below, since its longer and more variable content still needs to start from the top
+           and scroll on short viewports. */
+        #pause-overlay, #controls-overlay {
+            justify-content: center;
+        }
+
+        #gameover-overlay {
             justify-content: flex-start;
             padding-top: 8vh;
-            background: rgba(5, 1, 15, 0.93);
+        }
+
+        /* Shared "dialog card" (UX pass, user-requested) - menu/pause/controls previously had no
+           visual container at all, just text/buttons floating directly over the translucent
+           attract-mode camera view (menu) or a plain dark background (pause/controls). Reuses
+           this project's own established panel language (dark glass + cyan border + soft glow -
+           the same treatment the in-game backglass/dev panel already use) instead of inventing a
+           new visual style, and gives the menu's text real contrast against the busy 3D scene
+           behind it. */
+        .overlay-card {
+            background: rgba(12, 0, 30, 0.72);
+            border: 2px solid #00ffff;
+            border-radius: 18px;
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.3), inset 0 0 40px rgba(138, 43, 226, 0.12);
+            padding: 36px 28px;
+            max-width: 420px;
+            width: 100%;
+            box-sizing: border-box;
         }
 
         .screen-overlay h1 {
@@ -477,10 +510,24 @@
             margin: 0;
         }
 
+        /* UX pass (user-requested): the primary call-to-action on both the menu and game-over
+           screens used to be plain pulsing text, with no stronger visual weight than any other
+           line on the page - easy to skim past despite being the one thing every player actually
+           needs to do next. A bordered, glowing "pill" gives it real button-like affordance
+           (still just text, not an actual <button> - both are handled by a click-anywhere-on-the-
+           overlay/keyboard listener already, see menuOverlay.addEventListener('click', ...) and
+           gameOverOverlay's own equivalent in babylon-game.js, neither of which this touches).
+           Slightly smaller max font size than before to comfortably fit inside its own border on
+           narrow phone widths without wrapping. */
         .start-instructions, .restart-instructions {
-            font-size: clamp(18px, 5vw, 30px);
+            display: inline-block;
+            font-size: clamp(15px, 4.2vw, 24px);
             color: #00ff99;
             text-shadow: 0 0 8px #00ff99;
+            border: 2px solid #00ff99;
+            border-radius: 999px;
+            padding: 12px 30px;
+            box-shadow: 0 0 20px rgba(0, 255, 153, 0.35), inset 0 0 12px rgba(0, 255, 153, 0.08);
         }
 
         .screen-overlay button {
@@ -506,6 +553,20 @@
         #pause-newgame-btn:active, #pause-newgame-btn:hover { color: #00ff00; }
         #pause-controls-btn { border-color: #ffff00; }
         #pause-controls-btn:active, #pause-controls-btn:hover { color: #ffff00; }
+
+        /* UX pass (user-requested): Resume is the action most players take most often (every
+           pause is expected to end in a resume, not a new game) - previously it had the exact
+           same visual weight as every other button on the screen, with nothing marking it as the
+           primary/default one. A filled background (instead of the shared flat #1a1a3e) plus a
+           stronger glow is enough to read as "the main button" without changing its size, border
+           color, or position - still the first item in the list, same as before. */
+        #pause-resume-btn {
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.28), rgba(0, 140, 190, 0.38));
+            box-shadow: 0 0 18px rgba(0, 255, 255, 0.4);
+        }
+        #pause-resume-btn:active, #pause-resume-btn:hover {
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.4), rgba(0, 140, 190, 0.5));
+        }
 
         .screen-overlay .hint {
             font-size: 13px;
@@ -712,29 +773,35 @@
     <!-- Menu/title screen (Stage 12) - shown until the first launch input, translucent so the
          idle attract-mode orbit camera (10-*.md) is visible behind it. -->
     <div id="menu-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="menu-overlay-heading">
-        <h1 id="menu-overlay-heading" class="pulse-text">SPIRITBALL</h1>
-        <p class="tagline">DMT Vision Quest Pinball</p>
-        <p class="highscore-line" id="menu-highscore">HIGH SCORE: 0</p>
-        <p class="start-instructions pulse-text" id="menu-start-instructions">PRESS SPACE TO START</p>
+        <div class="overlay-card">
+            <h1 id="menu-overlay-heading" class="pulse-text">SPIRITBALL</h1>
+            <p class="tagline">DMT Vision Quest Pinball</p>
+            <p class="highscore-line" id="menu-highscore">HIGH SCORE: 0</p>
+            <p class="start-instructions pulse-text" id="menu-start-instructions">PRESS SPACE TO START</p>
+        </div>
     </div>
 
     <div id="pause-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="pause-overlay-heading">
-        <h1 id="pause-overlay-heading">GAME PAUSED</h1>
-        <button id="pause-resume-btn">▶ RESUME GAME</button><br>
-        <button id="pause-newgame-btn">🔄 NEW GAME</button><br>
-        <button id="pause-controls-btn">ℹ CONTROLS</button>
-        <p class="hint">ESC or TAP RESUME to continue</p>
+        <div class="overlay-card">
+            <h1 id="pause-overlay-heading">GAME PAUSED</h1>
+            <button id="pause-resume-btn">▶ RESUME GAME</button><br>
+            <button id="pause-newgame-btn">🔄 NEW GAME</button><br>
+            <button id="pause-controls-btn">ℹ CONTROLS</button>
+            <p class="hint">ESC or TAP RESUME to continue</p>
+        </div>
     </div>
 
     <div id="controls-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="controls-overlay-heading">
-        <h1 id="controls-overlay-heading">CONTROLS</h1>
-        <div id="controls-rows"></div>
-        <!-- Mute control (improvement-prompts/04-*.md) - the natural home for this per that
-             prompt's own instruction, matching where the 2D game's Sound/Music toggle used to
-             live before it was removed for being non-functional (archive/release-prompts/04-*.md)
-             and this screen took its place. -->
-        <button id="mute-toggle-btn">🔊 SOUND: ON</button>
-        <button id="controls-back-btn">◄ BACK</button>
+        <div class="overlay-card">
+            <h1 id="controls-overlay-heading">CONTROLS</h1>
+            <div id="controls-rows"></div>
+            <!-- Mute control (improvement-prompts/04-*.md) - the natural home for this per that
+                 prompt's own instruction, matching where the 2D game's Sound/Music toggle used to
+                 live before it was removed for being non-functional (archive/release-prompts/04-*.md)
+                 and this screen took its place. -->
+            <button id="mute-toggle-btn">🔊 SOUND: ON</button>
+            <button id="controls-back-btn">◄ BACK</button>
+        </div>
     </div>
 
     <div id="gameover-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="gameover-overlay-heading">

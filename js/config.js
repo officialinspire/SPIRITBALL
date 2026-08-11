@@ -177,9 +177,22 @@ export const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s com
 // swinging toward center-and-up-table when activated - then mirrored exactly for the right
 // flipper (mirroring an angle-plus-rotation-direction pair requires negating both the angle
 // reflection AND the sweep direction, not just the angle - also verified numerically).
+//
+// Bug fix (user-reported - "rest position angle looks wrong"): the original -100/-80 pair put
+// the rest angle only 10 degrees off perfectly vertical (nearly straight down, toward the
+// player), which reads on screen as a stubby vertical pillar rather than a classic pinball
+// flipper's diagonal paddle silhouette. Shifted 15 degrees further from vertical (each rest
+// angle now 25 degrees off vertical instead of 10), re-verified numerically the same way the
+// original pair was: LEFT's rest tip is still further outward (more negative X) than its own
+// pivot (no crossing at rest, same invariant as before), and with FLIPPER_SWEEP_RAD unchanged,
+// both ACTIVE tips still cross well past the centerline AND still overlap each other by ~6mm
+// when fired simultaneously (no new gap for the ball to sneak through - checked at every 5-degree
+// shift up to 25 before picking 15, since a 20-degree shift left only ~3mm of that overlap and
+// 25 degrees lost it entirely). Mirroring relationship (RIGHT_REST = 180 - LEFT_REST) preserved
+// exactly as established above.
 export const FLIPPER_SWEEP_RAD = (70 * Math.PI) / 180;
-export const FLIPPER_LEFT_REST_RAD = (-100 * Math.PI) / 180;
-export const FLIPPER_RIGHT_REST_RAD = (-80 * Math.PI) / 180;
+export const FLIPPER_LEFT_REST_RAD = (-115 * Math.PI) / 180;
+export const FLIPPER_RIGHT_REST_RAD = (-65 * Math.PI) / 180;
 
 // Motor tuning - NOT ported from anything (flippers are an entirely new mechanism in this
 // 3D rewrite; the 2D version's velocity-injection formula has no equivalent here). These are
