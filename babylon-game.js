@@ -329,6 +329,14 @@
         playNoiseClick(0.1, 0.1);
     }
 
+    // One tick of the end-of-ball bonus count (user-requested subsystem) - deliberately short
+    // and quiet, since updateBonusCount() in main() fires this up to BONUS_COUNT_TICKS times in
+    // quick succession; anything longer/louder than playHitSound()'s regular pitch would stack
+    // into a mess at that repetition rate.
+    function playBonusTickSound() {
+        playTone(660, 0.05, { type: 'square', volume: 0.09 });
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -941,6 +949,32 @@
     // separately, the point value itself doesn't need to differ between them.
     const SCORE_ORBIT = 1500;
 
+    // ===================================
+    // Traditional pinball bonus/multiplier subsystem (user-requested) - a classic end-of-ball
+    // "bonus count." Points quietly accumulate in ballBonus.points (main()) during play, from
+    // major shots and mission completions at their own call sites below, multiplied by
+    // ballBonus.multiplierX (advanced by clearing the rollover-lane bank), and only actually
+    // added to the real score - via a rapid, visible count-up - when the ball drains (see
+    // startBonusCount() in main()). None of this touches any existing base obstacle score
+    // constant above (SCORE_ATTACK_BUMPER etc.) or the mission/rank FSM - every contribution
+    // here is purely additive, alongside the normal addScore() call each hit already makes.
+    // ===================================
+    const BONUS_MULTIPLIER_MAX = 5;
+    // "Substantial" per the request - notably bigger than a single major-shot contribution,
+    // since completing a whole mission is a bigger achievement than one good shot.
+    const BONUS_MISSION_COMPLETE_AMOUNT = 3000;
+    // Major shots: the board's biggest, most deliberate hits (Saturn, a completed orbit, a
+    // Vision Gate capture) - NOT ordinary bumper/lane/target hits, which stay bonus-free so the
+    // pool specifically rewards genuine skill shots, not routine scoring.
+    const BONUS_MAJOR_SHOT_AMOUNT = 500;
+    // Fixed tick count regardless of the actual total, so the count-up's timing stays
+    // predictable and brisk no matter how big the bonus got.
+    const BONUS_COUNT_TICKS = 16;
+    const BONUS_COUNT_TICK_MS = 45; // ~720ms for the full sequence at BONUS_COUNT_TICKS ticks - brisk per the request
+    // Reduced motion: skip the tick sequence entirely and award the whole bonus in one step -
+    // this is just how long the single resulting message stays legible before continuing.
+    const BONUS_COUNT_REDUCED_MOTION_MS = 150;
+
     // Rank names ported from the classic "3D Pinball for Windows - Space Cadet" progression this
     // table's own layout is explicitly modeled on (see buildObstacles()'s "authentic
     // Space-Cadet-inspired" comment) - the same rank ladder archive/KNOWN_ISSUES.md item 3
@@ -1484,7 +1518,12 @@
             rank: RANK_NAMES[0], missionName: null, missionProgress: 0, missionRequired: 0,
             // Score-multiplier power-up (board redesign) - true while a collected orb's 2x
             // window is running (see updatePowerUp() in main()).
-            multiplierActive: false
+            multiplierActive: false,
+            // Bonus/multiplier subsystem (user-requested) - the CURRENT ball's bonus multiplier
+            // (1X-BONUS_MULTIPLIER_MAX), kept in sync with ballBonus.multiplierX in main()
+            // whenever it changes. Not the same thing as multiplierActive above - this one only
+            // affects the end-of-ball bonus count, not live scoring.
+            bonusMultiplierX: 1
         };
 
         function redraw() {
@@ -1521,6 +1560,11 @@
             if (state.multiplierActive) {
                 ctx.fillStyle = '#ff00ff';
                 ctx.fillText('★ ' + POWERUP_MULTIPLIER + 'X SCORE ACTIVE ★', 16, 110);
+            }
+
+            if (state.bonusMultiplierX > 1) {
+                ctx.fillStyle = '#ffaa00';
+                ctx.fillText('BONUS MULT: ' + state.bonusMultiplierX + 'X', 16, 136);
             }
 
             if (state.message) {
@@ -3238,6 +3282,16 @@
         // multiplier progression without any mission-FSM coupling.
         const laneBank = REENTRY_LANES.map(() => ({ lit: false }));
 
+        // Bonus/multiplier subsystem state (user-requested) - per-ball, not per-game: `points`
+        // accumulates silently from major shots/mission completions during play (see their call
+        // sites) and `multiplierX` is advanced by clearing the rollover-lane bank above. Neither
+        // touches the real score directly - only startBonusCount() (below) ever does, at drain,
+        // via the shared addScore() so high-score tracking stays exactly as it already works.
+        // Deliberately separate from `scoreMultiplier`/`powerUp` (a temporary, real-time 2x
+        // applied to every hit while its own window is running) - the two combine additively
+        // through addScore() during the bonus count, not by referencing each other.
+        const ballBonus = { points: 0, multiplierX: 1 };
+
         // Orbit shot state (one entry per side) - `armedAt` is the timestamp (performance.now()-
         // style ms) of the last valid entrance hit, or null if the entrance hasn't fired (or its
         // window already expired). A completion trigger only scores if armedAt is set and within
@@ -3292,6 +3346,90 @@
                 localStorage.setItem(highScoreKey, String(score));
             }
             backglass.redraw();
+        }
+
+        // Classic end-of-ball "bonus count" (bonus/multiplier subsystem, user-requested) - pays
+        // ballBonus.points * ballBonus.multiplierX into the real score via addScore() (so high-
+        // score tracking works exactly as it already does, no separate code path) as a rapid,
+        // visible count-up on the backglass, then calls `onComplete` so handleDrain()'s normal
+        // life/game-over flow continues. Called with the ball's already-accumulated bonus, before
+        // anything resets it for the next ball.
+        // Render-loop-driven state for the count-up (see updateBonusCount() below) - the same
+        // "remaining-ms field, advanced by the render loop's own deltaMs" idiom every other
+        // continuous effect in this file already uses (updateCameraEffects()'s shake/punch decay,
+        // updatePowerUp(), updateDropTargetBank()), deliberately NOT an independent setTimeout
+        // chain: pacing this way stays correct regardless of how much real wall-clock time a
+        // given frame takes on a particular device, and it naturally pauses along with everything
+        // else when isPaused is true, matching player expectation.
+        const bonusCount = {
+            active: false, total: 0, awarded: 0, multiplierX: 1,
+            ticksRemaining: 0, remainingMs: 0, onComplete: null
+        };
+
+        // Kicks off the classic end-of-ball "bonus count": ballBonus.points * ballBonus.
+        // multiplierX, paid into the real score via addScore() (so high-score tracking works
+        // exactly as it already does) as a rapid, visible count-up on the backglass. Calls
+        // `onComplete` once the whole sequence (including reduced-motion's single-step version)
+        // has finished, so handleDrain()'s normal life/game-over flow can continue.
+        function startBonusCount(onComplete) {
+            const total = ballBonus.points * ballBonus.multiplierX;
+            if (total <= 0) {
+                onComplete();
+                return;
+            }
+            if (window.SPIRITBALL_reducedMotion) {
+                // Skip/accelerate per the request - the whole payout lands in one immediate step,
+                // not a per-tick sequence. Still routed through updateBonusCount() below (with
+                // ticksRemaining already at 0) rather than resolved synchronously here, so a
+                // pause landing in the same instant can't skip the completion callback.
+                addScore(total);
+                backglass.showMessage('BONUS x' + ballBonus.multiplierX + ': ' + total.toLocaleString(), BONUS_COUNT_REDUCED_MOTION_MS);
+                bonusCount.active = true;
+                bonusCount.ticksRemaining = 0;
+                bonusCount.remainingMs = BONUS_COUNT_REDUCED_MOTION_MS;
+                bonusCount.onComplete = onComplete;
+                return;
+            }
+            bonusCount.active = true;
+            bonusCount.total = total;
+            bonusCount.awarded = 0;
+            bonusCount.multiplierX = ballBonus.multiplierX;
+            bonusCount.ticksRemaining = BONUS_COUNT_TICKS;
+            bonusCount.remainingMs = BONUS_COUNT_TICK_MS;
+            bonusCount.onComplete = onComplete;
+        }
+
+        // Called every frame (render loop, gated by !isPaused like updatePowerUp()/
+        // updateDropTargetBank()) while a count is running. `ticksRemaining <= 0` covers two
+        // cases the same way: the reduced-motion single-step already ran in startBonusCount()
+        // above, or the normal tick loop just finished its last tick and its "BONUS AWARDED"
+        // dwell time has now elapsed - either way, time to finish.
+        function updateBonusCount(deltaMs) {
+            if (!bonusCount.active) return;
+            bonusCount.remainingMs -= deltaMs;
+            if (bonusCount.remainingMs > 0) return;
+
+            if (bonusCount.ticksRemaining <= 0) {
+                bonusCount.active = false;
+                const onComplete = bonusCount.onComplete;
+                bonusCount.onComplete = null;
+                onComplete();
+                return;
+            }
+
+            bonusCount.ticksRemaining--;
+            const isLastTick = bonusCount.ticksRemaining <= 0;
+            // The last tick absorbs whatever the division below rounded away, so the full
+            // `total` always lands exactly rather than drifting off by a few points.
+            const step = isLastTick ? (bonusCount.total - bonusCount.awarded) : Math.round(bonusCount.total / BONUS_COUNT_TICKS);
+            bonusCount.awarded += step;
+            addScore(step);
+            playBonusTickSound();
+            backglass.showMessage(
+                isLastTick ? 'BONUS AWARDED' : 'BONUS x' + bonusCount.multiplierX + ': ' + bonusCount.awarded.toLocaleString(),
+                isLastTick ? 500 : BONUS_COUNT_TICK_MS + 60
+            );
+            bonusCount.remainingMs = isLastTick ? 500 : BONUS_COUNT_TICK_MS;
         }
 
         // Power-up orb (board redesign): collectPowerUp() runs when the ball hits it while active
@@ -3359,6 +3497,9 @@
 
             addScore(SCORE_VISION_GATE);
             stats.visionGateCaptures++;
+            // Bonus/multiplier subsystem (user-requested) - a Vision Gate capture is a "major
+            // shot," on top of (not instead of) the addScore() above.
+            ballBonus.points += BONUS_MAJOR_SHOT_AMOUNT;
             // No MISSION_DEFS entry uses type 'visionGate' yet (this task only asks that the
             // feature be ABLE to participate in missions later) - progressMission() already no-ops
             // for any type the active mission isn't selected on, so calling it unconditionally
@@ -3501,6 +3642,10 @@
             backglass.state.missionProgress = 0;
             backglass.state.rank = RANK_NAMES[mission.rank];
             addScore(MISSION_COMPLETE_BONUS);
+            // Bonus/multiplier subsystem (user-requested) - a "substantial" contribution to the
+            // hidden end-of-ball pool, on top of (not instead of) the immediate MISSION_COMPLETE_
+            // BONUS above. Doesn't touch mission/rank state or messaging at all - purely additive.
+            ballBonus.points += BONUS_MISSION_COMPLETE_AMOUNT;
             backglass.showMessage(rankedUp ? 'RANK UP: ' + RANK_NAMES[mission.rank] : 'MISSION COMPLETE!', 1600);
             // A stronger beat than any regular hit's - completing a mission and ranking up is the
             // single biggest moment the game currently has, deserves to read as one.
@@ -3811,6 +3956,9 @@
                 triggerCameraShake(200, 0.009);
                 triggerCameraPunch(300, cameraForwardDir.scale(0.015));
                 playSaturnHitSound();
+                // Bonus/multiplier subsystem (user-requested) - a "major shot," on top of (not
+                // instead of) the addScore() above. Silent until the end-of-ball bonus count.
+                ballBonus.points += BONUS_MAJOR_SHOT_AMOUNT;
             } else if (meta.kind === 'slingshot') {
                 setCooldown(mesh, COOLDOWN_SLINGSHOT_MS);
                 addScore(SCORE_SLINGSHOT);
@@ -3914,7 +4062,14 @@
                 if (newlyLit && laneBank.every((lane) => lane.lit)) {
                     addScore(SCORE_LANE_BANK_COMPLETE);
                     stats.laneBankCompletions++;
-                    backglass.showMessage('LANE BANK COMPLETE!', 1200);
+                    // Bonus/multiplier subsystem (user-requested) - a cleared rollover bank is
+                    // this game's "advance the bonus multiplier" shot, the traditional pinball
+                    // role for a lit-lane bank. Capped at BONUS_MULTIPLIER_MAX, not reset by
+                    // completing the bank again - only a drain (via startBonusCount()) or a new
+                    // game/ball resets it back to 1X.
+                    ballBonus.multiplierX = Math.min(ballBonus.multiplierX + 1, BONUS_MULTIPLIER_MAX);
+                    backglass.state.bonusMultiplierX = ballBonus.multiplierX;
+                    backglass.showMessage('LANE BANK COMPLETE! BONUS ' + ballBonus.multiplierX + 'X', 1200);
                     triggerCameraShake(280, 0.006);
                     triggerCameraPunch(280, new BABYLON.Vector3(0, 0.018, -0.022));
                     playLaneBankCompleteSound();
@@ -3962,6 +4117,9 @@
                 triggerCameraShake(150, 0.006);
                 triggerCameraPunch(250, cameraForwardDir.scale(0.01));
                 playOrbitCompleteSound(isLeft ? 520 : 620); // distinct pitch per side, matching this file's existing per-obstacle pitch convention
+                // Bonus/multiplier subsystem (user-requested) - a completed orbit is a "major
+                // shot," on top of (not instead of) the addScore() above.
+                ballBonus.points += BONUS_MAJOR_SHOT_AMOUNT;
             } else if (meta.kind === 'powerUp') {
                 // powerUp.active (see updatePowerUp()) is the real source of truth for whether
                 // this should count - guards against a trigger event that fires right as the orb
@@ -4016,22 +4174,36 @@
             playDrainSound();
             setTimeout(() => {
                 const action = () => {
-                    if (lives <= 0) {
-                        // Stage 12: was "reset lives/score in place" (Stage 6's documented
-                        // simplification, made before any Game Over screen existed to show final
-                        // results on). Now shows the real Game Over screen instead; NEW GAME/restart
-                        // input there is what actually resets state - see showGameOverScreen().
-                        showGameOverScreen();
-                        return;
-                    }
-                    backglass.redraw();
-                    resetBallToPlunger();
-                    // Drop-target bank reset (user-requested upgrade) - real drop-target banks
-                    // reset at the start of each new ball, not mid-ball; this is the "life lost,
-                    // game continues" path (the lives<=0/showGameOverScreen() branch above
-                    // returns before reaching here, so a true game-ending drain doesn't double up
-                    // with startNewGame()'s own reset later).
-                    resetDropTargetBank();
+                    // Bonus/multiplier subsystem (user-requested) - "on drain: calculate bonus x
+                    // multiplier, rapidly count the bonus into score, show the sequence on HUD/
+                    // backglass, then continue normal life/game-over flow." startBonusCount() pays
+                    // out (or no-ops instantly if this ball earned no bonus) BEFORE the lives<=0
+                    // check below, so the payout always plays regardless of whether the game is
+                    // about to end.
+                    startBonusCount(() => {
+                        if (lives <= 0) {
+                            // Stage 12: was "reset lives/score in place" (Stage 6's documented
+                            // simplification, made before any Game Over screen existed to show final
+                            // results on). Now shows the real Game Over screen instead; NEW GAME/restart
+                            // input there is what actually resets state - see showGameOverScreen().
+                            showGameOverScreen();
+                            return;
+                        }
+                        backglass.redraw();
+                        resetBallToPlunger();
+                        // Drop-target bank reset (user-requested upgrade) - real drop-target banks
+                        // reset at the start of each new ball, not mid-ball; this is the "life lost,
+                        // game continues" path (the lives<=0/showGameOverScreen() branch above
+                        // returns before reaching here, so a true game-ending drain doesn't double up
+                        // with startNewGame()'s own reset later).
+                        resetDropTargetBank();
+                        // Bonus/multiplier subsystem reset - "multiplier resets appropriately
+                        // between balls." startBonusCount() above already paid out this ball's
+                        // total before this runs, so it's safe to zero here.
+                        ballBonus.points = 0;
+                        ballBonus.multiplierX = 1;
+                        backglass.state.bonusMultiplierX = 1;
+                    });
                 };
                 if (isPaused) {
                     pendingDrainAction = action;
@@ -4228,6 +4400,11 @@
             // Rollover-lane bank (user-requested upgrade) - same per-run reasoning; a fresh game
             // shouldn't inherit a previous run's lit lanes.
             resetLaneBank();
+            // Bonus/multiplier subsystem (user-requested) - a fresh game starts back at 1X with
+            // an empty pool, same per-run reasoning as everything else here.
+            ballBonus.points = 0;
+            ballBonus.multiplierX = 1;
+            backglass.state.bonusMultiplierX = 1;
             // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
             // score/lives/stats above - resets on every new game, not a permanent meta-progression.
             mission.state = 'idle';
@@ -4379,6 +4556,7 @@
                 updateFlipperMotor(leftFlipper, deltaMs);
                 updateFlipperMotor(rightFlipper, deltaMs);
                 updateDropTargetBank(deltaMs);
+                updateBonusCount(deltaMs);
                 // Skipped while the Vision Gate holds the ball (visionGate.active) - not just a
                 // nicety: updateBallPhysics()'s own anti-stuck kick fires after STUCK_TIME_
                 // THRESHOLD_MS (450ms) of near-zero speed, which a deliberately-frozen kinematic
