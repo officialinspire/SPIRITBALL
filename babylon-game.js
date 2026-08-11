@@ -74,6 +74,14 @@
     let isMobileDevice = false;
     let fullscreenRequested = false;
 
+    // Dev HUD "particle effects" toggle (?dev=1 tuning HUD, user-requested) - module-scope because
+    // spawnHitBurst()/buildChakraSparkle()/buildDrainVortex() below are module-scope helpers, not
+    // closures over main()'s local state, and every one of their call sites lives inside main().
+    // A single flag checked inside those three shared functions covers every particle spawn site
+    // in the game without touching each call site individually. Defaults true - normal players see
+    // no behavior change; only the dev HUD's own checkbox (main()) ever sets this false.
+    let devParticlesEnabled = true;
+
     function detectMobile() {
         const userAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         const smallScreen = window.innerWidth <= 768;
@@ -2007,6 +2015,7 @@
     // feedback the doc says must stay intact, so it's significantly reduced (not fully removed -
     // the drain zone should still read as *something*) rather than skipped outright.
     function buildDrainVortex(scene, texture, highFidelity) {
+        if (!devParticlesEnabled) return null; // dev HUD "particle effects" toggle - see its own declaration comment
         const vortex = new BABYLON.ParticleSystem('drainVortex', highFidelity ? 150 : 60, scene);
         vortex.particleTexture = texture;
         vortex.emitter = new BABYLON.Vector3(0, 0.02, toWorldZ(DRAIN_ZONE_CENTER_Y_PX) + 0.06);
@@ -2036,6 +2045,7 @@
     // 12). Fully skipped under reduced-motion - purely decorative, no gameplay-feedback role.
     function buildChakraSparkle(scene, texture, targetMesh, highFidelity) {
         if (window.SPIRITBALL_reducedMotion) return null;
+        if (!devParticlesEnabled) return null; // dev HUD "particle effects" toggle - see its own declaration comment
         const color = targetMesh.material.albedoColor;
         const sparkle = new BABYLON.ParticleSystem('chakraSparkle', highFidelity ? 40 : 15, scene);
         sparkle.particleTexture = texture;
@@ -2065,6 +2075,7 @@
     // IS the "hit confirmed" feedback the doc says must stay intact; only its particle COUNT is
     // reduced on low-tier devices, which is a performance gate, not a motion gate.
     function spawnHitBurst(scene, texture, mesh, highFidelity) {
+        if (!devParticlesEnabled) return null; // dev HUD "particle effects" toggle - see its own declaration comment
         const color = mesh.material.albedoColor || mesh.material.diffuseColor;
         const burst = new BABYLON.ParticleSystem('hitBurst', highFidelity ? 30 : 12, scene);
         burst.particleTexture = texture;
@@ -2393,6 +2404,10 @@
         // inlane/outlane rollover triggers below render their (otherwise invisible) hitbox as a
         // translucent debug overlay.
         const devMode = new URLSearchParams(window.location.search).has('dev');
+        // Every otherwise-invisible trigger volume that gets a translucent debug overlay under
+        // ?dev=1 (see each push() below) - collected so the dev HUD's "collider/trigger
+        // visualization" checkbox (main()) can toggle all of them live, not just at load time.
+        const debugTriggerMeshes = [];
 
         // Shared dark-metallic material for every non-colliding "housing/bracket/rail" decoration
         // below (bumper skirts, target mounting posts, slingshot housings, lane guide rails) - one
@@ -2814,6 +2829,7 @@
                 trigger.position.set(laneKind.x, 0.01, LANE_TRIGGER_Z_M);
                 trigger.material = triggerMat;
                 trigger.isVisible = devMode;
+                debugTriggerMeshes.push(trigger);
                 trigger.metadata = { kind: laneKind.kind, side: laneDef.side, lampId };
                 const aggregate = new BABYLON.PhysicsAggregate(trigger, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
                 aggregate.shape.isTrigger = true;
@@ -2890,6 +2906,7 @@
             trigger.position.set(laneDef.x, 0.01, SKILL_SHOT_Z_M);
             trigger.material = triggerMat;
             trigger.isVisible = devMode;
+            debugTriggerMeshes.push(trigger);
             trigger.metadata = { kind: 'skillShotLane', index: i, lamp };
             const skillShotAggregate = new BABYLON.PhysicsAggregate(trigger, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
             skillShotAggregate.shape.isTrigger = true;
@@ -2977,6 +2994,7 @@
                 trigger.position.set(triggerDef.x, 0.01, triggerDef.z);
                 trigger.material = triggerMat;
                 trigger.isVisible = devMode;
+                debugTriggerMeshes.push(trigger);
                 trigger.metadata = { kind: triggerDef.kind, side: orbitDef.side, lampId };
                 const aggregate = new BABYLON.PhysicsAggregate(trigger, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
                 aggregate.shape.isTrigger = true;
@@ -3078,6 +3096,7 @@
         triggerMat.emissiveColor = new BABYLON.Color3(0.8, 0.3, 1).scale(0.5);
         visionGateTrigger.material = triggerMat;
         visionGateTrigger.isVisible = devMode;
+        debugTriggerMeshes.push(visionGateTrigger);
         visionGateTrigger.metadata = { kind: 'visionGate' };
         const visionGateAggregate = new BABYLON.PhysicsAggregate(visionGateTrigger, BABYLON.PhysicsShapeType.SPHERE, { mass: 0 }, scene);
         visionGateAggregate.shape.isTrigger = true;
@@ -3300,7 +3319,7 @@
         // plain mesh arrays/refs) against the centralized lamp system (see createLampSystem()).
         return {
             missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
-            sideLaneLampMeshes, orbitLampMeshes,
+            sideLaneLampMeshes, orbitLampMeshes, debugTriggerMeshes,
             kickbackLampMesh, ballSaveLampMesh, saturnRings, powerUpMesh, visionGateMesh: ring
         };
     }
@@ -3573,8 +3592,13 @@
         const restGlowIntensity = highFidelity ? 0.8 : 0.5;
         glowLayer.intensity = restGlowIntensity;
 
+        // Hoisted to a `let` (not a const declared only inside the if-block) so the dev HUD's
+        // "post-processing" checkbox (below, once devMode is confirmed) can toggle
+        // pipeline.bloomEnabled live - stays null on a non-highFidelity device, exactly like
+        // before.
+        let pipeline = null;
         if (highFidelity) {
-            const pipeline = new BABYLON.DefaultRenderingPipeline('defaultPipeline', true, scene, [camera]);
+            pipeline = new BABYLON.DefaultRenderingPipeline('defaultPipeline', true, scene, [camera]);
             pipeline.bloomEnabled = true;
             pipeline.bloomThreshold = 0.6;
             pipeline.bloomWeight = 0.5;
@@ -3766,7 +3790,9 @@
         // --- Particle VFX (Stage 8, babylon-prompts/08-*.md) ---
         const particleTexture = createParticleTexture(scene);
         const ballTrail = buildBallTrail(scene, particleTexture, mainBall.mesh, highFidelity);
-        buildDrainVortex(scene, particleTexture, highFidelity);
+        // Captured (not discarded like before) so the dev HUD's "particle effects" toggle can
+        // stop/restart this one ambient system too, not just gate future one-shot bursts/sparkles.
+        const drainVortex = buildDrainVortex(scene, particleTexture, highFidelity);
         obstacles.missionTargetMeshes.forEach((mesh) => buildChakraSparkle(scene, particleTexture, mesh, highFidelity));
 
         // --- Debug drop-tool balls (from Stage 2), kept for repeatable boundary-gap testing -
@@ -5832,6 +5858,116 @@
         // Tap-anywhere-to-restart, matching GameOverScene's this.input.once('pointerdown', ...).
         gameOverOverlay.addEventListener('click', startNewGame);
 
+        // ===================================
+        // Tuning/debug HUD (?dev=1, user-requested) - a lightweight readout + toggle layer for
+        // on-device pinball tuning, especially useful on Android where remote devtools access is
+        // often unavailable mid-playtest. Dev-only, zero visible impact for normal players:
+        // updateDevHud stays null outside a dev session, so the render loop's own call site is a
+        // single pointer check, not a function call - and every readout below is even THEN
+        // throttled (DEV_HUD_UPDATE_INTERVAL_MS), not recomputed every single frame, so the HUD
+        // itself never becomes a measurable cost on the FPS number it's showing.
+        // ===================================
+        const devMode = new URLSearchParams(window.location.search).has('dev');
+        // Toggle-ball-trail state (see the render loop's own use of this) - declared outside the
+        // `if (devMode)` block below since the render loop always reads it; stays permanently true
+        // for a normal player, identical to today's behavior.
+        let devBallTrailEnabled = true;
+        let updateDevHud = null;
+
+        if (devMode) {
+            const statusFps = document.getElementById('status-fps');
+            const statusFrameTime = document.getElementById('status-frame-time');
+            const statusPhysicsBodies = document.getElementById('status-physics-bodies');
+            const statusBallSpeed = document.getElementById('status-ball-speed');
+            const statusBallVelocity = document.getElementById('status-ball-velocity');
+            const statusBallPosition = document.getElementById('status-ball-position');
+            const statusFlipperState = document.getElementById('status-flipper-state');
+            const statusMission = document.getElementById('status-mission');
+            const statusMultiplier = document.getElementById('status-multiplier');
+            const statusBallSaveState = document.getElementById('status-ball-save-state');
+            const statusCombo = document.getElementById('status-combo');
+            const statusFidelity = document.getElementById('status-fidelity');
+
+            // Static for the whole session (detectHighFidelity() only ever runs once, at load) -
+            // set once here rather than every HUD tick. cores/mem are shown alongside the tier
+            // itself specifically for Android tuning - the two inputs detectHighFidelity() actually
+            // bases its decision on, so a dev can immediately see WHY a device landed on LOW
+            // without needing separate devtools access.
+            statusFidelity.textContent = (highFidelity ? 'HIGH' : 'LOW') +
+                ' (cores=' + (navigator.hardwareConcurrency || '?') + ', mem=' + (navigator.deviceMemory || '?') + 'GB)';
+
+            // Physics body count barely changes mid-session (only the dev drop-test-ball/clear-
+            // test-balls buttons touch it) - recomputed on the same throttle as everything else
+            // below rather than a separate, even-slower timer; still nowhere near "every frame".
+            function countPhysicsBodies() {
+                return scene.meshes.reduce((count, m) => count + (m.physicsBody ? 1 : 0), 0);
+            }
+
+            let devHudAccumulatorMs = 0;
+            const DEV_HUD_UPDATE_INTERVAL_MS = 200; // 5/sec - plenty legible for a tuning readout, avoids "expensive profiling every frame"
+            updateDevHud = function (deltaMs) {
+                devHudAccumulatorMs += deltaMs;
+                if (devHudAccumulatorMs < DEV_HUD_UPDATE_INTERVAL_MS) return;
+                devHudAccumulatorMs = 0;
+
+                statusFps.textContent = engine.getFps().toFixed(0);
+                statusFrameTime.textContent = deltaMs.toFixed(1) + ' ms';
+                statusPhysicsBodies.textContent = String(countPhysicsBodies());
+
+                const velocity = mainBall.aggregate.body.getLinearVelocity();
+                const position = mainBall.mesh.position;
+                statusBallSpeed.textContent = velocity.length().toFixed(2) + ' m/s';
+                statusBallVelocity.textContent = velocity.x.toFixed(2) + ', ' + velocity.y.toFixed(2) + ', ' + velocity.z.toFixed(2);
+                statusBallPosition.textContent = position.x.toFixed(2) + ', ' + position.y.toFixed(2) + ', ' + position.z.toFixed(2);
+
+                statusFlipperState.textContent = (leftFlipper.active ? 'ACTIVE' : 'idle') + ' / ' + (rightFlipper.active ? 'ACTIVE' : 'idle');
+
+                statusMission.textContent = mission.selectedIndex !== null
+                    ? MISSION_DEFS[mission.selectedIndex].name + ' (' + mission.progress + '/' + mission.required + ')'
+                    : 'none';
+
+                statusMultiplier.textContent = (scoreMultiplier > 1 ? scoreMultiplier + 'X score' : '1X') +
+                    (ballBonus.multiplierX > 1 ? ' / bonus ' + ballBonus.multiplierX + 'X' : '');
+
+                statusBallSaveState.textContent = ballSave.active ? 'ARMED' : 'off';
+
+                const inProgress = COMBO_DEFS
+                    .map((def, i) => ({ def, prog: comboProgress[i] }))
+                    .filter(({ prog }) => prog.index > 0);
+                statusCombo.textContent = (comboStreak.tier > 0 ? 'x' + comboStreak.tier : 'none') +
+                    (inProgress.length > 0 ? ' (' + inProgress.map(({ def, prog }) => def.name + ' ' + prog.index + '/' + def.steps.length).join(', ') + ')' : '');
+            };
+
+            // --- Optional toggles (user-requested) ---
+            const toggleColliderViz = document.getElementById('toggle-collider-viz');
+            toggleColliderViz.addEventListener('change', () => {
+                obstacles.debugTriggerMeshes.forEach((mesh) => { mesh.isVisible = toggleColliderViz.checked; });
+            });
+
+            const toggleBallTrail = document.getElementById('toggle-ball-trail');
+            toggleBallTrail.addEventListener('change', () => {
+                devBallTrailEnabled = toggleBallTrail.checked;
+                if (!devBallTrailEnabled) ballTrail.emitRate = 0; // stop immediately rather than waiting for the next speed-based fade
+            });
+
+            const togglePostProcessing = document.getElementById('toggle-post-processing');
+            togglePostProcessing.addEventListener('change', () => {
+                glowLayer.isEnabled = togglePostProcessing.checked;
+                if (pipeline) pipeline.bloomEnabled = togglePostProcessing.checked;
+            });
+
+            const toggleParticles = document.getElementById('toggle-particles');
+            toggleParticles.addEventListener('change', () => {
+                devParticlesEnabled = toggleParticles.checked;
+                // Future hit bursts/sparkles already check devParticlesEnabled themselves (see
+                // each function's own guard) - the one already-running system that needs an
+                // explicit stop/restart is the ambient drain vortex, built once at load.
+                if (drainVortex) {
+                    if (devParticlesEnabled) drainVortex.start(); else drainVortex.stop();
+                }
+            });
+        }
+
         engine.runRenderLoop(() => {
             const deltaMs = engine.getDeltaTime();
 
@@ -5867,7 +6003,15 @@
                     updateBallPhysics(mainBall, deltaMs);
                 }
                 testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
-                updateBallTrail(ballTrail, mainBall, highFidelity);
+                // Dev HUD "ball trail" toggle (default on, zero impact for normal players - this
+                // boolean is never false outside a dev session) - pins emitRate to 0 while off
+                // instead of skipping updateBallTrail() silently, so an already-emitting trail
+                // stops immediately rather than fading out on its own schedule.
+                if (devBallTrailEnabled) {
+                    updateBallTrail(ballTrail, mainBall, highFidelity);
+                } else {
+                    ballTrail.emitRate = 0;
+                }
 
                 // Power-up spawn/despawn timer + multiplier countdown - gated on ballInPlay too
                 // (not just isPaused), same reasoning as the plunger-charge guard just below: no
@@ -5924,6 +6068,11 @@
             // transform, since flippers are now kinematic (see createFlipper()'s comment).
             statusLeftFlipper.textContent = flipperAngleDegrees(leftFlipper).toFixed(1) + '°';
             statusRightFlipper.textContent = flipperAngleDegrees(rightFlipper).toFixed(1) + '°';
+
+            // Tuning/debug HUD (?dev=1, user-requested) - null outside a dev session (see its own
+            // declaration below), so this is a single pointer comparison for a normal player, not
+            // a function call - genuinely zero per-frame cost beyond that one `if`.
+            if (updateDevHud) updateDevHud(deltaMs);
 
             scene.render();
         });

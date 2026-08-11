@@ -118,6 +118,18 @@
         #status-panel .ok { color: #00ff88; }
         #status-panel .bad { color: #ff3355; }
 
+        #status-panel .row label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            color: #ccc;
+        }
+        #status-panel .row input[type="checkbox"] {
+            accent-color: #00ffff;
+            cursor: pointer;
+        }
+
         #status-panel button {
             margin-top: 6px;
             width: 100%;
@@ -572,6 +584,32 @@
         <div class="row"><span>Left flipper angle: </span><span id="status-left-flipper">—</span></div>
         <div class="row"><span>Right flipper angle: </span><span id="status-right-flipper">—</span></div>
         <div class="row"><span>Plunger charge: </span><span id="status-plunger-charge">0%</span></div>
+
+        <!-- Tuning/debug HUD (?dev=1, user-requested) - a lightweight readout layer for on-device
+             pinball tuning, distinct from the gameplay/test-harness rows above. Updated on a
+             throttled cadence, not every frame (see updateDevHud() in babylon-game.js) - cheap
+             enough to leave running for the rest of a dev session without itself skewing the FPS
+             number it's showing. -->
+        <div class="row" style="color:#888; font-size:11px; margin-top:8px;">— Tuning HUD —</div>
+        <div class="row"><span>FPS: </span><span id="status-fps">0</span></div>
+        <div class="row"><span>Frame time: </span><span id="status-frame-time">0 ms</span></div>
+        <div class="row"><span>Physics bodies: </span><span id="status-physics-bodies">0</span></div>
+        <div class="row"><span>Ball speed: </span><span id="status-ball-speed">0.00 m/s</span></div>
+        <div class="row"><span>Ball velocity: </span><span id="status-ball-velocity">0.00, 0.00, 0.00</span></div>
+        <div class="row"><span>Ball position: </span><span id="status-ball-position">0.00, 0.00, 0.00</span></div>
+        <div class="row"><span>Flippers L/R: </span><span id="status-flipper-state">idle / idle</span></div>
+        <div class="row"><span>Mission: </span><span id="status-mission">none</span></div>
+        <div class="row"><span>Multiplier: </span><span id="status-multiplier">1X</span></div>
+        <div class="row"><span>Ball save: </span><span id="status-ball-save-state">off</span></div>
+        <div class="row"><span>Combo: </span><span id="status-combo">none</span></div>
+        <div class="row"><span>Fidelity tier: </span><span id="status-fidelity">—</span></div>
+
+        <div class="row" style="color:#888; font-size:11px; margin-top:8px;">— Toggles —</div>
+        <div class="row"><label><input type="checkbox" id="toggle-collider-viz" checked> Collider/trigger visualization</label></div>
+        <div class="row"><label><input type="checkbox" id="toggle-ball-trail" checked> Ball trail</label></div>
+        <div class="row"><label><input type="checkbox" id="toggle-post-processing" checked> Post-processing</label></div>
+        <div class="row"><label><input type="checkbox" id="toggle-particles" checked> Particle effects</label></div>
+
         <div class="row" style="color:#888; font-size:11px; margin-top:4px;">
             Controls: LEFT/RIGHT arrow keys or SPACE (desktop); tap/hold the left/right edge zones
             for flippers, hold the round LAUNCH button to charge/fire the plunger (mobile).
