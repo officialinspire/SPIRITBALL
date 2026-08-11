@@ -366,6 +366,24 @@
         }
     }
 
+    // Ball save (fairness mechanics, user-requested) - a warm, rising sine sweep plus a bright
+    // confirm note: the deliberate mirror-image of playDrainSound()'s single downward sawtooth
+    // sweep, so a save reads as unambiguously good news at a glance (by ear) even before the
+    // backglass text registers.
+    function playBallSaveSound() {
+        playTone(300, 0.3, { type: 'sine', freqEnd: 700, volume: 0.16 });
+        setTimeout(() => playTone(900, 0.18, { type: 'sine', volume: 0.18 }), 220);
+    }
+
+    // Outlane kickback fired (fairness mechanics, user-requested) - a mechanical clack (reusing
+    // playWallSound()'s own noise-click building block, just louder/longer - a real solenoid
+    // firing) immediately followed by a rising "launched back into play" tone, distinct in shape
+    // from playLaunchSound()'s own sweep so the two don't sound interchangeable.
+    function playKickbackSound() {
+        playNoiseClick(0.05, 0.14);
+        setTimeout(() => playTone(260, 0.16, { type: 'sawtooth', freqEnd: 620, volume: 0.17 }), 30);
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -948,6 +966,31 @@
         { x: 0.125, halfWidth: 0.025, label: 'LAUNCH SHOT', points: SCORE_SKILL_SHOT_SAFE }
     ];
 
+    // ===================================
+    // Fairness mechanics (user-requested): BALL SAVE and OUTLANE KICKBACK. Both integrate into
+    // the existing handleDrain()/handleTriggerHit() paths in main() rather than duplicating any
+    // drain/scoring logic - see their own comments there for exactly how.
+    // ===================================
+    // BALL SAVE - a short grace window that arms on every launch (handleLaunchRelease()): a
+    // drain within it returns the ball instead of costing a life. "Limit abuse/retriggering" is
+    // enforced by ballSave.usedThisLife (main()) - once a save is used, it does NOT re-arm on
+    // the very next launch; only a genuine (unsaved) drain, or a new game, restores the
+    // opportunity for the next life.
+    const BALL_SAVE_WINDOW_MS = 7000; // "short configurable period" - typical real-machine ball-save length
+    // Brisk and clearly distinct from a real drain's own ~1500ms pre-decision delay (handleDrain()) -
+    // a save should read as "whew, saved," not as the same somber beat as losing a ball.
+    const BALL_SAVE_RETURN_DELAY_MS = 700;
+
+    // OUTLANE KICKBACK - one outlane (SIDE_LANES' side value below) gets a kickback solenoid,
+    // earned by clearing the rollover-lane bank (see the 'reentryLane' bank-complete branch in
+    // main()) and consumed the next time a ball rolls that specific outlane, kicking it back
+    // in and deactivating. Direction is derived from SIDE_LANES' own mirror value for that side
+    // (see applyKickback() in main()), not hardcoded, so flipping this one constant to 'right'
+    // would move the whole mechanism with no other changes needed.
+    const KICKBACK_SIDE = 'left';
+    const KICKBACK_INWARD_SPEED_MS = 550 * PX_TO_M; // pushes the ball back toward center X
+    const KICKBACK_UPTABLE_BIAS_MS = 500 * PX_TO_M; // +Z boost, same "guarantee real forward progress" role as SLINGSHOT_KICK_UPTABLE_BIAS_MS
+
     // How far the plunger tip sits behind the ball's true rest spot (toWorldZ(BALL_REST_Z_PX),
     // used directly for the ball's own spawn/reset position - NOT plunger.baseZ, which used to be
     // the same value and meant the ball spawned inside the plunger's own collision volume once
@@ -1228,11 +1271,17 @@
     // every other "lit insert" color on the board (amber lane lamps, cyan orbit lamps, green
     // mission-active), so a lit skill-shot lane reads as its own thing at a glance.
     const HEX_SKILL_SHOT_LAMP = 0xff3366;
+    // Fairness mechanics (user-requested) - two more distinct "lit insert" identities. Cool
+    // spring-green for ball save (a reassuring, "you're safe" color - distinct from
+    // HEX_MISSION_ACTIVE's green by being noticeably cooler/lighter) and a hot orange-red for
+    // kickback (reads as "loaded/armed," distinct from every warm color already in use).
+    const HEX_BALL_SAVE_LAMP = 0x00ffcc;
+    const HEX_KICKBACK_LAMP = 0xff5500;
     const HEX_BACKGROUND = 0x1a0033;
 
     let COLOR_BALL, COLOR_EYEBALL, COLOR_FLIPPER, COLOR_WALL, COLOR_BUMPERS, COLOR_CHAKRA,
         COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_ORBIT_LAMP,
-        COLOR_SKILL_SHOT_LAMP, COLOR_VISION_GATE, COLOR_BACKGROUND;
+        COLOR_SKILL_SHOT_LAMP, COLOR_BALL_SAVE_LAMP, COLOR_KICKBACK_LAMP, COLOR_VISION_GATE, COLOR_BACKGROUND;
 
     // Device-tier gate, ported from PerformanceManager.detectPerformance() in ../index.js -
     // simplified to the single boolean the doc asks for ("structured so they *can* be gated...
@@ -2537,6 +2586,42 @@
             });
         });
 
+        // OUTLANE KICKBACK lamp (fairness mechanics, user-requested) - a separate lamp from the
+        // outlane's own rollover lamp just above (that one briefly flashes on every rollover;
+        // this one shows the longer-lived earned/armed state, so the two signals don't get
+        // conflated). Positioned further down the same outlane, toward the drain end - reads as
+        // "your last line of defense" - no physics of its own, purely a state indicator.
+        const kickbackMirror = SIDE_LANES.find((l) => l.side === KICKBACK_SIDE).mirror;
+        const kickbackLampMat = new BABYLON.PBRMaterial('kickbackLampMat', scene);
+        kickbackLampMat.albedoColor = COLOR_KICKBACK_LAMP.scale(0.3);
+        kickbackLampMat.metallic = 0.2;
+        kickbackLampMat.roughness = 0.4;
+        kickbackLampMat.emissiveColor = COLOR_KICKBACK_LAMP.scale(0.12); // faint glow at rest, lit when earned (see setKickbackLampLit() in main())
+        const kickbackLampMesh = BABYLON.MeshBuilder.CreateCylinder('kickbackLamp', {
+            diameterTop: LANE_TRIGGER_WIDTH_M * 0.7,
+            diameterBottom: LANE_TRIGGER_WIDTH_M * 0.7,
+            height: 0.003
+        }, scene);
+        kickbackLampMesh.position.set(kickbackMirror * OUTLANE_TRIGGER_X_M, 0.011, LANE_Z_BOTTOM_M);
+        kickbackLampMesh.material = kickbackLampMat;
+
+        // BALL SAVE lamp (fairness mechanics, user-requested) - sits beside the shooter lane, at
+        // the ball's own rest spot, so it's the first thing a player sees while charging a
+        // launch. Same rest/lit split as every other stateful lamp here (setBallSaveLampLit() in
+        // main()).
+        const ballSaveLampMat = new BABYLON.PBRMaterial('ballSaveLampMat', scene);
+        ballSaveLampMat.albedoColor = COLOR_BALL_SAVE_LAMP.scale(0.3);
+        ballSaveLampMat.metallic = 0.2;
+        ballSaveLampMat.roughness = 0.4;
+        ballSaveLampMat.emissiveColor = COLOR_BALL_SAVE_LAMP.scale(0.12);
+        const ballSaveLampMesh = BABYLON.MeshBuilder.CreateCylinder('ballSaveLamp', {
+            diameterTop: LANE_TRIGGER_WIDTH_M * 0.7,
+            diameterBottom: LANE_TRIGGER_WIDTH_M * 0.7,
+            height: 0.003
+        }, scene);
+        ballSaveLampMesh.position.set(toWorldX(BALL_REST_X_PX) - 0.035, 0.011, BALL_REST_Z_M);
+        ballSaveLampMesh.material = ballSaveLampMat;
+
         // Upper-lane skill shot (user-requested) - see SKILL_SHOT_LANES' own block comment (near
         // its declaration) for the full geometry reasoning. Same invisible-unless-dev trigger +
         // always-visible lamp insert split as the inlane/outlane rollovers just above; the lamp
@@ -2764,7 +2849,10 @@
         // Saturn's rings every frame, drive the power-up orb's spawn/despawn cycle, and run the
         // Vision Gate's own capture sequence against a direct mesh reference (the ring, not the
         // trigger - the ring is what's actually visible and worth flashing/sparkling).
-        return { missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes, saturnRings, powerUpMesh, visionGateMesh: ring };
+        return {
+            missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
+            kickbackLampMesh, ballSaveLampMesh, saturnRings, powerUpMesh, visionGateMesh: ring
+        };
     }
 
     // Drain zone (Stage 6, babylon-prompts/06-*.md) - see the block comment above SCORE_ATTACK_
@@ -2814,6 +2902,8 @@
         COLOR_LANE_LAMP = hexToColor3(HEX_LANE_LAMP);
         COLOR_ORBIT_LAMP = hexToColor3(HEX_ORBIT_LAMP);
         COLOR_SKILL_SHOT_LAMP = hexToColor3(HEX_SKILL_SHOT_LAMP);
+        COLOR_BALL_SAVE_LAMP = hexToColor3(HEX_BALL_SAVE_LAMP);
+        COLOR_KICKBACK_LAMP = hexToColor3(HEX_KICKBACK_LAMP);
         COLOR_VISION_GATE = hexToColor3(HEX_VISION_GATE);
         COLOR_BACKGROUND = hexToColor3(HEX_BACKGROUND);
 
@@ -3188,6 +3278,14 @@
             // next ball. Force-reset, not endSkillShot() - a hard reset shouldn't retroactively
             // award whatever lane happened to be pending.
             forceResetSkillShot();
+            // Ball save (fairness mechanics, user-requested) - same defensive, unconditional
+            // reset for the same reason: no path into this function should ever leave a stale
+            // window armed for whatever ball is about to start. Deliberately does NOT touch
+            // ballSave.usedThisLife - that flag's whole job is to survive exactly this call (a
+            // save's own relaunch goes through here too), see armBallSave()'s comment.
+            ballSave.active = false;
+            ballSave.remainingMs = 0;
+            setBallSaveLampLit(false);
         }
 
         // Mirrors handleLaunchPress()/handleLaunchRelease() in ../index.js: power is purely a
@@ -3237,6 +3335,10 @@
             // rather than a second showMessage() call right after it, which would just silently
             // overwrite it (showMessage() has no queue - see its own comment).
             armSkillShot();
+            // Ball save (fairness mechanics, user-requested) - armed on every launch too;
+            // armBallSave() itself is what refuses to re-arm once used this life (see its own
+            // comment), so no extra guard is needed here.
+            armBallSave();
             backglass.showMessage('LAUNCH! SKILL SHOT READY', 900);
 
             // Power-scaled shake, matching launchBall()'s shakeIntensity = 0.002 + powerPercent*0.005
@@ -3403,7 +3505,8 @@
             bumperHits: 0, cometHits: 0, saturnHits: 0, targetHits: 0, laneHits: 0,
             missionsCompleted: 0, powerUpsCollected: 0, inlaneHits: 0, outlaneHits: 0,
             leftOrbitShots: 0, rightOrbitShots: 0, visionGateCaptures: 0, targetBankCompletions: 0,
-            laneBankCompletions: 0, combosCompleted: 0, comboMaxTier: 0, skillShotsAwarded: 0
+            laneBankCompletions: 0, combosCompleted: 0, comboMaxTier: 0, skillShotsAwarded: 0,
+            ballSaves: 0, kickbacksUsed: 0
         };
 
         // Mission/rank progression state (improvement-prompts/05-*.md). rank is an index into
@@ -3475,6 +3578,24 @@
         // up best, so "where the first clean launch lands" means the FURTHEST lane it reached,
         // not just whichever one happened to be geometrically nearest.
         const skillShot = { active: false, remainingMs: 0, bestLaneIndex: null };
+
+        // BALL SAVE state (fairness mechanics, user-requested) - `active`/`remainingMs` are the
+        // live grace window, same render-loop-driven countdown idiom as skillShot above
+        // (updateBallSave() below). `usedThisLife` is the actual "limit abuse/retriggering"
+        // mechanism: once a save is consumed, armBallSave() (called on every launch, same as
+        // armSkillShot()) refuses to re-arm until this life genuinely ends (a real, unsaved
+        // drain - see handleDrain()) or a new game starts - otherwise a player could bounce the
+        // same "free" ball off the drain zone indefinitely within one life.
+        const ballSave = { active: false, remainingMs: 0, usedThisLife: false };
+
+        // OUTLANE KICKBACK state (fairness mechanics, user-requested) - a plain earned/armed
+        // boolean, not time-limited (real pinball kickbacks stay loaded until used, however long
+        // that takes). Deliberately persists across a drain/relaunch (NOT reset by
+        // resetBallToPlunger(), unlike skillShot/ballSave above) - it was earned through real
+        // play (clearing the rollover-lane bank) and should stay earned until actually consumed
+        // by an outlane roll or the game ends, same "survives a drain" treatment laneBank's own
+        // lit state already gets.
+        const kickback = { active: false };
 
         // Orbit shot state (one entry per side) - `armedAt` is the timestamp (performance.now()-
         // style ms) of the last valid entrance hit, or null if the entrance hasn't fired (or its
@@ -4215,6 +4336,67 @@
             if (skillShot.remainingMs <= 0) endSkillShot();
         }
 
+        function setBallSaveLampLit(lit) {
+            obstacles.ballSaveLampMesh.material.emissiveColor = lit ? COLOR_BALL_SAVE_LAMP.scale(0.9) : COLOR_BALL_SAVE_LAMP.scale(0.12);
+        }
+
+        // Called once per launch (handleLaunchRelease()) - see ballSave's own block comment for
+        // why `usedThisLife` can block this from re-arming.
+        function armBallSave() {
+            if (ballSave.usedThisLife) return;
+            ballSave.active = true;
+            ballSave.remainingMs = BALL_SAVE_WINDOW_MS;
+            setBallSaveLampLit(true);
+        }
+
+        // Natural expiry only (called from the render loop below) - quietly turns the window off,
+        // same "no announcement for a routine, expected outcome" reasoning as skillShot's own
+        // timeout. Consuming the save (an actual drain-within-window) is handled directly in
+        // handleDrain() instead, since it needs to short-circuit that function's normal life-loss
+        // path entirely, not just flip a flag here.
+        function updateBallSave(deltaMs) {
+            if (!ballSave.active) return;
+            ballSave.remainingMs -= deltaMs;
+            if (ballSave.remainingMs <= 0) {
+                ballSave.active = false;
+                setBallSaveLampLit(false);
+            }
+        }
+
+        function setKickbackLampLit(lit) {
+            obstacles.kickbackLampMesh.material.emissiveColor = lit ? COLOR_KICKBACK_LAMP.scale(0.9) : COLOR_KICKBACK_LAMP.scale(0.12);
+        }
+
+        // Earned via an existing gameplay achievement (the 'reentryLane' bank-complete branch
+        // below calls this) - a no-op if already armed, so clearing the bank again while a
+        // kickback is still loaded doesn't stack or re-announce anything. Returns whether it
+        // actually newly armed, so the caller can fold that into its own message only when true.
+        function activateKickback() {
+            if (kickback.active) return false;
+            kickback.active = true;
+            setKickbackLampLit(true);
+            return true;
+        }
+
+        // Fixed-direction kick (unlike applyBumperKick()/applySlingshotKick(), which derive their
+        // direction from the ball's position relative to a movable contact point) - the outlane
+        // itself never moves, so "which way is inward" is just KICKBACK_SIDE's own mirror sign,
+        // looked up from SIDE_LANES rather than duplicated as a second hardcoded value.
+        function applyKickback() {
+            const body = mainBall.aggregate.body;
+            if (!body) return;
+            const mirror = SIDE_LANES.find((l) => l.side === KICKBACK_SIDE).mirror;
+            const v = body.getLinearVelocity();
+            body.setLinearVelocity(new BABYLON.Vector3(
+                v.x - mirror * KICKBACK_INWARD_SPEED_MS,
+                v.y,
+                v.z + KICKBACK_UPTABLE_BIAS_MS
+            ));
+            // Same shared safety ceiling every other active kick (bumper/slingshot) is re-clamped
+            // through - see clampBodySpeed()'s comment.
+            clampBodySpeed(body, MAX_BALL_SPEED_MS);
+        }
+
         function handlePhysicalHit(mesh) {
             const meta = mesh.metadata;
             if (!meta) return;
@@ -4405,7 +4587,18 @@
                     // game/ball resets it back to 1X.
                     ballBonus.multiplierX = Math.min(ballBonus.multiplierX + 1, BONUS_MULTIPLIER_MAX);
                     backglass.state.bonusMultiplierX = ballBonus.multiplierX;
-                    backglass.showMessage('LANE BANK COMPLETE! BONUS ' + ballBonus.multiplierX + 'X', 1200);
+                    // Outlane kickback (fairness mechanics, user-requested) - "let the player
+                    // earn/activate it through an existing gameplay achievement such as a
+                    // rollover-bank completion." Folded into the same message rather than a
+                    // second showMessage() call (which would just silently overwrite this one -
+                    // see showMessage()'s own comment), and only when it actually newly armed -
+                    // no point announcing "KICKBACK!" every single bank clear once it's already
+                    // loaded and waiting to be used.
+                    const kickbackArmed = activateKickback();
+                    backglass.showMessage(
+                        'LANE BANK COMPLETE! BONUS ' + ballBonus.multiplierX + 'X' + (kickbackArmed ? ' + KICKBACK!' : ''),
+                        1200
+                    );
                     triggerCameraShake(280, 0.006);
                     triggerCameraPunch(280, new BABYLON.Vector3(0, 0.018, -0.022));
                     playLaneBankCompleteSound();
@@ -4426,6 +4619,21 @@
                 backglass.showMessage((isOutlane ? 'OUTLANE! +' : 'INLANE! +') + points, 700);
                 triggerCameraShake(70, isOutlane ? 0.003 : 0.0025); // a modest rollover beat, not a collision - outlane a touch stronger, it's the more consequential of the two
                 playHitSound(isOutlane ? 430 : 600); // lower/more ominous pitch for the outlane, matching the existing "different obstacle kinds get different pitches" convention
+                // Outlane kickback (fairness mechanics, user-requested) - on top of (not instead
+                // of) the normal outlane scoring above, only for the one designated side
+                // (KICKBACK_SIDE) and only while armed. Overwrites the OUTLANE! message just
+                // shown - the bigger event wins the visible text, same precedent as every other
+                // "two things happened on one hit" case in this file (e.g. the bank-complete
+                // check right above).
+                if (isOutlane && meta.side === KICKBACK_SIDE && kickback.active) {
+                    kickback.active = false;
+                    setKickbackLampLit(false);
+                    stats.kickbacksUsed++;
+                    applyKickback();
+                    backglass.showMessage('KICKBACK!', 900);
+                    triggerCameraShake(150, 0.005);
+                    playKickbackSound();
+                }
             } else if (meta.kind === 'orbitEntrance') {
                 // Arms this side's orbit - does NOT score by itself (see ORBITS' block comment:
                 // "Award score only after a valid entrance->completion traversal"). Light feedback
@@ -4500,8 +4708,42 @@
             if (!ballInPlay) return; // the ball can sit inside the trigger volume for a while;
             // without this guard every frame it stays there would count as a separate drain.
             ballInPlay = false;
+
+            // BALL SAVE (fairness mechanics, user-requested) - checked before anything else
+            // touches lives/scoring, so a saved drain genuinely costs nothing: no life lost, no
+            // DRAINED! beat, and none of the per-ball resets below run (dropTargetBank/laneBank/
+            // combos/ballBonus all stay exactly as they were - the ball never really left play).
+            // Consumes the save immediately (ballSave.usedThisLife = true) so it can't retrigger
+            // from the very next drain - see armBallSave()'s own comment.
+            if (ballSave.active) {
+                ballSave.active = false;
+                ballSave.usedThisLife = true;
+                setBallSaveLampLit(false);
+                stats.ballSaves++;
+                backglass.showMessage('BALL SAVED!', 1400);
+                // Deliberately gentler/shorter than the real-drain beats below, and no red
+                // flashScreen() at all - this is good news, not a punishment.
+                triggerCameraShake(200, 0.004);
+                playBallSaveSound();
+                setTimeout(() => {
+                    const action = () => {
+                        backglass.redraw();
+                        resetBallToPlunger();
+                    };
+                    if (isPaused) {
+                        pendingDrainAction = action;
+                    } else {
+                        action();
+                    }
+                }, BALL_SAVE_RETURN_DELAY_MS);
+                return;
+            }
+
             lives--;
             setLives(lives);
+            // BALL SAVE reset (fairness mechanics) - this life is genuinely over now, so the next
+            // one gets its own fresh save opportunity (see armBallSave()'s "usedThisLife" gate).
+            ballSave.usedThisLife = false;
             backglass.showMessage('DRAINED!', 1400); // no Grim Reaper visual yet (Stage 12) - this is the stand-in
             triggerCameraShake(400, 0.008); // matches checkDrain()'s cameraShake(400, 0.008)
             flashScreen(200, 255, 0, 0); // matches checkDrain()'s cameraFlash(200, 255, 0, 0, true) - red
@@ -4747,6 +4989,20 @@
             stats.combosCompleted = 0;
             stats.comboMaxTier = 0;
             stats.skillShotsAwarded = 0;
+            stats.ballSaves = 0;
+            stats.kickbacksUsed = 0;
+            // Ball save (fairness mechanics, user-requested) - a fresh game gets a fresh save
+            // opportunity for its very first life. resetBallToPlunger() below already clears
+            // active/remainingMs/the lamp; usedThisLife is deliberately NOT touched by that
+            // function (see its own comment), so it needs its own explicit reset here.
+            ballSave.usedThisLife = false;
+            // Outlane kickback (fairness mechanics, user-requested) - unlike ballSave/skillShot,
+            // this is NOT reset by resetBallToPlunger() (it's meant to survive a drain - see
+            // kickback's own block comment), so a new game needs to explicitly clear it here;
+            // otherwise an earned-but-unused kickback would incorrectly carry over from a
+            // finished game into a brand new one.
+            kickback.active = false;
+            setKickbackLampLit(false);
             // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
             // score/lives/stats above - resets on every new game, not a permanent meta-progression.
             mission.state = 'idle';
@@ -4863,7 +5119,9 @@
                 ['Lane Bank Clears', stats.laneBankCompletions],
                 ['Combos', stats.combosCompleted],
                 ['Best Combo Tier', stats.comboMaxTier],
-                ['Skill Shots', stats.skillShotsAwarded]
+                ['Skill Shots', stats.skillShotsAwarded],
+                ['Ball Saves', stats.ballSaves],
+                ['Kickbacks Used', stats.kickbacksUsed]
             ];
             statLines.forEach(([label, value]) => {
                 if (value > 0) {
@@ -4903,6 +5161,7 @@
                 updateDropTargetBank(deltaMs);
                 updateBonusCount(deltaMs);
                 updateSkillShot(deltaMs);
+                updateBallSave(deltaMs);
                 // Skipped while the Vision Gate holds the ball (visionGate.active) - not just a
                 // nicety: updateBallPhysics()'s own anti-stuck kick fires after STUCK_TIME_
                 // THRESHOLD_MS (450ms) of near-zero speed, which a deliberately-frozen kinematic
