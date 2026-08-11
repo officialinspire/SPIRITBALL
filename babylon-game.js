@@ -4774,6 +4774,21 @@ import {
         // action until resumeGame() actually runs it, instead of letting it fire invisibly.
         let pendingDrainAction = null;
 
+        // Drain lifecycle audit fix: the raw setTimeout below (either branch) was never
+        // cancellable - pendingDrainAction only guards the "still paused when the timer fires"
+        // case. If the timer was still in flight (not yet fired) when startNewGame() ran - e.g.
+        // the player opened the pause menu mid-delay and immediately hit New Game, all well before
+        // the delay elapsed - nothing stopped it from firing later against the FRESH game: its
+        // captured `action` closure reads whatever ballBonus/lives/etc happen to hold at fire
+        // time, which by then belong to the new game, not the ball that actually drained.
+        // Confirmed via Playwright: New Game during the drain delay, followed by a real launch,
+        // saw the new ball snapped back to the plunger (a stale resetBallToPlunger()) once the
+        // original delay's wall-clock mark passed. Tracking the handle and clearing it in
+        // startNewGame() - same clearTimeout-on-reset idiom the Vision Gate's own colorTimers
+        // array already uses - stops the stale callback from ever running at all, rather than
+        // trying to make its effects conditional after the fact.
+        let drainTimeoutHandle = null;
+
         // Same reasoning as pendingDrainAction above, for the Vision Gate's own post-capture
         // eject timer (see startVisionGateCapture() in main()) - a plain JS setTimeout isn't
         // gated by scene.physicsEnabled either, so pausing mid-sequence must defer the eject
@@ -4807,7 +4822,8 @@ import {
                 triggerCameraShake(200, 0.004);
                 playBallSaveSound();
                 vibrateDevice(HAPTIC_BALL_SAVE_PATTERN); // differentiated haptics (user-requested) - a two-pulse "saved!" blip, distinct from mission complete's three-pulse fanfare
-                setTimeout(() => {
+                drainTimeoutHandle = setTimeout(() => {
+                    drainTimeoutHandle = null;
                     const action = () => {
                         backglass.redraw();
                         resetBallToPlunger();
@@ -4833,7 +4849,8 @@ import {
             // (that camera couldn't move through space at all).
             triggerCameraPunch(400, new BABYLON.Vector3(0, -0.03, 0));
             playDrainSound();
-            setTimeout(() => {
+            drainTimeoutHandle = setTimeout(() => {
+                drainTimeoutHandle = null;
                 const action = () => {
                     // Bonus/multiplier subsystem (user-requested) - "on drain: calculate bonus x
                     // multiplier, rapidly count the bonus into score, show the sequence on HUD/
@@ -5023,6 +5040,30 @@ import {
             // pendingDrainAction comment) - starting fresh here makes it stale; left set, it
             // would incorrectly fire against this new game's state on a future pause/resume.
             pendingDrainAction = null;
+            // Drain lifecycle audit fix - the raw drain-delay/ball-save-return setTimeout itself
+            // (see drainTimeoutHandle's own comment) isn't caught by the pendingDrainAction clear
+            // above unless the game happened to be paused the instant it fired; cancel it outright
+            // so a still-in-flight timer from the ball that just drained can never fire against
+            // this new game's fresh state at all.
+            if (drainTimeoutHandle !== null) {
+                clearTimeout(drainTimeoutHandle);
+                drainTimeoutHandle = null;
+            }
+            // Same reasoning, for a bonus count that's actively mid-sequence (not just scheduled)
+            // at the moment of a hard reset - updateBonusCount() only checks bonusCount.active
+            // each render-loop tick, with no awareness of which game/ball its `total`/`onComplete`
+            // belong to, so left running it would keep paying leftover points from the OLD ball
+            // into this new game's fresh score and then call the OLD onComplete (itself another
+            // resetBallToPlunger()) against a ball the player may have already relaunched.
+            // Confirmed via Playwright: New Game mid-count, followed by a real launch, kept
+            // gaining score from the stale count and then got yanked back to the plunger once it
+            // finished.
+            bonusCount.active = false;
+            bonusCount.onComplete = null;
+            bonusCount.ticksRemaining = 0;
+            bonusCount.remainingMs = 0;
+            bonusCount.awarded = 0;
+            bonusCount.total = 0;
             // Same "starting fresh makes any deferred/in-progress state stale" reasoning as
             // pendingDrainAction above, extended to a Vision Gate capture that might genuinely be
             // in progress (color-cycle timers running, sparkle alive, ball held kinematic) at the
