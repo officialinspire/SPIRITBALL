@@ -2306,6 +2306,50 @@
     // ring (Stage 4). This keeps the visual upgrade fully isolated from collision/scoring/trigger
     // behavior - nothing outside this function needed to change.
     // ===================================
+    // Small upright text-plaque label (cabinet visual-geometry pass, user-requested) - reuses the
+    // same DynamicTexture-canvas-text technique buildBackglass()/createStarfieldTexture() already
+    // established, just for compact playfield signage near an individual shot instead of one big
+    // panel. One small texture per label (drawn once, never redrawn - this is static signage, not
+    // a HUD), kept tiny (128x48) to stay cheap. DOUBLESIDE sidesteps ever having to get the exact
+    // facing-normal convention right.
+    function createLabelPlane(scene, text, x, z, color) {
+        const texW = 128, texH = 48;
+        const texture = new BABYLON.DynamicTexture('label' + text.replace(/\s/g, ''), { width: texW, height: texH }, scene, false);
+        const ctx = texture.getContext();
+        ctx.fillStyle = 'rgba(5, 0, 15, 0.55)';
+        ctx.fillRect(0, 0, texW, texH);
+        ctx.font = 'bold 20px monospace';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, texW / 2, texH / 2);
+        texture.update();
+
+        const mat = new BABYLON.StandardMaterial('labelMat' + text.replace(/\s/g, ''), scene);
+        mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        mat.disableLighting = true;
+        mat.emissiveTexture = texture;
+        mat.backFaceCulling = false;
+
+        // Verified via Playwright screenshot (not assumed): a flat, playfield-level decal reads
+        // as an edge-on sliver from this game's actual low, close, steeply-angled fixed camera
+        // (buildCamera() - y=0.36 over a table extending to z~0.45, looking mostly along +Z with
+        // only a ~22 degree downward tilt) - a flat horizontal surface at that shallow a viewing
+        // angle is nearly invisible, the same reason real machines put shot callouts on a raised/
+        // angled riser rather than flat playfield paint. Standing the plane upright and tilting it
+        // back to roughly match the camera's own downward look angle - the same rotation.x=0.4
+        // buildBackglass() already uses to face its panel toward this exact camera - fixes that.
+        const plane = BABYLON.MeshBuilder.CreatePlane('labelPlane' + text.replace(/\s/g, ''), {
+            width: 0.05,
+            height: 0.05 * (texH / texW),
+            sideOrientation: BABYLON.Mesh.DOUBLESIDE
+        }, scene);
+        plane.material = mat;
+        plane.position.set(x, 0.03, z);
+        plane.rotation.x = 0.4;
+        return plane;
+    }
+
     function buildObstacles(scene) {
         // Same dev-mode flag setDevPanelVisible() checks at module load - re-read here (cheap,
         // stateless) rather than threaded through as a parameter, purely to decide whether the new
@@ -2993,6 +3037,216 @@
         visionGateTrigger.metadata = { kind: 'visionGate' };
         const visionGateAggregate = new BABYLON.PhysicsAggregate(visionGateTrigger, BABYLON.PhysicsShapeType.SPHERE, { mass: 0 }, scene);
         visionGateAggregate.shape.isTrigger = true;
+
+        // ===================================
+        // Cabinet visual-geometry pass (user-requested) - purely decorative dressing that makes
+        // the table read as a physical cabinet (metal side rails, an apron, shooter-lane
+        // hardware, posts/rubber rings, extra lane guides, playfield inserts, shot labels, a
+        // backglass surround, and an outer cabinet frame), without touching any existing
+        // obstacle/wall/scoring geometry. Every mesh below is deliberately built WITHOUT a
+        // PhysicsAggregate - nothing here can accidentally receive a collision/trigger body.
+        // Reuses housingMat throughout, exactly like every other decorative piece above, and
+        // keeps polygon counts low (tessellation 8-10 on every cylinder/torus here, well under
+        // Babylon's defaults) - this whole pass adds well under 2000 triangles to a scene that
+        // already has particle systems and dozens of obstacles.
+        // ===================================
+
+        // 1. Metal side rails - a raised chrome cap along the top edge of the existing left/right
+        // walls, the rounded rail real cabinets run the full length of the playfield. Dressing on
+        // top of an already-physical collider, not a new one.
+        [-1, 1].forEach((side) => {
+            const rail = BABYLON.MeshBuilder.CreateCylinder('sideRail' + side, {
+                diameter: 0.012,
+                height: TABLE_LENGTH_M,
+                tessellation: 10
+            }, scene);
+            rail.rotation.x = Math.PI / 2;
+            rail.position.set(side * (TABLE_WIDTH_M / 2 - 0.006), WALL_HEIGHT_M + 0.004, 0);
+            rail.material = housingMat;
+        });
+
+        // 2. Apron - the trim strip below the flippers, closest to the player/camera, where a
+        // real cabinet's ball-return/coin-door graphics live. Sits just beyond the drain zone's
+        // own near edge (see DRAIN_ZONE_CENTER_Y_PX's comment - inner edge ~-0.43) so it can
+        // never overlap the drain trigger or the flippers themselves. A thin chakra-colored trim
+        // line keeps it tied to the table's own identity rather than reading as generic hardware.
+        const apronZ = -0.62;
+        const apron = BABYLON.MeshBuilder.CreateBox('apron', {
+            width: TABLE_WIDTH_M * 0.92,
+            height: 0.018,
+            depth: 0.05
+        }, scene);
+        apron.position.set(0, 0.005, apronZ);
+        apron.material = housingMat;
+
+        const apronTrimMat = new BABYLON.PBRMaterial('apronTrimMat', scene);
+        apronTrimMat.albedoColor = COLOR_CHAKRA[0];
+        apronTrimMat.emissiveColor = COLOR_CHAKRA[0].scale(0.6);
+        apronTrimMat.metallic = 0.1;
+        apronTrimMat.roughness = 0.4;
+        const apronTrim = BABYLON.MeshBuilder.CreateBox('apronTrim', {
+            width: TABLE_WIDTH_M * 0.92,
+            height: 0.003,
+            depth: 0.004
+        }, scene);
+        apronTrim.position.set(0, 0.015, apronZ - 0.023);
+        apronTrim.material = apronTrimMat;
+
+        // 3. Shooter-lane hardware - a coil-spring suggestion (three thin low-poly rings) plus a
+        // mechanical end cap, positioned behind the plunger's own fully-pulled-back position
+        // (PLUNGER_REST_Z_M/PLUNGER_TRAVEL_M) so nothing here can ever visually overlap the
+        // animated plunger mesh itself at any charge level.
+        const shooterLaneX = toWorldX(BALL_REST_X_PX);
+        const plungerRestZ = toWorldZ(BALL_REST_Z_PX) + PLUNGER_REST_Z_M;
+        const coilBaseZ = plungerRestZ - PLUNGER_TRAVEL_M - 0.015;
+        for (let i = 0; i < 3; i++) {
+            const coil = BABYLON.MeshBuilder.CreateTorus('shooterCoil' + i, {
+                diameter: 0.014,
+                thickness: 0.0025,
+                tessellation: 8
+            }, scene);
+            coil.rotation.x = Math.PI / 2;
+            coil.position.set(shooterLaneX, 0.014, coilBaseZ - i * 0.008);
+            coil.material = housingMat;
+        }
+        const shooterEndCap = BABYLON.MeshBuilder.CreateCylinder('shooterEndCap', {
+            diameter: 0.02,
+            height: 0.01,
+            tessellation: 10
+        }, scene);
+        shooterEndCap.rotation.x = Math.PI / 2;
+        shooterEndCap.position.set(shooterLaneX, 0.014, coilBaseZ - 3 * 0.008 - 0.008);
+        shooterEndCap.material = housingMat;
+
+        // 4. Posts and rubber rings - a classic center post between the flippers, plus one
+        // flanking each slingshot's outer edge, each a housing-colored post with a thin
+        // matte-rubber ring at its base. Purely cosmetic - unlike every OTHER post in this file,
+        // these get no PhysicsAggregate at all.
+        const rubberMat = new BABYLON.PBRMaterial('rubberRingMat', scene);
+        rubberMat.albedoColor = new BABYLON.Color3(0.05, 0.05, 0.06);
+        rubberMat.metallic = 0;
+        rubberMat.roughness = 0.9; // matte rubber, not chrome like housingMat
+        [
+            { x: 0, z: FLIPPER_Z_M + 0.05 }, // center post between the flippers
+            { x: SLINGSHOTS[0].x - 0.03, z: SLINGSHOTS[0].z }, // flanking the left slingshot
+            { x: SLINGSHOTS[1].x + 0.03, z: SLINGSHOTS[1].z } // flanking the right slingshot
+        ].forEach((def, i) => {
+            const post = BABYLON.MeshBuilder.CreateCylinder('decorPost' + i, {
+                diameter: 0.008,
+                height: 0.024,
+                tessellation: 8
+            }, scene);
+            post.position.set(def.x, 0.012, def.z);
+            post.material = housingMat;
+
+            const ring = BABYLON.MeshBuilder.CreateTorus('decorRing' + i, {
+                diameter: 0.016,
+                thickness: 0.0025,
+                tessellation: 8
+            }, scene);
+            ring.rotation.x = Math.PI / 2;
+            ring.position.set(def.x, 0.014, def.z);
+            ring.material = rubberMat;
+        });
+
+        // 5. Visible lane guides - small angled decorative fins at each flipper's outer edge,
+        // aiming the eye up the lane the same way a real machine's flipper-base guide plastic
+        // does. The actual guide walls/rails elsewhere (inlane guides, orbit rails, launch lane
+        // wall) already handle real deflection; this is a purely visual cue at the one spot on
+        // the table without any guide accent yet.
+        [-1, 1].forEach((mirror) => {
+            const fin = BABYLON.MeshBuilder.CreateBox('flipperGuideFin' + mirror, {
+                width: 0.002,
+                height: 0.02,
+                depth: 0.06
+            }, scene);
+            fin.position.set(mirror * (FLIPPER_GAP_HALF_M + 0.09), 0.011, FLIPPER_Z_M - 0.01);
+            fin.rotation.y = mirror * 0.35;
+            fin.material = housingMat;
+        });
+
+        // 6. Playfield inserts/lamps - flush glowing insert plates at each flipper's base, the
+        // one classic pinball light location this table didn't have yet (every other lamp so far
+        // is a raised bumper/lane/target insert). Lit continuously at a low level, like a real
+        // backlit-but-otherwise-idle insert - this is ambient set-dressing, not gameplay state.
+        [-1, 1].forEach((mirror, i) => {
+            const color = COLOR_CHAKRA[(i + 3) % COLOR_CHAKRA.length];
+            const insertMat = new BABYLON.PBRMaterial('flipperInsertMat' + i, scene);
+            insertMat.albedoColor = color.scale(0.3);
+            insertMat.emissiveColor = color.scale(0.35);
+            insertMat.metallic = 0.1;
+            insertMat.roughness = 0.5;
+            const insert = BABYLON.MeshBuilder.CreateCylinder('flipperInsert' + mirror, {
+                diameterTop: 0.02,
+                diameterBottom: 0.02,
+                height: 0.002,
+                tessellation: 10
+            }, scene);
+            insert.position.set(mirror * FLIPPER_GAP_HALF_M, 0.002, FLIPPER_Z_M + 0.02);
+            insert.material = insertMat;
+        });
+
+        // 7. Labels near important shots - small flat playfield decals (createLabelPlane(), the
+        // same DynamicTexture-canvas technique buildBackglass() uses) at the shots most likely to
+        // need a name to be understood at a glance: the skill-shot lane bank, the kickback
+        // outlane, both orbit entrances, and the Vision Gate. Positioned near, not on top of,
+        // each shot's own lamp/trigger geometry so nothing visually overlaps.
+        createLabelPlane(scene, 'SKILL SHOT', SKILL_SHOT_LANES[1].x, SKILL_SHOT_Z_M + 0.05, '#ff3366');
+        createLabelPlane(scene, 'KICKBACK', kickbackMirror * OUTLANE_TRIGGER_X_M, LANE_Z_BOTTOM_M - 0.03, '#ff5500');
+        ORBITS.forEach((orbitDef) => {
+            // Side-specific text (not a shared 'ORBIT' label for both) - doubles as telling the
+            // two orbits apart at a glance and keeps each label's mesh/texture name unique.
+            const orbitLabel = orbitDef.side === 'left' ? 'L ORBIT' : 'R ORBIT';
+            createLabelPlane(scene, orbitLabel, orbitDef.entranceX, ORBIT_ENTRANCE_Z_M - 0.04, '#33ccff');
+        });
+        createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x, VISION_GATE_POS.z - VISION_GATE_RADIUS_M - 0.03, '#cc66ff');
+
+        // 8. Physical backing around the backglass - a frame border plus a receding cabinet
+        // "head" riser behind the panel buildBackglass() builds separately (called after this
+        // function). These numbers deliberately mirror its own fixed position/rotation
+        // (position.set(0, 0.28, TABLE_LENGTH_M/2+0.06), rotation.x=0.4) rather than needing a
+        // mesh reference - both larger than the 0.32x0.15 panel and positioned slightly further
+        // from the camera (+Z) than it, so the panel stays the frontmost, readable layer with the
+        // frame/head peeking out around its edges, not covering it.
+        const backglassX = 0, backglassY = 0.28, backglassZ = TABLE_LENGTH_M / 2 + 0.06;
+        const backglassFrame = BABYLON.MeshBuilder.CreateBox('backglassFrame', {
+            width: 0.36,
+            height: 0.19,
+            depth: 0.02
+        }, scene);
+        backglassFrame.position.set(backglassX, backglassY, backglassZ + 0.012);
+        backglassFrame.rotation.x = 0.4;
+        backglassFrame.material = housingMat;
+
+        const cabinetHead = BABYLON.MeshBuilder.CreateBox('cabinetHead', {
+            width: 0.38,
+            height: 0.22,
+            depth: 0.05
+        }, scene);
+        cabinetHead.position.set(backglassX, backglassY - 0.01, backglassZ + 0.03);
+        cabinetHead.rotation.x = 0.4;
+        cabinetHead.material = housingMat;
+
+        // 9. Subtle cabinet depth/frame - a thin outer trim just beyond the existing side/top
+        // walls, suggesting the surrounding cabinet body without changing the actual playfield
+        // boundary at all (the walls keep their existing collision exactly as-is; this sits
+        // purely outside it).
+        [-1, 1].forEach((side) => {
+            const trim = BABYLON.MeshBuilder.CreateBox('cabinetSideTrim' + side, {
+                width: 0.01,
+                height: 0.01,
+                depth: TABLE_LENGTH_M + 0.04
+            }, scene);
+            trim.position.set(side * (TABLE_WIDTH_M / 2 + 0.014), 0.005, 0);
+            trim.material = housingMat;
+        });
+        const topTrim = BABYLON.MeshBuilder.CreateBox('cabinetTopTrim', {
+            width: TABLE_WIDTH_M + 0.04,
+            height: 0.01,
+            depth: 0.01
+        }, scene);
+        topTrim.position.set(0, 0.005, TABLE_LENGTH_M / 2 + 0.014);
+        topTrim.material = housingMat;
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
         // Saturn's rings every frame, drive the power-up orb's spawn/despawn cycle, and run the
