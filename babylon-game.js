@@ -3577,6 +3577,16 @@ import {
         // multiplier progression without any mission-FSM coupling.
         const laneBank = REENTRY_LANES.map(() => ({ lit: false }));
 
+        // Post-bank-complete reset delay (timer audit fix) - was a bare setTimeout(resetLaneBank,
+        // LANE_BANK_RESET_DELAY_MS) fired from the 'reentryLane' branch below, so a pause landing
+        // inside that 400ms window let resetLaneBank() (which un-lights every lane) fire on wall-
+        // clock time while the pause overlay hid it, silently clearing the just-completed bank's
+        // lit state before the player could see the reset happen. Converted to the same remaining-
+        // ms-decremented-by-deltaMs idiom as dropTargetBank's animMs/skillShot's remainingMs/
+        // ballSave's remainingMs (see updateLaneBankReset() below, called from the render loop's
+        // existing !isPaused block) so it now freezes correctly like every other continuous timer.
+        let laneBankResetRemainingMs = 0;
+
         // Bonus/multiplier subsystem state (user-requested) - per-ball, not per-game: `points`
         // accumulates silently from major shots/mission completions during play (see their call
         // sites) and `multiplierX` is advanced by clearing the rollover-lane bank above. Neither
@@ -3587,11 +3597,26 @@ import {
         // through addScore() during the bonus count, not by referencing each other.
         const ballBonus = { points: 0, multiplierX: 1 };
 
+        // Pause-aware gameplay clock (timer audit fix) - accumulates the render loop's own
+        // deltaMs, but ONLY while !isPaused (see the render loop's `if (!isPaused) { gameplayClockMs
+        // += deltaMs; ... }` below), unlike performance.now()/Date.now() which keep advancing
+        // through a pause or a backgrounded tab. combo/orbit windows below read this instead of
+        // performance.now() specifically because they're elapsed-SINCE-an-event comparisons, not
+        // continuous per-frame countdowns - the render-loop-deltaMs idiom used elsewhere in this
+        // file (updateSkillShot()/updateBallSave()/updateDropTargetBank()) doesn't fit an "N
+        // seconds since the last matching hit, whenever that next hit happens" check the same way,
+        // so rather than inventing a second pattern, this gives that style of check a clock that's
+        // just as pause-safe. Only ever read from inside a hit/trigger handler, which - because
+        // Havok's own step is what's gated by scene.physicsEnabled during a pause - can only run
+        // while !isPaused anyway, so it's always current when read.
+        let gameplayClockMs = 0;
+
         // Lightweight combo scoring state (user-requested) - one {index, lastAtMs} progress
         // cursor per COMBO_DEFS entry (same array index), advanced by recordComboShot() below.
         // `index` is how many of that def's steps have matched in order so far; `lastAtMs` is
-        // when the most recent one did, used to expire a stalled chain cleanly. Separate from
-        // `comboStreak`, which tracks chaining multiple DIFFERENT combos back to back for an
+        // when the most recent one did (in gameplayClockMs terms, not wall time - timer audit fix,
+        // see gameplayClockMs' own comment above), used to expire a stalled chain cleanly. Separate
+        // from `comboStreak`, which tracks chaining multiple DIFFERENT combos back to back for an
         // escalating tier (COMBO x2, x3...) - see fireCombo() below.
         const comboProgress = COMBO_DEFS.map(() => ({ index: 0, lastAtMs: 0 }));
         const comboStreak = { tier: 0, lastAtMs: 0 };
@@ -3634,12 +3659,18 @@ import {
         // lit state already gets.
         const kickback = { active: false };
 
-        // Orbit shot state (one entry per side) - `armedAt` is the timestamp (performance.now()-
-        // style ms) of the last valid entrance hit, or null if the entrance hasn't fired (or its
-        // window already expired). A completion trigger only scores if armedAt is set and within
+        // Orbit shot state (one entry per side) - `armedAt` is the timestamp (gameplayClockMs-style
+        // ms - timer audit fix, was performance.now(), see gameplayClockMs' own comment) of the
+        // last valid entrance hit, or null if the entrance hasn't fired (or its window already
+        // expired). A completion trigger only scores if armedAt is set and within
         // ORBIT_COMPLETION_WINDOW_MS - see handleTriggerHit()'s 'orbitCompletion' branch - so a
         // partial shot (entered, stalled, rolled back without reaching the top) can't score, and a
         // stale arm from a much earlier pass can't retroactively count a later, unrelated hit.
+        // Reading gameplayClockMs instead of performance.now() means pausing mid-window no longer
+        // silently burns down (or entirely blows past) the 4-second completion window - confirmed
+        // by playtest-style Playwright timing before/after: previously, pausing for longer than
+        // ORBIT_COMPLETION_WINDOW_MS and resuming always found the window already expired, even
+        // though the ball hadn't moved.
         const orbitState = { left: { armedAt: null }, right: { armedAt: null } };
 
         // VISION GATE capture state (see its own block comment near VISION_GATE_POS' declaration
@@ -4012,13 +4043,34 @@ import {
 
         // Per-object hit cooldown, ported from isOnCooldown()/setCooldown() in ../index.js
         // (there keyed by Phaser game object + a Map; here keyed by mesh, same idea).
-        const hitCooldowns = new Set();
+        //
+        // Timer audit fix: this used to be a real setTimeout (hitCooldowns as a Set, cleared by a
+        // wall-clock callback). Every one of this file's ~13 physical-hit/trigger cooldowns
+        // (bumper, comet, Saturn, slingshot, wall, flipper, mission target, reentry lane, side
+        // lane, both orbit triggers, Vision Gate) routed through it, and a setTimeout keeps
+        // counting down even while isPaused is true - confirmed via a standalone check, not
+        // assumed. Pausing gates Havok's own step (scene.physicsEnabled = false), so this rarely
+        // mattered in practice (no new collision can fire mid-pause to consult a stale cooldown),
+        // but a ball resting in continuous contact with a collider at the exact moment physics
+        // resumes could still see a cooldown that "silently" expired during the pause and get an
+        // extra hit it shouldn't. Converted to the same remaining-ms-decremented-by-the-render-
+        // loop's-own-deltaMs idiom every other continuous timer in this file already uses
+        // (updateDropTargetBank()/updateSkillShot()/updateBallSave()) - see updateHitCooldowns()
+        // below, called from the render loop's existing !isPaused block - so cooldowns now freeze
+        // exactly like everything else during a pause instead of being the one exception.
+        const hitCooldowns = new Map(); // mesh -> remainingMs
         function isOnCooldown(mesh) {
             return hitCooldowns.has(mesh);
         }
         function setCooldown(mesh, durationMs) {
-            hitCooldowns.add(mesh);
-            setTimeout(() => hitCooldowns.delete(mesh), durationMs);
+            hitCooldowns.set(mesh, durationMs);
+        }
+        function updateHitCooldowns(deltaMs) {
+            hitCooldowns.forEach((remainingMs, mesh) => {
+                const next = remainingMs - deltaMs;
+                if (next <= 0) hitCooldowns.delete(mesh);
+                else hitCooldowns.set(mesh, next);
+            });
         }
 
         // Lightweight scale-pulse as this stage's hit feedback - a 3D-appropriate stand-in for
@@ -4207,6 +4259,18 @@ import {
             });
         }
 
+        // Called every frame from the render loop (gated by !isPaused, same as
+        // updateDropTargetBank()/updateSkillShot()/updateBallSave()) - see laneBankResetRemainingMs'
+        // own declaration comment for why this replaced a bare setTimeout.
+        function updateLaneBankReset(deltaMs) {
+            if (laneBankResetRemainingMs <= 0) return;
+            laneBankResetRemainingMs -= deltaMs;
+            if (laneBankResetRemainingMs <= 0) {
+                laneBankResetRemainingMs = 0;
+                resetLaneBank();
+            }
+        }
+
         // Optional "lane change" skill mechanic (classic pinball - a flipper press rotates which
         // lanes are lit, letting a player shift their progress into a more useful pattern without
         // needing to physically hit anything). Rotates the lit/unlit PATTERN circularly by one
@@ -4251,7 +4315,7 @@ import {
         // jittering in one trigger can never log the same shot twice - this function never needs
         // its own separate debounce.
         function recordComboShot(type) {
-            const now = performance.now();
+            const now = gameplayClockMs; // timer audit fix - was performance.now(), see its own comment
             COMBO_DEFS.forEach((def, i) => advanceCombo(def, comboProgress[i], type, now));
         }
 
@@ -4261,7 +4325,7 @@ import {
         // since the last one. Camera feedback is deliberately fixed regardless of tier ("avoid
         // excessive screen flash/camera shake") - only score, sound, and the message text scale.
         function fireCombo(def) {
-            const now = performance.now();
+            const now = gameplayClockMs; // timer audit fix - was performance.now(), see its own comment
             comboStreak.tier = (now - comboStreak.lastAtMs <= COMBO_CHAIN_WINDOW_MS)
                 ? Math.min(comboStreak.tier + 1, COMBO_MAX_TIER)
                 : 1;
@@ -4616,7 +4680,7 @@ import {
                     triggerCameraShake(280, 0.006);
                     triggerCameraPunch(280, new BABYLON.Vector3(0, 0.018, -0.022));
                     playLaneBankCompleteSound();
-                    setTimeout(resetLaneBank, LANE_BANK_RESET_DELAY_MS);
+                    laneBankResetRemainingMs = LANE_BANK_RESET_DELAY_MS; // timer audit fix - was setTimeout(resetLaneBank, ...), see laneBankResetRemainingMs' own comment
                 }
             } else if (meta.kind === 'inlane' || meta.kind === 'outlane') {
                 // Not mission-tied (unlike 'reentryLane' above, whose 'lane' mission type belongs
@@ -4656,14 +4720,14 @@ import {
                 // "Award score only after a valid entrance->completion traversal"). Light feedback
                 // only, so a completed shot's own bigger beat stands out by comparison.
                 setCooldown(mesh, COOLDOWN_ORBIT_MS);
-                orbitState[meta.side].armedAt = performance.now();
+                orbitState[meta.side].armedAt = gameplayClockMs; // timer audit fix - was performance.now(), see gameplayClockMs' own comment
                 lampSystem.flashLamp(meta.lampId, 150, COLOR_ORBIT_LAMP);
                 triggerCameraShake(40, 0.0015);
                 playOrbitEnterSound();
             } else if (meta.kind === 'orbitCompletion') {
                 setCooldown(mesh, COOLDOWN_ORBIT_MS);
                 const armedAt = orbitState[meta.side].armedAt;
-                const withinWindow = armedAt !== null && performance.now() - armedAt <= ORBIT_COMPLETION_WINDOW_MS;
+                const withinWindow = armedAt !== null && gameplayClockMs - armedAt <= ORBIT_COMPLETION_WINDOW_MS;
                 // Always flash the lamp and give a small acknowledgement, even for a stray hit on
                 // the completion trigger with no matching entrance - only the scoring/stat/message
                 // below is gated on a genuine traversal.
@@ -4999,6 +5063,13 @@ import {
             stats.laneBankCompletions = 0;
             orbitState.left.armedAt = null;
             orbitState.right.armedAt = null;
+            // Timer audit fix - per-run state, same reasoning as everything else here: a stray
+            // hit-cooldown or pending lane-bank-reset countdown from the previous game has no
+            // business surviving into a fresh one (see hitCooldowns'/laneBankResetRemainingMs' own
+            // comments for why these are no longer real setTimeouts that could otherwise fire
+            // against this new game's state regardless).
+            hitCooldowns.clear();
+            laneBankResetRemainingMs = 0;
             // Drop-target bank (user-requested upgrade) - per-run state, same reasoning as
             // mission/rank/power-up above.
             resetDropTargetBank();
@@ -5292,12 +5363,18 @@ import {
             updateSaturnRotation(obstacles.saturnRings, deltaMs);
 
             if (!isPaused) {
+                // Timer audit fix - accumulates only while unpaused, see gameplayClockMs' own
+                // declaration comment for why the orbit/combo windows read this instead of
+                // performance.now().
+                gameplayClockMs += deltaMs;
                 updateFlipperMotor(leftFlipper, deltaMs);
                 updateFlipperMotor(rightFlipper, deltaMs);
                 updateDropTargetBank(deltaMs);
                 updateBonusCount(deltaMs);
                 updateSkillShot(deltaMs);
                 updateBallSave(deltaMs);
+                updateHitCooldowns(deltaMs); // timer audit fix - was a real setTimeout per cooldown, see hitCooldowns' own comment
+                updateLaneBankReset(deltaMs); // timer audit fix - was setTimeout(resetLaneBank, ...), see laneBankResetRemainingMs' own comment
                 lampSystem.updateLamps(performance.now());
                 // Skipped while the Vision Gate holds the ball (visionGate.active) - not just a
                 // nicety: updateBallPhysics()'s own anti-stuck kick fires after STUCK_TIME_
