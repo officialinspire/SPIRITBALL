@@ -337,6 +337,22 @@
         playTone(660, 0.05, { type: 'square', volume: 0.09 });
     }
 
+    // Combo completion (lightweight combo scoring, user-requested) - pitch rises and gains one
+    // extra harmonizing note per tier (capped at three notes total even at the highest tier), so
+    // higher combos read as "bigger" purely through timbre/pitch, not volume or duration -
+    // deliberately restrained rather than an increasingly long/loud sting, matching the "avoid
+    // excessive" spirit that also keeps this feature's camera shake fixed regardless of tier.
+    function playComboSound(tier) {
+        const basePitch = 480 + tier * 90;
+        playTone(basePitch, 0.1, { type: 'sine', freqEnd: basePitch * 1.4, volume: 0.14 });
+        if (tier >= 2) {
+            setTimeout(() => playTone(basePitch * 1.3, 0.12, { type: 'sine', volume: 0.15 }), 80);
+        }
+        if (tier >= 3) {
+            setTimeout(() => playTone(basePitch * 1.6, 0.14, { type: 'triangle', volume: 0.16 }), 160);
+        }
+    }
+
     function setupResizeHandlers(engine) {
         let resizeTimeout;
         window.addEventListener('resize', () => {
@@ -974,6 +990,44 @@
     // Reduced motion: skip the tick sequence entirely and award the whole bonus in one step -
     // this is just how long the single resulting message stays legible before continuing.
     const BONUS_COUNT_REDUCED_MOTION_MS = 150;
+
+    // ===================================
+    // Lightweight combo scoring (user-requested) - short chains of already-scored "major shot"
+    // events (orbit completions, comet hits, Vision Gate captures, bumper hits, a cleared
+    // rollover-lane bank), each within a short, per-combo time window. Deliberately NOT another
+    // mission FSM: COMBO_DEFS is a flat, data-driven list matched by one small, generic state
+    // machine (advanceCombo() in main()) shared by every entry - adding a new combo means adding
+    // one entry here (plus, if its event type is new, one recordComboShot() call at whatever
+    // existing hit site already scores it), never new collision/trigger architecture. A step can
+    // be a single type string (exact match) or an array of type strings (match any of them) - see
+    // 'BANK RUSH' below, whose second step accepts either orbit side.
+    // ===================================
+    const COMBO_ORBIT_TYPES = ['orbitLeft', 'orbitRight']; // "any orbit side" - the rollover-bank-into-orbit combo's second step
+    const COMBO_STEP_WINDOW_MS = 2500; // default per-step time budget between two consecutive combo steps
+    // BUMPER-BUMPER-BUMPER needs a tighter per-step window than the default - matching a genuine
+    // rapid-fire triple rather than three incidental hits minutes apart.
+    const COMBO_TRIPLE_STEP_WINDOW_MS = 1800;
+    // How soon after one combo completes the next one must start to escalate the combo TIER
+    // (COMBO x2, x3...) instead of resetting back to x1 - independent of any single combo
+    // definition's own per-step window above.
+    const COMBO_CHAIN_WINDOW_MS = 4000;
+    const COMBO_MAX_TIER = 5;
+    const COMBO_BASE_SCORE = 800; // tier-1 award; scales linearly by tier, see fireCombo() in main()
+    const COMBO_MESSAGE_MS = 900;
+
+    // The two ORBIT SWITCH entries track independently (each is just its own {index, lastAtMs}
+    // cursor over the same shared shot stream, see advanceCombo() in main()) - on a real
+    // alternating L/R/L/R run, both directions legitimately complete in an overlapping,
+    // roughly-every-shot cadence. That's intentional, not a double-count bug: the user's spec
+    // lists LEFT->RIGHT and RIGHT->LEFT as two separate combos, and rewarding sustained
+    // alternation this way is a standard real-pinball "combo train" pattern, not noise.
+    const COMBO_DEFS = [
+        { name: 'ORBIT SWITCH', steps: ['orbitLeft', 'orbitRight'], stepWindowMs: COMBO_STEP_WINDOW_MS },
+        { name: 'ORBIT SWITCH', steps: ['orbitRight', 'orbitLeft'], stepWindowMs: COMBO_STEP_WINDOW_MS },
+        { name: 'COMET GATE', steps: ['comet', 'visionGate'], stepWindowMs: COMBO_STEP_WINDOW_MS },
+        { name: 'TRIPLE BUMPER', steps: ['bumper', 'bumper', 'bumper'], stepWindowMs: COMBO_TRIPLE_STEP_WINDOW_MS },
+        { name: 'BANK RUSH', steps: ['laneBankComplete', COMBO_ORBIT_TYPES], stepWindowMs: COMBO_STEP_WINDOW_MS }
+    ];
 
     // Rank names ported from the classic "3D Pinball for Windows - Space Cadet" progression this
     // table's own layout is explicitly modeled on (see buildObstacles()'s "authentic
@@ -3248,7 +3302,7 @@
             bumperHits: 0, cometHits: 0, saturnHits: 0, targetHits: 0, laneHits: 0,
             missionsCompleted: 0, powerUpsCollected: 0, inlaneHits: 0, outlaneHits: 0,
             leftOrbitShots: 0, rightOrbitShots: 0, visionGateCaptures: 0, targetBankCompletions: 0,
-            laneBankCompletions: 0
+            laneBankCompletions: 0, combosCompleted: 0, comboMaxTier: 0
         };
 
         // Mission/rank progression state (improvement-prompts/05-*.md). rank is an index into
@@ -3291,6 +3345,15 @@
         // applied to every hit while its own window is running) - the two combine additively
         // through addScore() during the bonus count, not by referencing each other.
         const ballBonus = { points: 0, multiplierX: 1 };
+
+        // Lightweight combo scoring state (user-requested) - one {index, lastAtMs} progress
+        // cursor per COMBO_DEFS entry (same array index), advanced by recordComboShot() below.
+        // `index` is how many of that def's steps have matched in order so far; `lastAtMs` is
+        // when the most recent one did, used to expire a stalled chain cleanly. Separate from
+        // `comboStreak`, which tracks chaining multiple DIFFERENT combos back to back for an
+        // escalating tier (COMBO x2, x3...) - see fireCombo() below.
+        const comboProgress = COMBO_DEFS.map(() => ({ index: 0, lastAtMs: 0 }));
+        const comboStreak = { tier: 0, lastAtMs: 0 };
 
         // Orbit shot state (one entry per side) - `armedAt` is the timestamp (performance.now()-
         // style ms) of the last valid entrance hit, or null if the entrance hasn't fired (or its
@@ -3497,6 +3560,7 @@
 
             addScore(SCORE_VISION_GATE);
             stats.visionGateCaptures++;
+            recordComboShot('visionGate'); // combo scoring (user-requested) - feeds 'COMET GATE'
             // Bonus/multiplier subsystem (user-requested) - a Vision Gate capture is a "major
             // shot," on top of (not instead of) the addScore() above.
             ballBonus.points += BONUS_MAJOR_SHOT_AMOUNT;
@@ -3909,6 +3973,71 @@
             });
         }
 
+        // Advances one COMBO_DEFS entry's progress cursor against a new shot `type` - the one
+        // small generic matcher every definition shares (see COMBO_DEFS' block comment for why
+        // this isn't a per-combo FSM). Expiry is checked first: a stalled chain (no matching step
+        // within its own stepWindowMs) cleanly resets to idle BEFORE this event is evaluated
+        // against it, which for free also lets a late-but-otherwise-matching event start a brand
+        // new chain from step 0 in the same call, with no separate case needed for that.
+        function advanceCombo(def, prog, type, now) {
+            if (prog.index > 0 && now - prog.lastAtMs > def.stepWindowMs) {
+                prog.index = 0;
+            }
+            const expected = def.steps[prog.index];
+            const matches = Array.isArray(expected) ? expected.includes(type) : expected === type;
+            if (!matches) return;
+            prog.index++;
+            prog.lastAtMs = now;
+            if (prog.index >= def.steps.length) {
+                fireCombo(def);
+                prog.index = 0;
+            }
+        }
+
+        // Called once per already-scored "major shot" event - see each call site below (orbit
+        // completion, comet hit, Vision Gate capture, bumper hit, lane-bank completion). Every
+        // call site sits behind that hit's own existing isOnCooldown()/setCooldown() gate (or,
+        // for the bank/gate events, their own one-shot completion guards), so a ball resting or
+        // jittering in one trigger can never log the same shot twice - this function never needs
+        // its own separate debounce.
+        function recordComboShot(type) {
+            const now = performance.now();
+            COMBO_DEFS.forEach((def, i) => advanceCombo(def, comboProgress[i], type, now));
+        }
+
+        // A COMBO_DEFS entry just completed. Tracks a SEPARATE thing from that entry's own
+        // progress: chaining multiple combos back to back escalates comboStreak.tier (displayed
+        // as "COMBO x2", "x3"...), capped at COMBO_MAX_TIER and reset to 1 if too long passes
+        // since the last one. Camera feedback is deliberately fixed regardless of tier ("avoid
+        // excessive screen flash/camera shake") - only score, sound, and the message text scale.
+        function fireCombo(def) {
+            const now = performance.now();
+            comboStreak.tier = (now - comboStreak.lastAtMs <= COMBO_CHAIN_WINDOW_MS)
+                ? Math.min(comboStreak.tier + 1, COMBO_MAX_TIER)
+                : 1;
+            comboStreak.lastAtMs = now;
+
+            addScore(COMBO_BASE_SCORE * comboStreak.tier);
+            stats.combosCompleted++;
+            stats.comboMaxTier = Math.max(stats.comboMaxTier, comboStreak.tier);
+            backglass.showMessage(def.name + ' COMBO x' + comboStreak.tier, COMBO_MESSAGE_MS);
+            triggerCameraShake(100, 0.0035);
+            playComboSound(comboStreak.tier);
+        }
+
+        // Per-ball reset (user-requested) - combos are a live-play chaining mechanic scoped to
+        // the ball currently in play, same as ballBonus above; a stalled chain or an escalated
+        // tier has no business surviving into the next ball. Called from both of
+        // resetBallToPlunger()'s two "a new ball is starting" call sites (a continuing drain and
+        // startNewGame()), same pattern as resetDropTargetBank()/resetLaneBank(). Doesn't touch
+        // stats.combosCompleted/comboMaxTier - those are whole-game totals, reset only by
+        // startNewGame()'s own stats block, same as every other stat.
+        function resetCombos() {
+            comboProgress.forEach((prog) => { prog.index = 0; prog.lastAtMs = 0; });
+            comboStreak.tier = 0;
+            comboStreak.lastAtMs = 0;
+        }
+
         function handlePhysicalHit(mesh) {
             const meta = mesh.metadata;
             if (!meta || isOnCooldown(mesh)) return;
@@ -3919,6 +4048,7 @@
                 const points = meta.boss ? SCORE_BOSS_BUMPER : SCORE_ATTACK_BUMPER;
                 addScore(points);
                 stats.bumperHits++;
+                recordComboShot('bumper'); // combo scoring (user-requested) - feeds 'TRIPLE BUMPER'
                 applyBumperKick(mesh);
                 // Feedback bumped slightly (pulse scale, shake, sound volume) above the shared
                 // defaults now that bumpers actively kick the ball - the hit should read as a
@@ -3935,6 +4065,7 @@
                 setCooldown(mesh, COOLDOWN_COMET_MS);
                 addScore(SCORE_COMET);
                 stats.cometHits++;
+                recordComboShot('comet'); // combo scoring (user-requested) - feeds 'COMET GATE'
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('COMET!', 900);
@@ -4062,6 +4193,7 @@
                 if (newlyLit && laneBank.every((lane) => lane.lit)) {
                     addScore(SCORE_LANE_BANK_COMPLETE);
                     stats.laneBankCompletions++;
+                    recordComboShot('laneBankComplete'); // combo scoring (user-requested) - feeds 'BANK RUSH'
                     // Bonus/multiplier subsystem (user-requested) - a cleared rollover bank is
                     // this game's "advance the bonus multiplier" shot, the traditional pinball
                     // role for a lit-lane bank. Capped at BONUS_MULTIPLIER_MAX, not reset by
@@ -4112,6 +4244,7 @@
                 const isLeft = meta.side === 'left';
                 addScore(SCORE_ORBIT);
                 if (isLeft) stats.leftOrbitShots++; else stats.rightOrbitShots++;
+                recordComboShot(isLeft ? 'orbitLeft' : 'orbitRight'); // combo scoring (user-requested) - feeds 'ORBIT SWITCH' and 'BANK RUSH'
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage((isLeft ? 'LEFT' : 'RIGHT') + ' ORBIT! +' + SCORE_ORBIT, 900);
                 triggerCameraShake(150, 0.006);
@@ -4203,6 +4336,7 @@
                         ballBonus.points = 0;
                         ballBonus.multiplierX = 1;
                         backglass.state.bonusMultiplierX = 1;
+                        resetCombos();
                     });
                 };
                 if (isPaused) {
@@ -4405,6 +4539,9 @@
             ballBonus.points = 0;
             ballBonus.multiplierX = 1;
             backglass.state.bonusMultiplierX = 1;
+            resetCombos();
+            stats.combosCompleted = 0;
+            stats.comboMaxTier = 0;
             // Rank/mission progression (improvement-prompts/05-*.md) is per-run state, same as
             // score/lives/stats above - resets on every new game, not a permanent meta-progression.
             mission.state = 'idle';
@@ -4518,7 +4655,9 @@
                 ['Vision Gate Captures', stats.visionGateCaptures],
                 ['Power-Ups Collected', stats.powerUpsCollected],
                 ['Target Bank Clears', stats.targetBankCompletions],
-                ['Lane Bank Clears', stats.laneBankCompletions]
+                ['Lane Bank Clears', stats.laneBankCompletions],
+                ['Combos', stats.combosCompleted],
+                ['Best Combo Tier', stats.comboMaxTier]
             ];
             statLines.forEach(([label, value]) => {
                 if (value > 0) {
