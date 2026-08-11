@@ -3492,6 +3492,12 @@ import {
         // tap can retry if fullscreen was exited mid-game.
         document.addEventListener('touchstart', () => requestFullscreenAndLock(), { passive: true });
 
+        // Bug fix (playtest audit): a second, undebounced `window.addEventListener('resize', ...)`
+        // used to sit right after the render loop below - a leftover from this file's very first
+        // version (Stage 2), predating setupResizeHandlers() entirely. It was never removed once
+        // that debounced handler existed, so every resize fired engine.resize() twice (once
+        // instantly there, once again 250ms later here) and skipped detectMobile() on the instant
+        // path. setupResizeHandlers() alone is correct and sufficient.
         setupResizeHandlers(engine);
         detectMobile(); // initial visibility check - also runs on every resize/orientation change above
 
@@ -4835,6 +4841,13 @@ import {
         let isPaused = false;
         let gameOverActive = false;
 
+        // Bug fix (repo audit): #loading-panel (index.html) is visible from the very first paint,
+        // with zero JS needed to reveal it - see its own CSS comment for why. This is the one
+        // point in main() that reliably means "the scene is actually ready to show the player
+        // something", so it's hidden here, right alongside #menu-overlay first appearing.
+        const loadingPanel = document.getElementById('loading-panel');
+        if (loadingPanel) loadingPanel.style.display = 'none';
+
         // --- Menu/title screen: shown until the first launch input, translucent so the idle
         // attract-mode camera (10-*.md) is visible behind it, matching the doc's explicit spec. ---
         document.getElementById('menu-highscore').textContent = 'HIGH SCORE: ' + backglass.state.highScore;
@@ -5360,7 +5373,6 @@ import {
 
             scene.render();
         });
-        window.addEventListener('resize', () => engine.resize());
 
         console.log('[SPIRITBALL 3D] Flippers + obstacle layout initialized.');
     }
