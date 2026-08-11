@@ -35,11 +35,18 @@ beyond an honest "not supported" message.
 
 ## Project structure
 
-- `index.html` / `babylon-game.js` — the game. Everything runs client-side, no framework.
+- `index.html` / `babylon-game.js` — the game. Everything runs client-side, no framework, no
+  build step — `babylon-game.js` is loaded as a native ES module (`<script type="module">`) and
+  imports `js/config.js` directly; still just static files, nothing to compile.
+- `js/config.js` — physics/scoring/geometry/timing constants and a few pure helper functions,
+  extracted out of `babylon-game.js` as the first step of an ongoing modularization effort — see
+  `MODULARIZATION.md` for what's done and the plan for the rest.
 - `vendor/babylonjs/` — self-hosted Babylon.js + Havok build artifacts (not loaded from a CDN —
   see `VENDORING.md` for why and how to update them).
 - `manifest.json` / `icons/` — PWA manifest and app icons.
 - `BABYLON_3D_OVERHAUL.md` — the 3D rewrite's architecture, decisions, and stage-by-stage status.
+- `MODULARIZATION.md` — the plan for splitting `babylon-game.js` into logical ES modules: what's
+  extracted so far, why, and the documented boundaries/order for what's left.
 - `babylon-prompts/` — the 13-stage implementation plan the 3D rewrite was built from, each with
   an implementation note documenting what was actually built and any real bugs found along the way.
 - `improvement-prompts/` — scoped, modular prompts for ongoing post-rewrite work (bug fixes and
