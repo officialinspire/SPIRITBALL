@@ -103,26 +103,58 @@
         }
     }
 
-    // Requires a user gesture, so this can't happen automatically on page load - called from the
-    // first touchstart anywhere (see main()). Failures are silently ignored (fullscreen can be
-    // denied by the browser; orientation lock isn't supported at all on iOS Safari) - a
-    // nice-to-have enhancement, never a requirement to play.
+    // Requires a user gesture, so this can't happen automatically on page load - called from
+    // every touchstart anywhere (see main()) until it actually succeeds. Failures are silently
+    // ignored (fullscreen can be denied by the browser; orientation lock isn't supported at all
+    // on iOS Safari) - a nice-to-have enhancement, never a requirement to play.
     function requestFullscreenAndLock() {
         if (fullscreenRequested) return;
         fullscreenRequested = true;
         const el = document.documentElement;
-        const requestFs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
         const lockPortrait = () => {
             if (screen.orientation && screen.orientation.lock) {
                 screen.orientation.lock('portrait').catch(() => {});
             }
         };
+        // Already running as an installed/standalone PWA (matchMedia covers Android/desktop;
+        // navigator.standalone covers iOS home-screen web apps) - the OS is already presenting
+        // this as a fullscreen app window, so calling the Fullscreen API here would be redundant
+        // (and on iOS standalone specifically, unsupported). Orientation lock is still worth
+        // attempting either way.
+        const alreadyStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+        if (alreadyStandalone) {
+            lockPortrait();
+            return;
+        }
+        const requestFs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
         if (requestFs) {
             Promise.resolve(requestFs.call(el)).then(lockPortrait).catch(() => {});
         } else {
             lockPortrait();
         }
     }
+
+    // If fullscreen is exited for any reason mid-game (a system gesture, the browser's own UI,
+    // the player backing out) - not just at page load - fullscreenRequested resets so the next
+    // touch anywhere retries entering it, instead of requestFullscreenAndLock() being a permanent
+    // no-op for the rest of the session after the very first attempt.
+    document.addEventListener('fullscreenchange', () => {
+        if (!document.fullscreenElement) fullscreenRequested = false;
+    });
+    document.addEventListener('webkitfullscreenchange', () => {
+        if (!document.webkitFullscreenElement) fullscreenRequested = false;
+    });
+
+    // vibrateDevice() accepts either a plain ms number (a single buzz) or an array (navigator.
+    // vibrate()'s native alternating vibrate/pause-ms pattern format) - callers below pass whichever
+    // shape fits. Differentiated haptics (user-requested), all deliberately short - a single quick
+    // tick for the two high-frequency events (every flipper flap, every bumper hit) and a brief
+    // two/three-pulse pattern for the two rare, celebratory ones, kept well under a few hundred ms
+    // total so none of them ever reads as a "long vibration."
+    const HAPTIC_FLIPPER_MS = 8;
+    const HAPTIC_BUMPER_MS = 18;
+    const HAPTIC_BALL_SAVE_PATTERN = [20, 60, 20];
+    const HAPTIC_MISSION_COMPLETE_PATTERN = [15, 40, 15, 40, 30];
 
     function vibrateDevice(ms) {
         if (navigator.vibrate) {
@@ -2254,8 +2286,13 @@
         // Only on the actual off->on transition - browser key-repeat fires keydown repeatedly
         // while a key is held, and this function has no other guard against being called many
         // times per real button press (updateFlipperMotor() handles that idempotently for the
-        // physics side, but a sound effect needs its own check to avoid replaying rapidly).
-        if (!flipper.active) playFlipperSound();
+        // physics side, but a sound effect needs its own check to avoid replaying rapidly). The
+        // haptic tick (touch input audit, user-requested) needs the exact same guard, for the
+        // exact same reason - one tick per real flap, not one per repeated event.
+        if (!flipper.active) {
+            playFlipperSound();
+            vibrateDevice(HAPTIC_FLIPPER_MS);
+        }
         flipper.active = true;
     }
 
@@ -3979,74 +4016,171 @@
             handleLaunchRelease();
         });
 
-        // --- Mobile controls (Stage 11, babylon-prompts/11-*.md) ---
+        // --- Mobile controls (Stage 11, babylon-prompts/11-*.md; touch input audit, user-requested) ---
         //
-        // DOM elements/CSS and event pattern ported directly from InputManager.setupMobileControls()
-        // in ../index.js (archive/release-prompts/14-*.md) - full-height arcade-style edge zones (tap
-        // ANYWHERE along the side, not a small button) plus a discrete round launch button, both
-        // wired with the same touchstart/touchend/touchcancel + mousedown/mouseup/mouseleave
-        // pattern for touch AND desktop-mouse testing. What changed from the 2D version: press/
-        // release call this file's own activateFlipper()/deactivateFlipper()/handleLaunchPress()/
-        // handleLaunchRelease() directly, instead of setting InputManager.state flags for a
-        // Phaser scene to poll every frame - there's no separate polling step here to slot into.
+        // DOM elements/CSS ported from InputManager.setupMobileControls() in ../index.js
+        // (archive/release-prompts/14-*.md) - full-height arcade-style edge zones (tap ANYWHERE
+        // along the side, not a small button) plus a discrete round launch button - unchanged by
+        // this audit (the doc explicitly asks to preserve them). The EVENT WIRING below replaces
+        // the original direct touchstart/touchend/touchcancel-per-element approach with an
+        // identifier-tracked model, for a handful of real gaps that approach had:
+        //
+        // 1. Two touches on the SAME zone (e.g. a stray second finger) - the original code called
+        //    deactivate on ANY touchend/touchcancel targeting that zone, so the first finger
+        //    lifting released the flipper even while a second finger was still holding it down.
+        //    Now every touch identifier is tracked individually per control, and a control only
+        //    releases once its last touch ends.
+        // 2. touchend/touchcancel were only listened for on each zone element specifically. Touch
+        //    events keep targeting the ORIGINAL element for the life of the touch even if the
+        //    finger moves elsewhere, so this usually worked - but listening once on window with
+        //    the identifier map above is simpler AND catches a cancellation the original per-zone
+        //    touchcancel might miss.
+        // 3. A finger dragged off the edge of the SCREEN (not just off the zone - genuinely
+        //    leaving the viewport) doesn't reliably fire touchend/touchcancel on every platform,
+        //    which could leave a flipper permanently "held". A window-level touchmove watches
+        //    every tracked touch's position and treats leaving the viewport bounds as a release.
+        // 4. Backgrounding the tab/app (another app, a notification, alt-tab) can strand a touch
+        //    mid-press with no DOM event at all - see forceReleaseAllControls()'s blur/
+        //    visibilitychange wiring right below this block.
         const leftZone = document.getElementById('flipper-zone-left');
-        const leftFlipperStart = (e) => {
-            e.preventDefault();
+        const rightZone = document.getElementById('flipper-zone-right');
+        const launchBtn = document.getElementById('launch-btn');
+
+        function pressLeft() {
             if (!leftFlipper.active) rotateLaneLamps(-1); // "lane change" - see the keydown handler's comment
             activateFlipper(leftFlipper);
             leftZone.classList.add('pressed');
-        };
-        const leftFlipperEnd = (e) => {
-            e.preventDefault();
+        }
+        function releaseLeft() {
             deactivateFlipper(leftFlipper);
             leftZone.classList.remove('pressed');
-        };
-        leftZone.addEventListener('touchstart', leftFlipperStart, { passive: false });
-        leftZone.addEventListener('touchend', leftFlipperEnd, { passive: false });
-        leftZone.addEventListener('touchcancel', leftFlipperEnd, { passive: false });
-        leftZone.addEventListener('mousedown', leftFlipperStart);
-        leftZone.addEventListener('mouseup', leftFlipperEnd);
-        leftZone.addEventListener('mouseleave', leftFlipperEnd);
-
-        const rightZone = document.getElementById('flipper-zone-right');
-        const rightFlipperStart = (e) => {
-            e.preventDefault();
+        }
+        function pressRight() {
             if (!rightFlipper.active) rotateLaneLamps(1); // "lane change" - see the keydown handler's comment
             activateFlipper(rightFlipper);
             rightZone.classList.add('pressed');
-        };
-        const rightFlipperEnd = (e) => {
-            e.preventDefault();
+        }
+        function releaseRight() {
             deactivateFlipper(rightFlipper);
             rightZone.classList.remove('pressed');
-        };
-        rightZone.addEventListener('touchstart', rightFlipperStart, { passive: false });
-        rightZone.addEventListener('touchend', rightFlipperEnd, { passive: false });
-        rightZone.addEventListener('touchcancel', rightFlipperEnd, { passive: false });
-        rightZone.addEventListener('mousedown', rightFlipperStart);
-        rightZone.addEventListener('mouseup', rightFlipperEnd);
-        rightZone.addEventListener('mouseleave', rightFlipperEnd);
-
-        const launchBtn = document.getElementById('launch-btn');
-        const launchStart = (e) => {
-            e.preventDefault();
+        }
+        function pressLaunch() {
             handleLaunchPress();
             launchBtn.classList.add('pressed');
-        };
-        const launchEnd = (e) => {
-            e.preventDefault();
+        }
+        function releaseLaunch() {
             handleLaunchRelease();
             launchBtn.classList.remove('pressed');
-        };
-        launchBtn.addEventListener('touchstart', launchStart, { passive: false });
-        launchBtn.addEventListener('touchend', launchEnd, { passive: false });
-        launchBtn.addEventListener('touchcancel', launchEnd, { passive: false });
-        launchBtn.addEventListener('mousedown', launchStart);
-        launchBtn.addEventListener('mouseup', launchEnd);
+        }
+        const CONTROL_PRESS = { left: pressLeft, right: pressRight, launch: pressLaunch };
+        const CONTROL_RELEASE = { left: releaseLeft, right: releaseRight, launch: releaseLaunch };
+
+        // touch identifier -> which control it's holding down, plus a live count per control -
+        // together these are the single source of truth for "is this control actually pressed
+        // right now", replacing the original code's implicit "last touchend on this element wins"
+        // assumption. Very rapid alternating presses stay correct under this model too: each
+        // touchstart/touchend pair is matched by identifier, not by ordering assumptions, so a
+        // fast left-right-left-right sequence can never cross-cancel the wrong zone.
+        const touchIdToControl = new Map();
+        const controlTouchCounts = { left: 0, right: 0, launch: 0 };
+
+        function trackTouchStart(control, touchList) {
+            for (const touch of touchList) {
+                if (touchIdToControl.has(touch.identifier)) continue; // defensive - shouldn't normally happen
+                touchIdToControl.set(touch.identifier, control);
+                controlTouchCounts[control]++;
+                if (controlTouchCounts[control] === 1) CONTROL_PRESS[control]();
+            }
+        }
+
+        // Shared release path for touchend, touchcancel, AND a tracked touch whose position has
+        // left the viewport (see the touchmove listener below) - all three mean "this finger no
+        // longer counts as a press" and must be handled identically so a control can never get
+        // stuck active from one of them being missed.
+        function trackTouchEnd(touchList) {
+            for (const touch of touchList) {
+                const control = touchIdToControl.get(touch.identifier);
+                if (!control) continue;
+                touchIdToControl.delete(touch.identifier);
+                controlTouchCounts[control] = Math.max(0, controlTouchCounts[control] - 1);
+                if (controlTouchCounts[control] === 0) CONTROL_RELEASE[control]();
+            }
+        }
+
+        leftZone.addEventListener('touchstart', (e) => { e.preventDefault(); trackTouchStart('left', e.changedTouches); }, { passive: false });
+        rightZone.addEventListener('touchstart', (e) => { e.preventDefault(); trackTouchStart('right', e.changedTouches); }, { passive: false });
+        launchBtn.addEventListener('touchstart', (e) => { e.preventDefault(); trackTouchStart('launch', e.changedTouches); }, { passive: false });
+
+        // Window-level, not per-zone: touch events keep bubbling from whichever element actually
+        // received the touchstart regardless of where the finger ends up, so one listener per
+        // event type correctly covers all three controls (point 2 above).
+        window.addEventListener('touchend', (e) => trackTouchEnd(e.changedTouches), { passive: true });
+        window.addEventListener('touchcancel', (e) => trackTouchEnd(e.changedTouches), { passive: true });
+        // Leaving-the-viewport detection (point 3 above) - purely a coordinate read, never calls
+        // preventDefault, so this stays passive for scroll/composite performance.
+        window.addEventListener('touchmove', (e) => {
+            for (const touch of e.changedTouches) {
+                if (!touchIdToControl.has(touch.identifier)) continue;
+                if (touch.clientX < 0 || touch.clientX > window.innerWidth || touch.clientY < 0 || touch.clientY > window.innerHeight) {
+                    trackTouchEnd([touch]);
+                }
+            }
+        }, { passive: true });
+
+        // Desktop-mouse testing path - no multi-touch concerns, so this stays the original direct
+        // press/release wiring (not routed through the touch-identifier tracking above).
+        leftZone.addEventListener('mousedown', pressLeft);
+        leftZone.addEventListener('mouseup', releaseLeft);
+        leftZone.addEventListener('mouseleave', releaseLeft);
+        rightZone.addEventListener('mousedown', pressRight);
+        rightZone.addEventListener('mouseup', releaseRight);
+        rightZone.addEventListener('mouseleave', releaseRight);
+        launchBtn.addEventListener('mousedown', pressLaunch);
+        launchBtn.addEventListener('mouseup', releaseLaunch);
+
+        // Safety net (touch input audit, user-requested) for focus/visibility changes: backgrounding
+        // the tab/app (another app, a notification, an OS gesture, alt-tab) can strand a touch
+        // mid-press with no touchend/touchcancel ever firing, since the finger physically lifts
+        // while this page isn't receiving events at all. Force-releasing every tracked control (and
+        // cancelling an in-progress plunger charge, which has the exact same "silently stuck"
+        // failure mode) whenever the page is hidden or loses focus guarantees nothing can come back
+        // from the background still holding a flipper or mid-charge. Also pauses the game itself via
+        // the existing openPauseMenu() - already a correct, safe stopped state, and its own guard
+        // (isPaused/gameOverActive/menuOverlay checks) makes this a harmless no-op when a pause
+        // wouldn't make sense (menu screen, already paused, game over).
+        function forceReleaseAllControls() {
+            touchIdToControl.clear();
+            controlTouchCounts.left = 0;
+            controlTouchCounts.right = 0;
+            controlTouchCounts.launch = 0;
+            deactivateFlipper(leftFlipper);
+            deactivateFlipper(rightFlipper);
+            leftZone.classList.remove('pressed');
+            rightZone.classList.remove('pressed');
+            launchBtn.classList.remove('pressed');
+            if (plungerCharging) {
+                plungerCharging = false;
+                plungerChargeElapsedMs = 0;
+                plungerPower = PLUNGER_MIN_POWER_MS;
+                plunger.chargePercent = 0;
+            }
+        }
+        window.addEventListener('blur', () => {
+            forceReleaseAllControls();
+            openPauseMenu();
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                forceReleaseAllControls();
+                openPauseMenu();
+            }
+        });
 
         // Fullscreen + portrait-lock request on the player's first touch anywhere (needs a user
-        // gesture - can't happen automatically on load).
-        document.addEventListener('touchstart', () => requestFullscreenAndLock(), { once: true, passive: true });
+        // gesture - can't happen automatically on load). Not {once: true} - requestFullscreenAndLock()
+        // guards itself, and resets that guard on fullscreenchange (see its own comment), so a later
+        // tap can retry if fullscreen was exited mid-game.
+        document.addEventListener('touchstart', () => requestFullscreenAndLock(), { passive: true });
 
         setupResizeHandlers(engine);
         detectMobile(); // initial visibility check - also runs on every resize/orientation change above
@@ -4542,6 +4676,7 @@
             triggerCameraShake(500, 0.01);
             triggerCameraPunch(500, new BABYLON.Vector3(0, 0.02, -0.03));
             playRankUpSound();
+            vibrateDevice(HAPTIC_MISSION_COMPLETE_PATTERN); // differentiated haptics (user-requested) - a short multi-pulse "fanfare", distinct from every single-tick haptic elsewhere
             // Drop-target bank reset (user-requested upgrade) - a mission completing is one of
             // the transitions the bank is required to reset on, regardless of which targets are
             // currently down (a target dropped toward this mission doesn't need to stay down once
@@ -4980,6 +5115,7 @@
                 backglass.showMessage('+' + points, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
                 triggerCameraShake(130, meta.boss ? 0.009 : 0.007); // was 120/0.008/0.006 - a bit stronger, matching the new active-kick feel
                 playBumperSound(meta.boss); // pop-bumper solenoid layer, distinct from the generic playHitSound()
+                vibrateDevice(HAPTIC_BUMPER_MS); // differentiated haptics (user-requested) - a touch punchier tick than the flipper's, matching the punchier sound/shake above
                 progressMission('bumper');
             } else if (meta.kind === 'comet') {
                 setCooldown(mesh, COOLDOWN_COMET_MS);
@@ -5280,6 +5416,7 @@
                 // flashScreen() at all - this is good news, not a punishment.
                 triggerCameraShake(200, 0.004);
                 playBallSaveSound();
+                vibrateDevice(HAPTIC_BALL_SAVE_PATTERN); // differentiated haptics (user-requested) - a two-pulse "saved!" blip, distinct from mission complete's three-pulse fanfare
                 setTimeout(() => {
                     const action = () => {
                         backglass.redraw();
