@@ -2632,10 +2632,11 @@
         // Unlit state: dim yellow-ish neutral (no direct 2D equivalent - the 2D lanes start
         // unlit/grey and only take on a color once hit). Lit state (CONFIG.colors.missionActive,
         // green) is applied per-lane in handleTriggerHit() in main(), matching hitReentryLane()'s
-        // persistent lane.setFillStyle() recoloring in ../index.js, not just a brief pulse. Rollover-
-        // lane bank upgrade: these two Color3 pairs are also reused verbatim by setLaneLit() in
-        // main() to un-light a lane back to this exact rest look on resetLaneBank() - the values
-        // must stay in sync between the two spots.
+        // persistent lane.setFillStyle() recoloring in ../index.js, not just a brief pulse.
+        // albedoColor stays fixed at this rest look forever - only emissiveColor ever changes, via
+        // the centralized lamp system (setLaneLit() in main(), registered as lamp id
+        // 'reentryLane'+i), the same emissive-only on/off convention every other lamp in this file
+        // already uses.
         const reentryLaneMeshes = [];
         REENTRY_LANES.forEach((pos, i) => {
             const laneMat = new BABYLON.PBRMaterial('laneMat' + i, scene);
@@ -2643,7 +2644,6 @@
             laneMat.metallic = 0.1;
             laneMat.roughness = 0.4;
             laneMat.alpha = 0.6;
-            laneMat.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.05);
 
             const mesh = BABYLON.MeshBuilder.CreateBox('reentryLane' + i, {
                 width: REENTRY_LANE_RADIUS_M * 2,
@@ -2674,6 +2674,7 @@
 
         // Lower-table inlanes/outlanes - see SIDE_LANES' block comment (near its declaration) for
         // the full layout reasoning and the real-scene-measured geometry it's based on.
+        const sideLaneLampMeshes = [];
         SIDE_LANES.forEach((laneDef) => {
             const mirror = laneDef.mirror;
             const dividerX = mirror * LANE_DIVIDER_X_M;
@@ -2752,7 +2753,6 @@
                 lampMat.albedoColor = COLOR_LANE_LAMP.scale(0.3);
                 lampMat.metallic = 0.2;
                 lampMat.roughness = 0.4;
-                lampMat.emissiveColor = COLOR_LANE_LAMP.scale(0.12); // faint glow at rest, like a real backlit-but-unlit insert
                 const lamp = BABYLON.MeshBuilder.CreateCylinder(laneKind.kind + 'Lamp' + laneDef.side, {
                     diameterTop: LANE_TRIGGER_WIDTH_M * 0.6,
                     diameterBottom: LANE_TRIGGER_WIDTH_M * 0.6,
@@ -2760,6 +2760,10 @@
                 }, scene);
                 lamp.position.set(laneKind.x, 0.011, LANE_TRIGGER_Z_M);
                 lamp.material = lampMat;
+                // Lamp system id (registered in main()) - kind+side, e.g. 'inlaneLeft' - unique
+                // per lane/side combination, matching the naming every other lamp id in this file uses.
+                const lampId = laneKind.kind + (laneDef.side === 'left' ? 'Left' : 'Right');
+                sideLaneLampMeshes.push({ id: lampId, mesh: lamp });
 
                 const triggerMat = new BABYLON.PBRMaterial(laneKind.kind + 'TriggerMat' + laneDef.side, scene);
                 triggerMat.albedoColor = laneKind.debugColor;
@@ -2773,7 +2777,7 @@
                 trigger.position.set(laneKind.x, 0.01, LANE_TRIGGER_Z_M);
                 trigger.material = triggerMat;
                 trigger.isVisible = devMode;
-                trigger.metadata = { kind: laneKind.kind, side: laneDef.side, lamp };
+                trigger.metadata = { kind: laneKind.kind, side: laneDef.side, lampId };
                 const aggregate = new BABYLON.PhysicsAggregate(trigger, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
                 aggregate.shape.isTrigger = true;
             });
@@ -2860,6 +2864,7 @@
         // (capped by end posts, same visual language as the inlane/outlane divider above) running
         // alongside the existing mission-target-bank/comet, plus an entrance and a completion
         // rollover trigger with their own lamp inserts.
+        const orbitLampMeshes = [];
         ORBITS.forEach((orbitDef) => {
             // Same empirically-derived rotation formula as the inlane guide above (see its own
             // comment for how rotationY = atan2(-dz, dx) was verified against this exact Babylon
@@ -2912,7 +2917,6 @@
                 lampMat.albedoColor = COLOR_ORBIT_LAMP.scale(0.3);
                 lampMat.metallic = 0.2;
                 lampMat.roughness = 0.4;
-                lampMat.emissiveColor = COLOR_ORBIT_LAMP.scale(0.12);
                 const lamp = BABYLON.MeshBuilder.CreateCylinder(triggerDef.kind + 'Lamp' + orbitDef.side, {
                     diameterTop: ORBIT_TRIGGER_WIDTH_M * 0.6,
                     diameterBottom: ORBIT_TRIGGER_WIDTH_M * 0.6,
@@ -2920,6 +2924,9 @@
                 }, scene);
                 lamp.position.set(triggerDef.x, 0.011, triggerDef.z);
                 lamp.material = lampMat;
+                // Lamp system id (registered in main()) - kind+side, e.g. 'orbitEntranceLeft'.
+                const lampId = triggerDef.kind + (orbitDef.side === 'left' ? 'Left' : 'Right');
+                orbitLampMeshes.push({ id: lampId, mesh: lamp });
 
                 const triggerMat = new BABYLON.PBRMaterial(triggerDef.kind + 'TriggerMat' + orbitDef.side, scene);
                 triggerMat.albedoColor = triggerDef.debugColor;
@@ -2933,7 +2940,7 @@
                 trigger.position.set(triggerDef.x, 0.01, triggerDef.z);
                 trigger.material = triggerMat;
                 trigger.isVisible = devMode;
-                trigger.metadata = { kind: triggerDef.kind, side: orbitDef.side, lamp };
+                trigger.metadata = { kind: triggerDef.kind, side: orbitDef.side, lampId };
                 const aggregate = new BABYLON.PhysicsAggregate(trigger, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
                 aggregate.shape.isTrigger = true;
             });
@@ -3249,11 +3256,14 @@
         topTrim.material = housingMat;
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
-        // Saturn's rings every frame, drive the power-up orb's spawn/despawn cycle, and run the
+        // Saturn's rings every frame, drive the power-up orb's spawn/despawn cycle, run the
         // Vision Gate's own capture sequence against a direct mesh reference (the ring, not the
-        // trigger - the ring is what's actually visible and worth flashing/sparkling).
+        // trigger - the ring is what's actually visible and worth flashing/sparkling), and
+        // register every lamp mesh (sideLaneLampMeshes/orbitLampMeshes: {id, mesh} pairs, the rest:
+        // plain mesh arrays/refs) against the centralized lamp system (see createLampSystem()).
         return {
             missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
+            sideLaneLampMeshes, orbitLampMeshes,
             kickbackLampMesh, ballSaveLampMesh, saturnRings, powerUpMesh, visionGateMesh: ring
         };
     }
@@ -3273,6 +3283,136 @@
         const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
         aggregate.shape.isTrigger = true;
         return mesh;
+    }
+
+    // ===================================
+    // Centralized playfield-lamp system (user-requested) - a small, reusable state layer so
+    // gameplay code never mutates a lamp mesh's material directly. Every lamp insert in the game
+    // (mission targets, re-entry lanes, inlanes, outlanes, orbits, the Vision Gate, the
+    // score-multiplier orb, ball save, kickback) registers itself once against its own
+    // already-existing per-instance material - see buildObstacles()'s per-instance-clone
+    // convention every one of those meshes already follows, this system never allocates a new
+    // material itself - and after that, gameplay code only ever calls setLampMode(id, mode) or
+    // flashLamp(id, ...) by ID. updateLamps(), called once per frame from the render loop, is the
+    // only place that actually drives BLINK/PULSE animation or an in-flight flash; OFF/ON/LOCKED
+    // are fully static and cost nothing per frame beyond one comparison per lamp. No Color3 or
+    // material is ever allocated here, at registration or per frame - only the scratch Color3
+    // below and each lamp's own pre-existing emissiveColor are mutated in place (scaleToRef).
+    //
+    // Deliberately one-directional: this registry is pure VISUAL state, never gameplay state.
+    // dropTargetBank[i].dropped, laneBank[i].lit, kickback.active, ballSave.active, skillShot.
+    // active, powerUp.active all stay exactly where they already lived, as the sole source of
+    // truth - this system only ever gets told about a change after the fact, from the same
+    // handful of call sites that already flip those flags.
+    // ===================================
+    const LAMP_MODE = { OFF: 'off', ON: 'on', BLINK: 'blink', PULSE: 'pulse', LOCKED: 'locked' };
+    const LAMP_DIM_SCALE = 0.12; // matches this file's pre-existing "faint glow at rest" convention (every lamp's original unlit emissive)
+    const LAMP_LIT_SCALE = 0.9; // matches this file's pre-existing "lit" convention
+    const LAMP_LOCKED_SCALE = 0.5; // a new, distinct fixed brightness - reads as "done", not just "off" or "on"
+    const LAMP_BLINK_PERIOD_MS = 300; // one on/off half-period
+    const LAMP_PULSE_PERIOD_MS = 1100; // one full sine cycle
+    // Slowed, not eliminated under reduced motion - same treatment updateSaturnRotation() already
+    // gives purely ambient motion, applied here to a gameplay-meaningful blink/pulse instead. A
+    // lamp's state is real information (a window's open, a shot is ready), so it stays legible,
+    // just at a calmer, well-under-3Hz rate rather than removed outright.
+    const LAMP_REDUCED_MOTION_PERIOD_SCALE = 2.5;
+
+    function createLampSystem() {
+        const lamps = new Map();
+        const scratch = new BABYLON.Color3(); // reused every frame - values only ever copied OUT of it, never held onto
+
+        function applyBrightness(lamp, brightness) {
+            scratch.copyFrom(lamp.flashColor || lamp.baseColor);
+            scratch.scaleToRef(brightness, lamp.material.emissiveColor);
+        }
+
+        // Renders a lamp's current mode immediately - used at registration and for every static
+        // mode change (OFF/ON/LOCKED). BLINK/PULSE deliberately fall through to a dim resting look
+        // here; their real per-frame animation only starts once updateLamps() next ticks.
+        function applyMode(lamp) {
+            if (lamp.mode === LAMP_MODE.ON) applyBrightness(lamp, lamp.litScale);
+            else if (lamp.mode === LAMP_MODE.LOCKED) applyBrightness(lamp, lamp.lockedScale);
+            else applyBrightness(lamp, lamp.dimScale);
+        }
+
+        // opts optionally overrides this one lamp's dim/lit/locked brightness scale (e.g. the
+        // Vision Gate, whose rest look predates this system and doesn't distinguish dim/lit at
+        // all) - every other lamp just takes the shared LAMP_*_SCALE constants above.
+        function registerLamp(id, mesh, baseColor, mode, opts) {
+            opts = opts || {};
+            const lamp = {
+                material: mesh.material,
+                baseColor,
+                mode: mode || LAMP_MODE.OFF,
+                dimScale: opts.dimScale !== undefined ? opts.dimScale : LAMP_DIM_SCALE,
+                litScale: opts.litScale !== undefined ? opts.litScale : LAMP_LIT_SCALE,
+                lockedScale: opts.lockedScale !== undefined ? opts.lockedScale : LAMP_LOCKED_SCALE,
+                phase: Math.random() * 1000, // desyncs same-mode lamps so a whole bank doesn't blink/pulse in lockstep
+                flashUntilMs: 0,
+                flashColor: null
+            };
+            lamps.set(id, lamp);
+            applyMode(lamp);
+        }
+
+        // id must already be registered - every call site owns a fixed, known set of lamp ids
+        // (see the registration block in main()), so a missing id here is a real bug, not a
+        // routine "might not exist yet" case worth silently no-oping.
+        function setLampMode(id, mode) {
+            const lamp = lamps.get(id);
+            lamp.mode = mode;
+            if (mode !== LAMP_MODE.BLINK && mode !== LAMP_MODE.PULSE) applyMode(lamp);
+        }
+
+        // One-shot brief brightening on top of whatever persistent mode is already set (hit
+        // feedback - a rollover/orbit lamp flashing bright for a beat), reverting cleanly back to
+        // that mode's own steady look once it expires. Driven by the same nowMs tick as
+        // everything else here instead of an independent setTimeout, so it can never fire while
+        // paused/backgrounded and leave a lamp stuck bright.
+        function flashLamp(id, durationMs, color) {
+            const lamp = lamps.get(id);
+            lamp.flashColor = color || null;
+            lamp.flashUntilMs = performance.now() + durationMs;
+        }
+
+        // Called once per frame from the render loop. Cheap: every lamp gets one flash-expiry
+        // comparison, and only lamps currently in BLINK/PULSE (or mid-flash) do any further work -
+        // the rest (the vast majority - OFF/ON/LOCKED) are already-correct static materials this
+        // tick touches but doesn't change.
+        function updateLamps(nowMs) {
+            const reducedMotion = window.SPIRITBALL_reducedMotion;
+            const blinkPeriod = reducedMotion ? LAMP_BLINK_PERIOD_MS * LAMP_REDUCED_MOTION_PERIOD_SCALE : LAMP_BLINK_PERIOD_MS;
+            const pulsePeriod = reducedMotion ? LAMP_PULSE_PERIOD_MS * LAMP_REDUCED_MOTION_PERIOD_SCALE : LAMP_PULSE_PERIOD_MS;
+
+            lamps.forEach((lamp) => {
+                if (lamp.flashUntilMs > nowMs) {
+                    applyBrightness(lamp, 1);
+                    return;
+                }
+                if (lamp.flashUntilMs !== 0) {
+                    lamp.flashUntilMs = 0;
+                    lamp.flashColor = null;
+                    // Restores the static OFF/ON/LOCKED look immediately - those modes otherwise
+                    // never get re-rendered here (see the comment at the bottom of this loop), so
+                    // without this a lamp that flashed while static would stay stuck bright
+                    // forever. Harmless if the mode turns out to be BLINK/PULSE instead - the
+                    // branches below immediately overwrite it again in this same tick.
+                    applyMode(lamp);
+                }
+                if (lamp.mode === LAMP_MODE.BLINK) {
+                    const on = Math.floor((nowMs + lamp.phase) / blinkPeriod) % 2 === 0;
+                    applyBrightness(lamp, on ? lamp.litScale : lamp.dimScale);
+                } else if (lamp.mode === LAMP_MODE.PULSE) {
+                    const t = ((nowMs + lamp.phase) % pulsePeriod) / pulsePeriod;
+                    const wave = (Math.sin(t * Math.PI * 2) + 1) / 2; // 0..1
+                    applyBrightness(lamp, lamp.dimScale + wave * (lamp.litScale - lamp.dimScale));
+                }
+                // OFF/ON/LOCKED are static and already applied by setLampMode()/registerLamp() -
+                // nothing else to do for them here.
+            });
+        }
+
+        return { registerLamp, setLampMode, flashLamp, updateLamps };
     }
 
     async function main() {
@@ -3336,6 +3476,40 @@
         const attractCamera = buildAttractCamera(scene);
         scene.activeCamera = attractCamera; // idle/attract mode until the first launch input - see endAttractMode()
         const obstacles = buildObstacles(scene);
+
+        // Centralized playfield-lamp system (user-requested) - see createLampSystem()'s own block
+        // comment for the full design. Every lamp mesh built in buildObstacles() registers here,
+        // once, by a fixed string id; every gameplay call site below only ever refers to a lamp by
+        // that id from this point on, never its mesh/material directly.
+        const lampSystem = createLampSystem();
+        obstacles.missionTargetLamps.forEach((mesh, i) => {
+            lampSystem.registerLamp('missionTarget' + i, mesh, COLOR_CHAKRA[i % COLOR_CHAKRA.length], LAMP_MODE.ON);
+        });
+        obstacles.reentryLaneMeshes.forEach((mesh, i) => {
+            lampSystem.registerLamp('reentryLane' + i, mesh, COLOR_MISSION_ACTIVE, LAMP_MODE.OFF);
+        });
+        obstacles.sideLaneLampMeshes.forEach((entry) => {
+            lampSystem.registerLamp(entry.id, entry.mesh, COLOR_LANE_LAMP, LAMP_MODE.OFF);
+        });
+        obstacles.orbitLampMeshes.forEach((entry) => {
+            lampSystem.registerLamp(entry.id, entry.mesh, COLOR_ORBIT_LAMP, LAMP_MODE.OFF);
+        });
+        obstacles.skillShotLampMeshes.forEach((mesh, i) => {
+            lampSystem.registerLamp('skillShot' + i, mesh, COLOR_SKILL_SHOT_LAMP, LAMP_MODE.OFF);
+        });
+        lampSystem.registerLamp('ballSave', obstacles.ballSaveLampMesh, COLOR_BALL_SAVE_LAMP, LAMP_MODE.OFF);
+        lampSystem.registerLamp('kickback', obstacles.kickbackLampMesh, COLOR_KICKBACK_LAMP, LAMP_MODE.OFF);
+        // litScale:1 matches the multiplier orb's own always-fully-bright-while-visible material
+        // (powerUpMat.emissiveColor starts at (1,1,1) in buildObstacles()) - PULSE then sweeps it
+        // between the shared dim rest scale and this full brightness while it's spawned/collectible.
+        lampSystem.registerLamp('multiplier', obstacles.powerUpMesh, new BABYLON.Color3(1, 1, 1), LAMP_MODE.OFF, { litScale: 1 });
+        // dimScale/litScale/lockedScale all pinned to 0.4 - the Vision Gate's own pre-existing rest
+        // brightness (COLOR_VISION_GATE.scale(0.4)), which doesn't distinguish "off" from "on" the
+        // way every other lamp here does. LOCKED is used only to freeze this lamp under the
+        // system's own control while startVisionGateColorCycle()'s bespoke sequence drives the same
+        // material directly during a capture.
+        lampSystem.registerLamp('visionGate', obstacles.visionGateMesh, COLOR_VISION_GATE, LAMP_MODE.ON, { dimScale: 0.4, litScale: 0.4, lockedScale: 0.4 });
+
         buildLaunchLane(scene);
         buildDrainZone(scene);
         const backglass = buildBackglass(scene);
@@ -4148,6 +4322,7 @@
         function collectPowerUp() {
             powerUp.active = false;
             obstacles.powerUpMesh.setEnabled(false);
+            lampSystem.setLampMode('multiplier', LAMP_MODE.OFF);
             powerUp.timerMs = POWERUP_SPAWN_INTERVAL_MS;
             scoreMultiplier = POWERUP_MULTIPLIER;
             powerUp.multiplierRemainingMs = POWERUP_MULTIPLIER_DURATION_MS;
@@ -4174,11 +4349,13 @@
                 if (powerUp.timerMs <= 0) {
                     powerUp.active = false;
                     obstacles.powerUpMesh.setEnabled(false);
+                    lampSystem.setLampMode('multiplier', LAMP_MODE.OFF);
                     powerUp.timerMs = POWERUP_SPAWN_INTERVAL_MS;
                 }
             } else if (powerUp.timerMs <= 0) {
                 powerUp.active = true;
                 obstacles.powerUpMesh.setEnabled(true);
+                lampSystem.setLampMode('multiplier', LAMP_MODE.PULSE);
                 powerUp.timerMs = POWERUP_ACTIVE_DURATION_MS;
             }
         }
@@ -4232,6 +4409,10 @@
             // below deliberately treats more strictly.
             glowLayer.intensity = restGlowIntensity + 0.4;
 
+            // LOCKED freezes the lamp system's own control of this material - startVisionGateColorCycle()
+            // below drives obstacles.visionGateMesh.material.emissiveColor directly for the
+            // duration of the capture, and LOCKED guarantees updateLamps() never fights it.
+            lampSystem.setLampMode('visionGate', LAMP_MODE.LOCKED);
             startVisionGateColorCycle();
 
             setTimeout(() => {
@@ -4272,7 +4453,7 @@
         function endVisionGateCapture() {
             visionGate.colorTimers.forEach(clearTimeout);
             visionGate.colorTimers = [];
-            obstacles.visionGateMesh.material.emissiveColor = COLOR_VISION_GATE.scale(0.4);
+            lampSystem.setLampMode('visionGate', LAMP_MODE.ON); // hands control back from the capture's own bespoke color-cycle to the lamp system's normal rest look
             glowLayer.intensity = restGlowIntensity;
 
             if (visionGate.sparkle) {
@@ -4510,35 +4691,6 @@
             }, 90);
         }
 
-        // Brightens a lamp insert (inlane/outlane or orbit entrance/completion) to `color` on a
-        // rollover, then fades back to the dim at-rest glow set in buildObstacles() - kept as a
-        // simple standalone flash (unlike the reentry lanes' persistent lit-green recolor - a
-        // deliberately different, mission-tied mechanic, see SIDE_LANES' block comment) since a
-        // rollover here isn't tied to any ongoing state that should stay visibly "on". Shared by
-        // both lamp-bearing features (see flashLaneLamp()'s/orbit triggers' call sites) rather
-        // than duplicated per-feature - the color and flash duration are the only real differences.
-        function flashLamp(lamp, color, durationMs = 220) {
-            const mat = lamp.material;
-            const originalEmissive = mat.emissiveColor.clone();
-            mat.emissiveColor = color.clone();
-            setTimeout(() => {
-                if (!lamp.isDisposed()) mat.emissiveColor.copyFrom(originalEmissive);
-            }, durationMs);
-        }
-
-        function flashLaneLamp(lamp) {
-            flashLamp(lamp, COLOR_LANE_LAMP);
-        }
-
-        // Persistent (not a fade-back flash like flashLamp() above) lit/dim state for a mission
-        // target's own indicator lamp - matches the requirement that each drop target carry its
-        // own state light, independent of the flag mesh's own drop animation.
-        function setMissionTargetLampLit(index, lit) {
-            const lampMat = obstacles.missionTargetLamps[index].material;
-            const color = COLOR_CHAKRA[index % COLOR_CHAKRA.length];
-            lampMat.emissiveColor = lit ? color.scale(0.9) : color.scale(0.12);
-        }
-
         // Marks a target dropped (the real trigger/collision gate, checked in handleTriggerHit()
         // below) and starts its visual sink - see dropTargetBank's own block comment above for why
         // these are two separate pieces of state rather than one. The trigger volume itself never
@@ -4547,7 +4699,7 @@
             const target = dropTargetBank[index];
             target.dropped = true;
             target.animMs = TARGET_DROP_ANIM_MS;
-            setMissionTargetLampLit(index, false);
+            lampSystem.setLampMode('missionTarget' + index, LAMP_MODE.LOCKED);
         }
 
         // Pops every target in the bank back up and relights its lamp - instant, not animated,
@@ -4561,7 +4713,7 @@
                 target.dropped = false;
                 target.animMs = 0;
                 obstacles.missionTargetMeshes[i].position.y = TARGET_RAISED_Y_M;
-                setMissionTargetLampLit(i, true);
+                lampSystem.setLampMode('missionTarget' + i, LAMP_MODE.ON);
             });
         }
 
@@ -4579,17 +4731,9 @@
             });
         }
 
-        // Recolors one re-entry lane to its lit or unlit rest look - the same two Color3 pairs
-        // buildObstacles() sets at construction time (see its comment there; must stay in sync).
+        // Recolors one re-entry lane to its lit or unlit rest look, via the centralized lamp system.
         function setLaneLit(index, lit) {
-            const mat = obstacles.reentryLaneMeshes[index].material;
-            if (lit) {
-                mat.albedoColor = COLOR_MISSION_ACTIVE;
-                mat.emissiveColor = COLOR_MISSION_ACTIVE.scale(0.5);
-            } else {
-                mat.albedoColor = new BABYLON.Color3(0.5, 0.5, 0.15);
-                mat.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.05);
-            }
+            lampSystem.setLampMode('reentryLane' + index, lit ? LAMP_MODE.ON : LAMP_MODE.OFF);
         }
 
         // Un-lights every lane for another cycle - called after LANE_BANK_RESET_DELAY_MS from a
@@ -4683,9 +4827,11 @@
             comboStreak.lastAtMs = 0;
         }
 
+        // BLINK while active - a real "shoot now" window, matching a classic machine's blinking
+        // time-limited insert rather than a plain steady light.
         function setSkillShotLampsLit(lit) {
-            obstacles.skillShotLampMeshes.forEach((lamp) => {
-                lamp.material.emissiveColor = lit ? COLOR_SKILL_SHOT_LAMP.scale(0.9) : COLOR_SKILL_SHOT_LAMP.scale(0.12);
+            obstacles.skillShotLampMeshes.forEach((_, i) => {
+                lampSystem.setLampMode('skillShot' + i, lit ? LAMP_MODE.BLINK : LAMP_MODE.OFF);
             });
         }
 
@@ -4739,8 +4885,9 @@
             if (skillShot.remainingMs <= 0) endSkillShot();
         }
 
+        // BLINK while active - a real time-limited window, same reasoning as the skill-shot lamps.
         function setBallSaveLampLit(lit) {
-            obstacles.ballSaveLampMesh.material.emissiveColor = lit ? COLOR_BALL_SAVE_LAMP.scale(0.9) : COLOR_BALL_SAVE_LAMP.scale(0.12);
+            lampSystem.setLampMode('ballSave', lit ? LAMP_MODE.BLINK : LAMP_MODE.OFF);
         }
 
         // Called once per launch (handleLaunchRelease()) - see ballSave's own block comment for
@@ -4766,8 +4913,10 @@
             }
         }
 
+        // Steady ON, not BLINK - unlike ball save/skill shot, kickback isn't time-boxed; it stays
+        // armed until actually used, so a blink would misleadingly suggest it's about to expire.
         function setKickbackLampLit(lit) {
-            obstacles.kickbackLampMesh.material.emissiveColor = lit ? COLOR_KICKBACK_LAMP.scale(0.9) : COLOR_KICKBACK_LAMP.scale(0.12);
+            lampSystem.setLampMode('kickback', lit ? LAMP_MODE.ON : LAMP_MODE.OFF);
         }
 
         // Earned via an existing gameplay achievement (the 'reentryLane' bank-complete branch
@@ -4914,7 +5063,7 @@
                 if (skillShot.bestLaneIndex === null || SKILL_SHOT_LANES[meta.index].points > SKILL_SHOT_LANES[skillShot.bestLaneIndex].points) {
                     skillShot.bestLaneIndex = meta.index;
                 }
-                flashLamp(meta.lamp, new BABYLON.Color3(1, 1, 1), 150);
+                lampSystem.flashLamp('skillShot' + meta.index, 150, new BABYLON.Color3(1, 1, 1));
             } else if (meta.kind === 'missionTarget') {
                 // Drop-target bank upgrade: the trigger volume never moves once a target drops
                 // (see buildObstacles()'s comment - only the flag mesh sinks, in
@@ -5017,7 +5166,7 @@
                 addScore(points);
                 if (isOutlane) stats.outlaneHits++; else stats.inlaneHits++;
                 pulseMesh(mesh);
-                flashLaneLamp(meta.lamp);
+                lampSystem.flashLamp(meta.lampId, 220, COLOR_LANE_LAMP);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage((isOutlane ? 'OUTLANE! +' : 'INLANE! +') + points, 700);
                 triggerCameraShake(70, isOutlane ? 0.003 : 0.0025); // a modest rollover beat, not a collision - outlane a touch stronger, it's the more consequential of the two
@@ -5046,7 +5195,7 @@
                 // only, so a completed shot's own bigger beat stands out by comparison.
                 setCooldown(mesh, COOLDOWN_ORBIT_MS);
                 orbitState[meta.side].armedAt = performance.now();
-                flashLamp(meta.lamp, COLOR_ORBIT_LAMP, 150);
+                lampSystem.flashLamp(meta.lampId, 150, COLOR_ORBIT_LAMP);
                 triggerCameraShake(40, 0.0015);
                 playOrbitEnterSound();
             } else if (meta.kind === 'orbitCompletion') {
@@ -5056,7 +5205,7 @@
                 // Always flash the lamp and give a small acknowledgement, even for a stray hit on
                 // the completion trigger with no matching entrance - only the scoring/stat/message
                 // below is gated on a genuine traversal.
-                flashLamp(meta.lamp, COLOR_ORBIT_LAMP, 150);
+                lampSystem.flashLamp(meta.lampId, 150, COLOR_ORBIT_LAMP);
                 if (!withinWindow) return;
                 orbitState[meta.side].armedAt = null; // consume the arm - one entrance buys one completion, not a standing "always score" state
                 const isLeft = meta.side === 'left';
@@ -5359,7 +5508,7 @@
             }
             visionGate.active = false;
             visionGate.ball = null;
-            obstacles.visionGateMesh.material.emissiveColor = COLOR_VISION_GATE.scale(0.4);
+            lampSystem.setLampMode('visionGate', LAMP_MODE.ON);
             glowLayer.intensity = restGlowIntensity;
             mainBall.aggregate.body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
             score = 0;
@@ -5426,6 +5575,7 @@
             scoreMultiplier = 1;
             backglass.state.multiplierActive = false;
             obstacles.powerUpMesh.setEnabled(false);
+            lampSystem.setLampMode('multiplier', LAMP_MODE.OFF);
             setScore(0);
             setLives(lives);
             backglass.redraw();
@@ -5568,6 +5718,7 @@
                 updateBonusCount(deltaMs);
                 updateSkillShot(deltaMs);
                 updateBallSave(deltaMs);
+                lampSystem.updateLamps(performance.now());
                 // Skipped while the Vision Gate holds the ball (visionGate.active) - not just a
                 // nicety: updateBallPhysics()'s own anti-stuck kick fires after STUCK_TIME_
                 // THRESHOLD_MS (450ms) of near-zero speed, which a deliberately-frozen kinematic
