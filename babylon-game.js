@@ -687,14 +687,34 @@ import {
         return major < 16 || (major === 16 && minor < 4);
     }
 
+    // Responsive QA pass: both showUnsupportedMessage() and showFatalError() below can fire from
+    // main()'s own outer .catch() (see its own comment - a Havok/WASM failure partway through
+    // setup, not just the proactive pre-flight check at the very top of main()), which means
+    // main() may already have gotten as far as showing #menu-overlay, #pause-btn (visible
+    // unconditionally from first paint, no JS needed), and #mobile-controls before it failed.
+    // Neither failure panel accounted for that - #unsupported-panel/#error-panel sit at z-index
+    // 25/20, well BELOW the menu overlay's 200 and the pause button's 45, so a failure reached
+    // after that point rendered the actual error message completely hidden behind (and illegible
+    // under) the still-visible menu screen, with the pause button and flipper/launch controls
+    // floating on top looking tappable. Confirmed via Playwright. Every element hidden here is a
+    // fixed lookup (module-scope, so the real menuOverlay/pauseOverlay/etc. references inside
+    // main() aren't in scope) rather than an exhaustive trace of exactly which ones COULD be
+    // showing at a given failure point - harmless/idempotent to hide one that was never visible.
+    function hideAllGameUiForFailure() {
+        document.querySelectorAll('.screen-overlay').forEach((el) => { el.style.display = 'none'; });
+        ['pause-btn', 'mobile-controls', 'player-hud', 'mission-hud', 'effects-hud'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+    }
+
     function showUnsupportedMessage(reason) {
         console.error('[SPIRITBALL 3D] Unsupported device:', reason);
+        hideAllGameUiForFailure();
         const panel = document.getElementById('unsupported-panel');
         if (panel) panel.style.display = 'flex';
         const canvasEl = document.getElementById('renderCanvas');
         if (canvasEl) canvasEl.style.display = 'none';
-        const mobileControlsEl = document.getElementById('mobile-controls');
-        if (mobileControlsEl) mobileControlsEl.style.display = 'none';
     }
 
     // Dev/debug panel (#status-panel - score/lives/Havok status/CCD test/flipper-angle readouts
@@ -727,6 +747,7 @@ import {
 
     function showFatalError(title, err) {
         console.error(title, err);
+        hideAllGameUiForFailure();
         errorPanel.style.display = 'block';
         // Only stomp the Havok status to FAILED if it wasn't already confirmed OK - otherwise a
         // later, unrelated failure (e.g. flipper/constraint setup) misleadingly reads as "Havok
