@@ -3205,6 +3205,16 @@ import {
             // correct no-op when no capture is active (see its own comment), so this is safe
             // unconditionally - same reasoning startNewGame() already relies on for its own call.
             cancelVisionGateCapture('resetBallToPlunger');
+            // Ball-reset authoritative-definition audit fix: cancelVisionGateCapture() only
+            // restores DYNAMIC when it actually captured a ball reference (visionGate.ball was
+            // non-null), so this function's own guarantee that a reset ball is always DYNAMIC
+            // afterward was previously indirect - true today only because Vision Gate capture is
+            // the sole mechanism in this file that ever changes mainBall's motion type away from
+            // DYNAMIC in the first place. Setting it directly and unconditionally here makes that
+            // guarantee this function's own, not a borrowed side effect of another helper - a
+            // correct no-op on an already-dynamic body (Havok applies no impulse/velocity change
+            // from re-setting the same motion type), so this changes no physics behavior today.
+            mainBall.aggregate.body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
             mainBall.mesh.position.set(plunger.baseX, BALL_REST_Y_M, BALL_REST_Z_M);
             mainBall.aggregate.body.setLinearVelocity(BABYLON.Vector3.Zero());
             mainBall.aggregate.body.setAngularVelocity(BABYLON.Vector3.Zero());
@@ -5146,13 +5156,11 @@ import {
             // menu path). Interruption-lifecycle audit fix: consolidated into the shared
             // cancelVisionGateCapture() helper (also used by endVisionGateCapture()'s natural eject
             // and resetBallToPlunger()'s own hard reset) instead of duplicating the same ~15 lines
-            // here. The explicit unconditional setMotionType(DYNAMIC) right after stays regardless
-            // - not just for the visionGate.active case cancelVisionGateCapture() already covers,
-            // but as a last-resort guarantee that resetBallToPlunger() below (which assumes a
-            // normal dynamic body and doesn't itself touch motion type) can never leave the ball
-            // permanently frozen from ANY cause.
+            // here. No separate setMotionType(DYNAMIC) needed after this - resetBallToPlunger()
+            // below now guarantees that unconditionally itself (ball-reset authoritative-definition
+            // audit fix, see its own comment), so the old redundant belt-and-suspenders copy of
+            // that line that used to live here was removed.
             cancelVisionGateCapture('newGame');
-            mainBall.aggregate.body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
             score = 0;
             lives = STARTING_LIVES;
             stats.bumperHits = 0;
