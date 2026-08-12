@@ -3393,9 +3393,33 @@ import {
         window.addEventListener('keydown', (e) => {
             if (e.code !== 'Space') return;
             e.preventDefault(); // stop the page from scrolling on spacebar
+            // Input-boundary audit fix: a real, physically-held key fires keydown repeatedly
+            // (browser-native auto-repeat), not just once on the initial press - confirmed via a
+            // simulated real-repeat sequence in Playwright (repeat:true keydowns, matching actual
+            // browser behavior) that this handler's own handleLaunchPress() call was resetting
+            // plungerChargeElapsedMs back to 0 on every single repeat, so a genuinely long hold
+            // could never accumulate real charge time and stayed stuck near minimum power the
+            // entire time it was held. Ignoring repeats here (the true off->on edge is the only
+            // one that should mean anything, same principle the flipper keydown handler already
+            // uses via its own active-flag edge check) fixes every branch below at once, not just
+            // the launch-charge one - a held Space also has no business re-dismissing the menu,
+            // re-starting a new game, or re-resuming from pause on every repeat either.
+            if (e.repeat) return;
+            // Input-boundary audit fix: this branch used to call handleLaunchPress() here
+            // ("also ends attract mode internally"), treating menu-dismiss and begin-charging as
+            // one continuous gesture on the theory that keydown/keyup are always a real, correctly-
+            // paired hold. That part's true, but it made this the ONLY one of the three dismiss
+            // branches (menu/game-over/pause) that didn't set suppressNextLaunchRelease, and the
+            // one genuine inconsistency it created - a quick tap-and-release Space at the menu
+            // charges and launches immediately at whatever tiny amount of time the dismiss+launch
+            // pair took, rather than just dismissing - is exactly the kind of "shared input path"
+            // ambiguity this audit is about. Now consistent with the other two: dismiss only,
+            // suppress the matching keyup, and require the player's own separate, deliberate
+            // press afterward to begin charging - same as the click/touch tap-anywhere path below.
             if (menuOverlay.style.display === 'flex') {
                 hideMenuScreen();
-                handleLaunchPress(); // also ends attract mode internally
+                endAttractMode();
+                suppressNextLaunchRelease = true;
                 return;
             }
             if (gameOverActive) {
@@ -5176,9 +5200,27 @@ import {
         // ../index.js - the overlay covers the full screen while visible, so this naturally
         // takes priority over the flipper zones/launch button underneath without needing to
         // modify their own handlers.
+        //
+        // Input-boundary audit fix: this used to also call handleLaunchPress() ("also ends
+        // attract mode internally"), on the theory that dismissing the menu and starting to
+        // charge the launch are the same gesture. That's a reasonable idea for a real
+        // press-and-hold (keydown/keyup are a correctly-paired hold - see the Space keydown
+        // handler, which used to do the same thing), but 'click' is a DISCRETE, already-completed
+        // gesture - it fires only after the touch/mouse release has already happened - with no
+        // matching "release" of its own to end a charge it starts. Confirmed via Playwright: a
+        // single tap-to-dismiss left plungerCharging running with nothing to stop it, climbing to
+        // and sitting at max power indefinitely (no charge was ever consciously intended by the
+        // player) - and a later, entirely unrelated mouseup/touchend landing on the launch button
+        // (e.g. a drag-release, or any real pointer activity near it) would silently fire an
+        // accidental full-power launch off that stale charge. Both this and the Space keydown
+        // handler now agree: dismissing a screen only ever dismisses it (+ ends attract mode, still
+        // idempotent/safe to call directly); charging always requires the player's own explicit,
+        // separate press on the actual launch control afterward - matching how restarting from
+        // Game Over already behaved even before this fix (see gameOverOverlay's own 'click'
+        // listener below, which never called handleLaunchPress() either).
         menuOverlay.addEventListener('click', () => {
             hideMenuScreen();
-            handleLaunchPress(); // also ends attract mode internally
+            endAttractMode();
         });
 
         // --- Controls reference content, platform-aware (archive/release-prompts/04-*.md's content -
