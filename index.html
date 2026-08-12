@@ -344,7 +344,33 @@
             z-index: 40;
         }
 
+        /* Touch-controls visual polish (UX/UI polish, no mechanic/hit-area change) - the flipper
+           zones/launch button start at full strength (obvious to a brand-new player, the instant
+           the table is uncovered) and drop to a quieter resting look the moment the ball is
+           actually in play, so they "disappear into the cabinet" rather than compete with the
+           table for attention during a shot. #mobile-controls.dimmed is toggled by exactly the
+           same two call sites that already own the launch button's own .ready state
+           (resetBallToPlunger()/handleLaunchRelease() in babylon-game.js - see setControlsDimmed()
+           there) - ballInPlay's real, existing off/on edge, not a new mechanic or timer. Naturally
+           un-dims again between balls too (the moment the next ball is back on the plunger), which
+           re-invites the player right when the controls are actually actionable again. Opacity
+           only - never the icons/borders/glow's own base colors, so contrast against a bright or
+           dark table (drain flash, bumper flash, a dark corner) degrades gracefully rather than
+           disappearing outright; .pressed always wins over .dimmed regardless (brighten
+           immediately on press), overridden explicitly below since #mobile-controls.dimmed's ID
+           selector would otherwise outrank a bare .pressed class rule on specificity alone. */
+        #mobile-controls.dimmed .flipper-zone,
+        #mobile-controls.dimmed .launch-btn {
+            opacity: 0.55;
+        }
+
+        #mobile-controls.dimmed .flipper-zone.pressed,
+        #mobile-controls.dimmed .launch-btn.pressed {
+            opacity: 1;
+        }
+
         .flipper-zone {
+            transition: opacity 0.12s ease-out;
             position: absolute;
             top: 0;
             bottom: 0;
@@ -438,7 +464,14 @@
                 0 0 30px rgba(255, 165, 0, 0.5),
                 0 4px 15px rgba(0, 0, 0, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.3);
-            transition: transform 0.1s ease-out, box-shadow 0.1s ease-out, background 0.1s ease-out;
+            transition: transform 0.1s ease-out, box-shadow 0.1s ease-out, background 0.1s ease-out, opacity 0.12s ease-out;
+            /* Read by .launch-btn.pressed's box-shadow below - kept updated every frame while
+               charging (see updatePlungerVisual()'s call site in babylon-game.js), reusing
+               plunger.chargePercent, which already exists for the in-scene plunger piston
+               animation. Not gated behind reduced-motion: unlike an autoplaying/looping
+               animation, this only ever changes while the player's own finger is actively holding
+               the button down, the same category of feedback as a native volume slider's fill. */
+            --charge-pct: 0;
         }
 
         .launch-btn-icon { font-size: clamp(22px, 6vw, 32px); line-height: 1; }
@@ -453,14 +486,19 @@
             50% { box-shadow: 0 0 48px rgba(255, 200, 0, 0.85), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
         }
 
+        /* CHARGING, not just "pressed" - the glow's own spread/blur/alpha scale continuously with
+           --charge-pct (0 at the moment of press, 1 at full charge), so the button visibly heats
+           up as the real charge builds rather than jumping straight to one static "held" look and
+           staying there for the whole 0-2s hold - the same real plunger.chargePercent already
+           driving the in-scene plunger piston, not a separate/new value. */
         .launch-btn.pressed {
             transform: translateX(-50%) scale(0.94);
             background: linear-gradient(135deg, rgba(255, 100, 0, 0.7), rgba(255, 165, 0, 0.9));
             border-color: rgba(255, 200, 0, 1);
             box-shadow:
-                0 0 50px rgba(255, 165, 0, 0.9),
-                0 0 80px rgba(255, 100, 0, 0.6),
-                inset 0 0 30px rgba(255, 100, 0, 0.6);
+                0 0 calc(50px + var(--charge-pct, 0) * 30px) rgba(255, 165, 0, calc(0.9 + var(--charge-pct, 0) * 0.1)),
+                0 0 calc(80px + var(--charge-pct, 0) * 50px) rgba(255, 140, 0, calc(0.6 + var(--charge-pct, 0) * 0.35)),
+                inset 0 0 calc(30px + var(--charge-pct, 0) * 20px) rgba(255, 100, 0, 0.6);
         }
 
         .rotate-overlay {
