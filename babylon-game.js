@@ -3856,6 +3856,15 @@ import {
         // entered (mainBall today; written to take a `ball` parameter rather than close over
         // mainBall directly, so a future multiball system can reuse this unchanged).
         function startVisionGateCapture(ball) {
+            // Stale-callback audit fix - a defensive belt-and-suspenders clear, not the primary
+            // fix (handleTriggerHit()'s visionGate.active guard already prevents two REAL captures
+            // from overlapping under normal play; this only matters for the New-Game-mid-capture
+            // race - see visionGateEjectTimeoutHandle's own comment). Guarantees this capture's
+            // own eject timer, scheduled below, is always the only one that can ever fire.
+            if (visionGateEjectTimeoutHandle !== null) {
+                clearTimeout(visionGateEjectTimeoutHandle);
+                visionGateEjectTimeoutHandle = null;
+            }
             const body = ball.aggregate.body;
             body.setLinearVelocity(BABYLON.Vector3.Zero());
             body.setAngularVelocity(BABYLON.Vector3.Zero());
@@ -3906,7 +3915,8 @@ import {
             lampSystem.setLampMode('visionGate', LAMP_MODE.LOCKED);
             startVisionGateColorCycle();
 
-            setTimeout(() => {
+            visionGateEjectTimeoutHandle = setTimeout(() => {
+                visionGateEjectTimeoutHandle = null;
                 // Same pendingDrainAction pattern used for the drain->reset delay: a plain JS
                 // timer isn't gated by scene.physicsEnabled, so pausing mid-sequence must defer
                 // the eject rather than let it fire invisibly underneath the pause overlay.
@@ -4796,6 +4806,23 @@ import {
         // the pause overlay.
         let pendingVisionGateEject = null;
 
+        // Stale-callback audit fix: the eject setTimeout scheduled in startVisionGateCapture()
+        // was never itself cancellable - only the "still paused when it fires" case was covered
+        // (via pendingVisionGateEject above). visionGate.ball being cleared to null by
+        // startNewGame() makes a stale eject harmless IF no new capture starts before it fires
+        // (endVisionGateCapture()'s own `if (!ball...) return;` guard catches that case) - but if
+        // a New Game happens mid-capture and the player relaunches straight into a SECOND,
+        // legitimate capture before the OLD capture's original ~1.8s eject mark, visionGate.ball
+        // is no longer null by then - it's the NEW capture's ball - so the stale timer would
+        // wrongly end/eject the new capture early. Confirmed via Playwright: a second capture
+        // started well inside the first one's eject window had visionGate.active/ball forced back
+        // to false/null (and the ball kicked back to dynamic) partway through what should still
+        // have been its own active window. Tracking the handle here - same clearTimeout-on-reset
+        // idiom drainTimeoutHandle already uses - and clearing/reassigning it both in
+        // startNewGame() and at the top of every new startVisionGateCapture() call closes this:
+        // a capture's own eject timer is always the only one that can ever fire for it.
+        let visionGateEjectTimeoutHandle = null;
+
         // Ported from checkDrain() in ../index.js: lose a life, end this ball's turn. No
         // GameOverScene equivalent exists yet (Stage 12), so hitting 0 lives just resets lives
         // and score in place after the same pause the 2D version used before showing Grim
@@ -5074,6 +5101,14 @@ import {
             // dynamic body and doesn't itself touch motion type) can never leave the ball
             // permanently frozen.
             pendingVisionGateEject = null;
+            // Stale-callback audit fix - see visionGateEjectTimeoutHandle's own comment: the
+            // pendingVisionGateEject clear above only catches a capture whose eject already fired
+            // while paused; this cancels one still genuinely in flight, so it can never fire later
+            // against whatever capture (if any) this new game's own play starts.
+            if (visionGateEjectTimeoutHandle !== null) {
+                clearTimeout(visionGateEjectTimeoutHandle);
+                visionGateEjectTimeoutHandle = null;
+            }
             visionGate.colorTimers.forEach(clearTimeout);
             visionGate.colorTimers = [];
             if (visionGate.sparkle) {
