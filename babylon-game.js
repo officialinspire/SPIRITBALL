@@ -3835,6 +3835,44 @@ import {
         setScore(0);
         setLives(lives);
 
+        // HUD hierarchy audit (UX polish, no new mechanic) - see index.html's #mission-hud/
+        // #effects-hud CSS comment for the full design reasoning behind which of this game's
+        // existing systems get a persistent-while-relevant spot here. Every value read below
+        // already exists (ballSave.active, kickback.active, backglass.state.*) - this only
+        // surfaces it, on the same throttled-poll pattern updateDevHud() already uses further
+        // down this file (a plain accumulator + interval check, not a new timer/mechanic), rather
+        // than hunting down and touching every single call site that can change one of these
+        // flags. Runs for every player (not gated behind ?dev=1) - unlike updateDevHud, this IS
+        // the real, shipped UI.
+        const missionHud = document.getElementById('mission-hud');
+        const missionHudName = document.getElementById('mission-hud-name');
+        const missionHudProgress = document.getElementById('mission-hud-progress');
+        const effectsHud = document.getElementById('effects-hud');
+        const effectBallSave = document.getElementById('effect-ballsave');
+        const effectKickback = document.getElementById('effect-kickback');
+        const effectMultiplier = document.getElementById('effect-multiplier');
+        effectMultiplier.textContent = '★ ' + POWERUP_MULTIPLIER + 'X SCORE';
+        let playerStatusHudAccumulatorMs = 0;
+        const PLAYER_STATUS_HUD_UPDATE_INTERVAL_MS = 150; // frequent enough that a badge appearing/disappearing never reads as delayed, far cheaper than every frame
+        function updatePlayerStatusHud(deltaMs) {
+            playerStatusHudAccumulatorMs += deltaMs;
+            if (playerStatusHudAccumulatorMs < PLAYER_STATUS_HUD_UPDATE_INTERVAL_MS) return;
+            playerStatusHudAccumulatorMs = 0;
+
+            if (backglass.state.missionName) {
+                missionHudName.textContent = backglass.state.missionName;
+                missionHudProgress.textContent = backglass.state.missionProgress + '/' + backglass.state.missionRequired;
+                missionHud.hidden = false;
+            } else {
+                missionHud.hidden = true;
+            }
+
+            effectBallSave.hidden = !ballSave.active;
+            effectKickback.hidden = !kickback.active;
+            effectMultiplier.hidden = !backglass.state.multiplierActive;
+            effectsHud.hidden = !ballSave.active && !kickback.active && !backglass.state.multiplierActive;
+        }
+
         // Scoring-accounting audit fix: `applyMultiplier` defaults true for every ordinary call
         // (every ordinary hit legitimately gets the temporary scoreMultiplier power-up while it's
         // running - that's its whole point). The end-of-ball bonus count is the one exception -
@@ -5805,6 +5843,11 @@ import {
             // transform, since flippers are now kinematic (see createFlipper()'s comment).
             statusLeftFlipper.textContent = flipperAngleDegrees(leftFlipper).toFixed(1) + '°';
             statusRightFlipper.textContent = flipperAngleDegrees(rightFlipper).toFixed(1) + '°';
+
+            // HUD hierarchy audit - see updatePlayerStatusHud()'s own declaration comment. Runs
+            // for every player, throttled internally (own accumulator), same spot as the dev HUD
+            // below.
+            updatePlayerStatusHud(deltaMs);
 
             // Tuning/debug HUD (?dev=1, user-requested) - null outside a dev session (see its own
             // declaration below), so this is a single pointer comparison for a normal player, not
