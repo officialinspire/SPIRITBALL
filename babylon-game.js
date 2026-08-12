@@ -3257,6 +3257,16 @@ import {
             if (btn) btn.classList.toggle('ready', ready);
         }
 
+        // Touch-controls visual polish (UX/UI polish, no mechanic change) - same "look it up
+        // fresh each call" pattern as setLaunchReady() just above. Called from the same two spots
+        // that already own .ready (resetBallToPlunger()/handleLaunchRelease() below), reusing
+        // ballInPlay's own real off/on edge rather than a new flag - see #mobile-controls.dimmed's
+        // own CSS comment in index.html for the full reasoning.
+        function setControlsDimmed(dimmed) {
+            const controls = document.getElementById('mobile-controls');
+            if (controls) controls.classList.toggle('dimmed', dimmed);
+        }
+
         function resetBallToPlunger() {
             // Interruption-lifecycle audit fix - an active Vision Gate capture holds the ball
             // kinematic (ANIMATED) and owns a bunch of its own timers/visuals; this used to be
@@ -3287,7 +3297,9 @@ import {
             plungerChargeElapsedMs = 0;
             plungerPower = PLUNGER_MIN_POWER_MS;
             plunger.chargePercent = 0;
+            launchBtn.style.setProperty('--charge-pct', 0);
             setLaunchReady(true);
+            setControlsDimmed(false);
             // Upper-lane skill shot (user-requested) - defensive, unconditional reset, same
             // pattern as the Vision Gate's own motion-type restore here: correct no-op if no
             // shot is pending, and guarantees a dev "RESET BALL TO PLUNGER" tap or any other path
@@ -3345,7 +3357,9 @@ import {
             ballInPlay = true;
             plungerCharging = false;
             plunger.chargePercent = 0;
+            launchBtn.style.setProperty('--charge-pct', 0);
             setLaunchReady(false);
+            setControlsDimmed(true);
             // Upper-lane skill shot (user-requested) - armed on every launch, not just the first
             // of the game; "award once per ball" is enforced by skillShot.active itself (see its
             // own block comment), not by anything here. Folded into the existing LAUNCH! message
@@ -3590,6 +3604,7 @@ import {
                 plungerChargeElapsedMs = 0;
                 plungerPower = PLUNGER_MIN_POWER_MS;
                 plunger.chargePercent = 0;
+                launchBtn.style.setProperty('--charge-pct', 0);
             }
         }
         window.addEventListener('blur', () => {
@@ -5818,6 +5833,9 @@ import {
                     const chargePercent = Math.min(plungerChargeElapsedMs / PLUNGER_CHARGE_TIME_MS, 1);
                     plungerPower = PLUNGER_MIN_POWER_MS + (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS) * chargePercent;
                     plunger.chargePercent = chargePercent;
+                    // Touch-controls visual polish - drives .launch-btn.pressed's own charge-scaled
+                    // glow in index.html, reusing this same real chargePercent (not a new value).
+                    launchBtn.style.setProperty('--charge-pct', chargePercent);
                 }
                 updatePlungerVisual(plunger);
             }
