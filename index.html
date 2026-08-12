@@ -513,6 +513,13 @@
             align-items: center;
             text-align: center;
             padding: 30px;
+            box-sizing: border-box;
+            /* Responsive QA pass fix: no scroll fallback existed here - at a genuinely reflowed
+               short landscape height (confirmed via Playwright: a 390px phone at real 200% page
+               zoom, held in landscape, reflows to ~195px of usable height) the icon+text could
+               exceed the viewport with no way to reach the rest. Matches the same overflow-y:auto
+               every other full-screen panel here already has (.screen-overlay/#error-panel). */
+            overflow-y: auto;
         }
 
         .rotate-overlay-content { max-width: 320px; }
@@ -558,10 +565,27 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            /* Responsive QA pass fix - same reasoning as .rotate-overlay's own comment: no scroll
+               fallback existed here for a genuinely short/narrow effective viewport. */
+            overflow-y: auto;
         }
 
         #unsupported-panel h1 { color: #ff9900; margin: 0 0 12px 0; }
-        #unsupported-panel p { max-width: 420px; line-height: 1.6; font-size: 15px; }
+        #unsupported-panel p {
+            /* Responsive QA pass fix: max-width alone doesn't stop this paragraph overflowing a
+               narrower viewport - #unsupported-panel is a column flexbox with align-items:center
+               (not stretch), so without an explicit width this <p> sized itself toward its
+               unwrapped content width instead of the container's actual available space,
+               overflowing/clipping text past the right edge at narrow effective widths (confirmed
+               via Playwright at ~195px). width:100% (still capped at max-width:420px on wider
+               screens, unchanged there) forces it to respect whatever space is actually available.
+            */
+            width: 100%;
+            max-width: 420px;
+            box-sizing: border-box;
+            line-height: 1.6;
+            font-size: 15px;
+        }
         #unsupported-panel a { color: #00ffff; }
 
         /* ===================================
@@ -697,6 +721,10 @@
             text-align: center;
             padding: 24px;
             box-sizing: border-box;
+            /* Responsive QA pass fix - same defensive overflow-y:auto every other full-screen
+               panel on this page now has consistently; content here is short enough that this is
+               unlikely to ever actually engage, but costs nothing to have as a safety net. */
+            overflow-y: auto;
         }
 
         #loading-panel h1 {
@@ -742,7 +770,17 @@
             border-radius: 8px;
             padding: 14px 28px;
             margin: 10px 0;
-            min-width: 240px;
+            /* Responsive QA pass fix: a bare 240px caused real horizontal overflow (buttons
+               visibly clipped past the right edge, confirmed via Playwright) at extreme narrow
+               effective widths - genuine page zoom on an already-narrow phone reflows the CSS
+               viewport well below 240px (~195px at 200% zoom on a 390px phone). min(240px, 100%)
+               keeps the exact same 240px floor at every width this project actually ships at
+               (still ≥100% of the card's own content width there, so this changes nothing
+               visually at 320px and up - the current identity is unchanged), only yielding at
+               widths narrower than that, where 240px was never reachable without overflowing
+               anyway. */
+            min-width: min(240px, 100%);
+            box-sizing: border-box;
             cursor: pointer;
         }
 
