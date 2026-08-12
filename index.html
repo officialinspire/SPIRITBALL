@@ -984,6 +984,23 @@
         <div class="row"><span>Combo: </span><span id="status-combo">none</span></div>
         <div class="row"><span>Fidelity tier: </span><span id="status-fidelity">—</span></div>
 
+        <!-- State diagnostics (?dev=1, user-requested) - compact snapshot of internal lifecycle/
+             timer state for diagnosing state bugs on real hardware without remote devtools. Same
+             throttled cadence as the rest of the Tuning HUD above (see updateDevHud()). -->
+        <div class="row" style="color:#888; font-size:11px; margin-top:8px;">— State Diagnostics —</div>
+        <div class="row"><span>Ball in play: </span><span id="status-ball-in-play">no</span></div>
+        <div class="row"><span>Phase: </span><span id="status-phase">—</span></div>
+        <div class="row"><span>Pending drain action: </span><span id="status-pending-drain">no</span></div>
+        <div class="row"><span>Pending VGate eject: </span><span id="status-pending-vgate-eject">no</span></div>
+        <div class="row"><span>Skill shot: </span><span id="status-skill-shot">off</span></div>
+        <div class="row"><span>Orbit armed L/R: </span><span id="status-orbit-armed">— / —</span></div>
+        <div class="row"><span>Kickback: </span><span id="status-kickback">off</span></div>
+        <div class="row"><span>Bonus pool: </span><span id="status-bonus-pool">0 x1</span></div>
+        <div class="row"><span>Vision Gate: </span><span id="status-vision-gate">off</span></div>
+        <div class="row"><span>Last reset reason: </span><span id="status-last-reset-reason">—</span></div>
+        <div class="row"><span>Last trigger kind: </span><span id="status-last-trigger-kind">—</span></div>
+        <div class="row"><span>Last scoring event: </span><span id="status-last-scoring-event">—</span></div>
+
         <div class="row" style="color:#888; font-size:11px; margin-top:8px;">— Toggles —</div>
         <div class="row"><label><input type="checkbox" id="toggle-collider-viz" checked> Collider/trigger visualization</label></div>
         <div class="row"><label><input type="checkbox" id="toggle-ball-trail" checked> Ball trail</label></div>

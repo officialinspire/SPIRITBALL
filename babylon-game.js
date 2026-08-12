@@ -1246,6 +1246,11 @@ import {
         function showMessage(text, durationMs) {
             if (state.messageTimer) clearTimeout(state.messageTimer);
             state.message = text;
+            // Dev diagnostics (?dev=1 only, see updateDevHud() in main()) - unlike state.message
+            // above, this is never cleared back to '', so the dev HUD can always show "last
+            // scoring/game event" even well after the toast itself has faded. Purely a diagnostic
+            // breadcrumb - nothing reads this outside the dev HUD, no gameplay/visual effect.
+            state.lastMessage = text;
             redraw();
             state.messageTimer = setTimeout(() => {
                 state.message = '';
@@ -3909,12 +3914,22 @@ import {
             effectsHud.hidden = !ballSave.active && !kickback.active && !backglass.state.multiplierActive;
         }
 
+        // Dev diagnostics (?dev=1 only, see updateDevHud() in main()) - the raw numeric half of
+        // "last scoring event"; backglass.state.lastMessage (see showMessage()'s own comment) is
+        // the human-readable half, since not every scoring hit's message text includes the actual
+        // point value (e.g. comet just shows "COMET!"). Purely a diagnostic breadcrumb.
+        let lastScoreDelta = 0;
+        let lastScoreTotal = 0;
+
         // Scoring-accounting audit fix: `applyMultiplier` defaults true for every ordinary call
         // (every ordinary hit legitimately gets the temporary scoreMultiplier power-up while it's
         // running - that's its whole point). The end-of-ball bonus count is the one exception -
         // see startBonusCount()/updateBonusCount()'s own comments for why it passes false.
         function addScore(points, applyMultiplier = true) {
-            score += applyMultiplier ? points * scoreMultiplier : points;
+            const delta = applyMultiplier ? points * scoreMultiplier : points;
+            score += delta;
+            lastScoreDelta = delta;
+            lastScoreTotal = score;
             setScore(score);
             if (score > backglass.state.highScore) {
                 backglass.state.highScore = score;
@@ -4195,6 +4210,9 @@ import {
         // Returns the ball that was captured (or null), so endVisionGateCapture() doesn't need to
         // read visionGate.ball itself after this has already cleared it.
         function cancelVisionGateCapture(reason) {
+            // Dev diagnostics (?dev=1 only, see updateDevHud() in main()) - "last reset reason".
+            // Purely a diagnostic breadcrumb - `reason` is otherwise unused by this function itself.
+            lastResetReason = reason || null;
             if (visionGateEjectTimeoutHandle !== null) {
                 clearTimeout(visionGateEjectTimeoutHandle);
                 visionGateEjectTimeoutHandle = null;
@@ -4849,9 +4867,16 @@ import {
             }
         }
 
+        // Dev diagnostics (?dev=1 only, see updateDevHud() in main()) - "last trigger kind";
+        // handleTriggerHit() is the single entry point for every trigger-based collision (orbits,
+        // lanes, vision gate, skill shot lanes, re-entry lanes, drain zone, etc.), so this is the
+        // natural place to record it. Purely a diagnostic breadcrumb - no gameplay effect.
+        let lastTriggerKind = null;
+
         function handleTriggerHit(mesh) {
             const meta = mesh.metadata;
             if (!meta) return;
+            lastTriggerKind = meta.kind || null;
             if (triggerEnterLog) {
                 triggerEnterLog.push({
                     t: gameplayClockMs, kind: meta.kind, side: meta.side, index: meta.index,
@@ -5115,6 +5140,10 @@ import {
         // startNewGame() and at the top of every new startVisionGateCapture() call closes this:
         // a capture's own eject timer is always the only one that can ever fire for it.
         let visionGateEjectTimeoutHandle = null;
+
+        // Dev diagnostics (?dev=1 only, see updateDevHud() in main()) - "last reset reason", set
+        // inside cancelVisionGateCapture() (see its own comment). Purely a diagnostic breadcrumb.
+        let lastResetReason = null;
 
         // Ported from checkDrain() in ../index.js: lose a life, end this ball's turn. No
         // GameOverScene equivalent exists yet (Stage 12), so hitting 0 lives just resets lives
@@ -5670,6 +5699,22 @@ import {
             const statusCombo = document.getElementById('status-combo');
             const statusFidelity = document.getElementById('status-fidelity');
 
+            // State diagnostics (?dev=1, user-requested) - see index.html's own "State
+            // Diagnostics" section comment for the intent (on-device state-bug diagnosis without
+            // remote devtools). Same throttled updateDevHud tick as everything above.
+            const statusBallInPlay = document.getElementById('status-ball-in-play');
+            const statusPhase = document.getElementById('status-phase');
+            const statusPendingDrain = document.getElementById('status-pending-drain');
+            const statusPendingVGateEject = document.getElementById('status-pending-vgate-eject');
+            const statusSkillShot = document.getElementById('status-skill-shot');
+            const statusOrbitArmed = document.getElementById('status-orbit-armed');
+            const statusKickback = document.getElementById('status-kickback');
+            const statusBonusPool = document.getElementById('status-bonus-pool');
+            const statusVisionGate = document.getElementById('status-vision-gate');
+            const statusLastResetReason = document.getElementById('status-last-reset-reason');
+            const statusLastTriggerKind = document.getElementById('status-last-trigger-kind');
+            const statusLastScoringEvent = document.getElementById('status-last-scoring-event');
+
             // Static for the whole session (detectHighFidelity() only ever runs once, at load) -
             // set once here rather than every HUD tick. cores/mem are shown alongside the tier
             // itself specifically for Android tuning - the two inputs detectHighFidelity() actually
@@ -5711,13 +5756,60 @@ import {
                 statusMultiplier.textContent = (scoreMultiplier > 1 ? scoreMultiplier + 'X score' : '1X') +
                     (ballBonus.multiplierX > 1 ? ' / bonus ' + ballBonus.multiplierX + 'X' : '');
 
-                statusBallSaveState.textContent = ballSave.active ? 'ARMED' : 'off';
-
                 const inProgress = COMBO_DEFS
                     .map((def, i) => ({ def, prog: comboProgress[i] }))
                     .filter(({ prog }) => prog.index > 0);
-                statusCombo.textContent = (comboStreak.tier > 0 ? 'x' + comboStreak.tier : 'none') +
+                const comboRemainingMs = comboStreak.tier > 0
+                    ? Math.max(0, COMBO_CHAIN_WINDOW_MS - (gameplayClockMs - comboStreak.lastAtMs))
+                    : 0;
+                statusCombo.textContent = (comboStreak.tier > 0 ? 'x' + comboStreak.tier + ' (' + (comboRemainingMs / 1000).toFixed(1) + 's)' : 'none') +
                     (inProgress.length > 0 ? ' (' + inProgress.map(({ def, prog }) => def.name + ' ' + prog.index + '/' + def.steps.length).join(', ') + ')' : '');
+
+                const multiplierRemainingMs = powerUp.multiplierRemainingMs > 0 ? powerUp.multiplierRemainingMs : 0;
+                statusMultiplier.textContent += multiplierRemainingMs > 0 ? ' (' + (multiplierRemainingMs / 1000).toFixed(1) + 's)' : '';
+
+                statusBallSaveState.textContent = ballSave.active
+                    ? 'ARMED (' + (ballSave.remainingMs / 1000).toFixed(1) + 's)'
+                    : 'off';
+
+                // --- State diagnostics (?dev=1, user-requested) - see index.html's own comment. ---
+                statusBallInPlay.textContent = ballInPlay ? 'yes' : 'no';
+
+                let phase;
+                if (gameOverActive) phase = 'GAME_OVER';
+                else if (isPaused) phase = 'PAUSED';
+                else if (menuOverlay.style.display === 'flex') phase = 'MENU';
+                else if (visionGate.active) phase = 'VISION_GATE';
+                else if (bonusCount.active) phase = 'BONUS_COUNT';
+                else if (drainTimeoutHandle !== null) phase = 'DRAIN_DELAY';
+                else if (ballSave.active) phase = 'BALL_SAVED';
+                else if (ballInPlay) phase = 'PLAYING';
+                else phase = 'READY';
+                statusPhase.textContent = phase;
+
+                statusPendingDrain.textContent = pendingDrainAction ? 'yes' : 'no';
+                statusPendingVGateEject.textContent = pendingVisionGateEject ? 'yes' : 'no';
+
+                statusSkillShot.textContent = skillShot.active
+                    ? 'active (' + (skillShot.remainingMs / 1000).toFixed(1) + 's)'
+                    : 'off';
+
+                const orbitRemaining = (armedAt) => armedAt === null
+                    ? '—'
+                    : (Math.max(0, ORBIT_COMPLETION_WINDOW_MS - (gameplayClockMs - armedAt)) / 1000).toFixed(1) + 's';
+                statusOrbitArmed.textContent = orbitRemaining(orbitState.left.armedAt) + ' / ' + orbitRemaining(orbitState.right.armedAt);
+
+                statusKickback.textContent = kickback.active ? 'ACTIVE' : 'off';
+
+                statusBonusPool.textContent = ballBonus.points + ' x' + ballBonus.multiplierX;
+
+                statusVisionGate.textContent = visionGate.active ? 'ACTIVE' : 'off';
+
+                statusLastResetReason.textContent = lastResetReason || '—';
+                statusLastTriggerKind.textContent = lastTriggerKind || '—';
+                statusLastScoringEvent.textContent = backglass.state.lastMessage
+                    ? backglass.state.lastMessage + (lastScoreDelta ? ' (+' + lastScoreDelta + ', total ' + lastScoreTotal + ')' : '')
+                    : '—';
             };
 
             // --- Optional toggles (user-requested) ---
