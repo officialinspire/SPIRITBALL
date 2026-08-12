@@ -2790,7 +2790,25 @@ import {
         COLOR_VISION_GATE = hexToColor3(HEX_VISION_GATE);
         COLOR_BACKGROUND = hexToColor3(HEX_BACKGROUND);
 
-        const engine = new BABYLON.Engine(canvas, true);
+        // Containment-regression audit fix: without this, Babylon steps physics once per
+        // rendered frame using that frame's RAW, unclamped deltaTime (Scene._advancePhysicsEngineStep
+        // calls the physics engine's own accumulator loop with the full elapsed time). Under a
+        // real frame hitch - confirmed via direct measurement in this exact build,
+        // headless-Chromium/swiftshader frames occasionally ran 350-440ms instead of ~16ms - a
+        // fast-moving ball's single physics step could span most of the table's length,
+        // reproducibly tunneling clean through a wall (and, via repeated/compounding contact
+        // resolution against a large backlog in one step, occasionally producing an unstable,
+        // energetic bounce that launched the ball through the floor too) at completely ordinary
+        // gameplay speeds, not just extreme ones - confirmed as low as 1.7 m/s (MAX_BALL_SPEED_MS)
+        // against the side wall, with the ball ending up meters below the table with no recovery
+        // path. deterministicLockstep is Babylon's own built-in, bounded fix for exactly this:
+        // physics/animation always advance in fixed timeStep (1/60s) increments, capped at
+        // lockstepMaxSteps per rendered frame - a bad frame makes the SIMULATION run in slow
+        // motion relative to real time (falling behind, never explosively "catching up" in one
+        // giant or bursty step), rather than risking tunneling or solver instability. Confirmed
+        // via Playwright: the same reproducible wall-tunneling/floor-fall-through scenarios no
+        // longer occur with this enabled.
+        const engine = new BABYLON.Engine(canvas, true, { deterministicLockstep: true, lockstepMaxSteps: 4, timeStep: 1 / 60 });
         const scene = new BABYLON.Scene(engine);
         scene.clearColor = new BABYLON.Color4(0.02, 0.0, 0.06, 1);
 
