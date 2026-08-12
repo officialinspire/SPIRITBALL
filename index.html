@@ -45,10 +45,17 @@
            of device/camera angle - the backglass no longer duplicates them, and instead shows
            what THIS can't (high score, rank, mission progress, hit messages), so the two read as
            one deliberate display instead of two competing "SCORE 0"s. */
+        /* HUD polish audit: right edge used to be a bare `right: 12px`, with no awareness that
+           #pause-btn (below) occupies the SAME top-right corner at its own `right: max(16px,
+           safe-inset)`. At every width actually tested (320-1280px) the two overlapped outright -
+           the pause button sat on top of the "Lives" value. Now reserves exactly the pause
+           button's own footprint (its right offset + 44px width + an 8px gap) so the two can
+           never collide, and picks up safe-area-inset-top for parity with every other fixed
+           corner element on this page (it was the one exception still using a bare pixel value). */
         #player-hud {
             position: fixed;
-            top: 12px;
-            right: 12px;
+            top: max(12px, env(safe-area-inset-top));
+            right: calc(max(16px, env(safe-area-inset-right)) + 44px + 8px);
             z-index: 10;
             display: flex;
             gap: 16px;
@@ -76,11 +83,168 @@
 
         @media (max-width: 480px) {
             #player-hud {
-                top: 8px;
-                right: 8px;
+                top: max(8px, env(safe-area-inset-top));
+                right: calc(max(16px, env(safe-area-inset-right)) + 40px + 6px);
                 padding: 5px 10px;
                 font-size: 12px;
                 gap: 10px;
+            }
+        }
+
+        /* HUD hierarchy audit (UX polish, no new mechanic) - which of this game's existing
+           systems (mission/rank/temp score multiplier/bonus multiplier/ball save/kickback/skill
+           shot/combo) are worth a guaranteed-legible spot outside the 3D backglass, without
+           turning the screen into a wall of permanent readouts:
+             - Score/lives stay the only always-on numbers (#player-hud above, unchanged in kind).
+             - Exactly two PERSISTENT-WHILE-RELEVANT slots, one per corner, mirroring #player-hud's
+               own established visual language:
+                 #mission-hud (top-left) - the active mission's name + progress. The one long-
+                 running objective a player is deliberately working toward across many hits; shown
+                 only while a mission is actually active (hidden the rest of the time), same as
+                 the backglass's own missionName-null idle state.
+                 #effects-hud (top-right, stacked under the pause button/score row) - a single
+                 compact strip of small badges for BALL SAVE and KICKBACK (armed state, existing
+                 lamp-only signals with genuinely no other player-facing indicator today - a lit
+                 lamp is even less reliably in view than the backglass this audit is about) and the
+                 temporary 2X SCORE power-up (existing toast only fires for its first 1.2s, not the
+                 full 12s window). Each badge appears/disappears independently as its own
+                 already-existing boolean flips; the whole strip collapses to nothing when none are
+                 active - never a static row of empty slots.
+             - Deliberately NOT given a persistent slot: rank (changes rarely, on mission
+               completion only - the existing "RANK UP!" toast plus the backglass/Game-Over Final
+               Rank line already cover it), skill shot (a 2.5s window, too brief for a badge to be
+               worth the screen space over its own existing "LAUNCH! SKILL SHOT READY" toast), the
+               end-of-ball bonus multiplier (a payout curious-to-check total, not an in-the-moment
+               decision the way ball save/kickback are - stays backglass-only), and combo tier
+               (already gets an escalating per-hit toast in real time - comboStreak.tier itself
+               has no natural "still mid-chain" expiry without deriving new state beyond what
+               already exists, and a stale, long-since-broken tier sitting in a badge would be
+               actively misleading).
+           Both new elements read only pre-existing state (ballSave.active, kickback.active,
+           backglass.state.multiplierActive/missionName/missionProgress/missionRequired) via
+           updatePlayerStatusHud() in babylon-game.js - no new mechanic, timers, or thresholds. */
+        #mission-hud, #effects-hud {
+            position: fixed;
+            z-index: 10;
+            font-size: 12px;
+            line-height: 1.3;
+            text-shadow: 0 0 6px currentColor;
+        }
+
+        #mission-hud[hidden], #effects-hud[hidden] { display: none; }
+
+        #mission-hud {
+            top: max(12px, env(safe-area-inset-top));
+            left: max(12px, env(safe-area-inset-left));
+            /* Fixed cap, not vw-based: a vw-relative width computes against the same 100vw both
+               with and without CSS zoom applied (zoom scales the rendered result, not what vw
+               resolves to), so at 200% zoom on a narrow phone width a vw-sized box rendered
+               visually TWICE as large collided with the score/lives+pause cluster in the opposite
+               corner - confirmed via Playwright at 390px + zoom:2. A small fixed cap keeps this
+               box's max footprint predictable and small regardless of zoom; the longest real
+               mission name (RE-ENTRY CIRCUIT, MISSION_DEFS) still comfortably fits inside it, and
+               #mission-hud-name's own overflow:ellipsis (below) is the real safety net for
+               anything longer, not this number. */
+            max-width: 150px;
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            background: rgba(10, 0, 25, 0.55);
+            border: 1px solid rgba(255, 170, 0, 0.5);
+            border-radius: 8px;
+            padding: 6px 12px;
+            color: #ffaa00;
+        }
+
+        #mission-hud-icon { flex: 0 0 auto; }
+
+        #mission-hud-name {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #mission-hud-progress {
+            flex: 0 0 auto;
+            color: #ffd27a;
+            font-variant-numeric: tabular-nums;
+        }
+
+        #effects-hud {
+            top: calc(max(12px, env(safe-area-inset-top)) + 44px + 8px);
+            right: max(16px, env(safe-area-inset-right));
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 4px;
+        }
+
+        .effect-badge {
+            display: block;
+            background: rgba(10, 0, 25, 0.6);
+            border: 1px solid currentColor;
+            border-radius: 999px;
+            padding: 3px 10px;
+            white-space: nowrap;
+            font-weight: bold;
+        }
+
+        .effect-badge[hidden] { display: none; }
+
+        #effect-ballsave { color: #00ffcc; }
+        #effect-kickback { color: #ff8800; }
+        #effect-multiplier { color: #ff00ff; }
+
+        @media (max-width: 480px) {
+            #mission-hud, #effects-hud { font-size: 11px; }
+            #mission-hud {
+                max-width: 118px;
+                padding: 5px 10px;
+                gap: 5px;
+            }
+            #effects-hud {
+                top: calc(max(8px, env(safe-area-inset-top)) + 40px + 6px);
+            }
+            .effect-badge { padding: 3px 8px; }
+        }
+
+        /* Genuine page-zoom reflow (not the far more common non-reflowing pinch-zoom this page's
+           own viewport meta already allows) on an already-narrow phone can push the effective CSS
+           width low enough that there simply isn't room for two independent corner-anchored
+           elements side by side, no matter how small either is capped - confirmed via Playwright
+           at a genuinely reflowed ~195px width (390px phone at real 200% page zoom, which halves
+           the logical CSS viewport, unlike CSS `zoom:2` which doesn't - that's a materially
+           different, non-representative test). Below this width, #mission-hud drops the shared
+           top row entirely and becomes its own full-width bar instead, pushing #player-hud/
+           #effects-hud down to make room - never overlapping, whatever the content. */
+        @media (max-width: 300px) {
+            /* Shares its row with #pause-btn (unchanged position) rather than #player-hud now -
+               same reserved-footprint formula #player-hud itself uses normally, so the two can
+               never collide under the pause button either. */
+            #mission-hud {
+                position: fixed;
+                top: max(8px, env(safe-area-inset-top));
+                left: max(8px, env(safe-area-inset-left));
+                right: calc(max(16px, env(safe-area-inset-right)) + 44px + 8px);
+                max-width: none;
+                width: auto;
+                justify-content: flex-start;
+            }
+            /* Dropped to its own row below the mission bar/pause button row - no longer needs to
+               dodge #pause-btn horizontally, so it's free to use the full row width. Cleared
+               against #pause-btn's own bottom edge specifically (its 44px button is taller than
+               the mission bar sharing its row - mission's own height alone isn't enough of a
+               gap, confirmed via Playwright: score/lives still collided with the pause button's
+               circle using that shorter offset). */
+            #player-hud {
+                top: calc(max(16px, env(safe-area-inset-top)) + 44px + 6px);
+                right: max(8px, env(safe-area-inset-right));
+            }
+            #effects-hud {
+                top: calc(max(16px, env(safe-area-inset-top)) + 44px + 6px + 44px + 6px);
             }
         }
 
@@ -696,6 +860,21 @@
     <div id="player-hud">
         <div role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Score</span><span class="hud-value" id="hud-score">0</span></div>
         <div role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Lives</span><span class="hud-value" id="hud-lives">3</span></div>
+    </div>
+
+    <!-- HUD hierarchy audit - see #mission-hud/#effects-hud's own CSS comment above for the full
+         design reasoning. Both start hidden and are populated/toggled entirely by
+         updatePlayerStatusHud() in babylon-game.js, reading only pre-existing state. -->
+    <div id="mission-hud" role="status" aria-live="polite" aria-atomic="true" hidden>
+        <span id="mission-hud-icon" aria-hidden="true">🎯</span>
+        <span id="mission-hud-name"></span>
+        <span id="mission-hud-progress"></span>
+    </div>
+
+    <div id="effects-hud" role="status" aria-live="polite" aria-atomic="true" hidden>
+        <span class="effect-badge" id="effect-ballsave" hidden>🛟 BALL SAVE</span>
+        <span class="effect-badge" id="effect-kickback" hidden>⚡ KICKBACK READY</span>
+        <span class="effect-badge" id="effect-multiplier" hidden></span>
     </div>
 
     <div id="status-panel">
