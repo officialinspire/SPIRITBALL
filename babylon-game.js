@@ -4127,6 +4127,15 @@ import {
         // below, called from the render loop's existing !isPaused block - so cooldowns now freeze
         // exactly like everything else during a pause instead of being the one exception.
         const hitCooldowns = new Map(); // mesh -> remainingMs
+        // Phantom/double-scoring audit (?dev=1) - a ring buffer of every raw trigger ENTER Havok
+        // reports against mainBall, logged at the very top of handleTriggerHit() below before any
+        // of the skillShot/drain/cooldown/active-state gating runs, so a genuine double-fire from
+        // Havok itself (e.g. a fast pass tunneling through a thin trigger and re-entering, or a
+        // slow pass jittering across a boundary) is visible and distinguishable from a real second
+        // physical traversal. Stays null (the push below becomes a no-op) for a normal player -
+        // populated and exposed as window.__triggerDebug only under ?dev=1, see its own devMode
+        // block further down.
+        let triggerEnterLog = null;
         function isOnCooldown(mesh) {
             return hitCooldowns.has(mesh);
         }
@@ -4553,6 +4562,15 @@ import {
             // exempt - guide rails/dividers are structural, not a deliberate shot, and a clean
             // skill-shot launch can legitimately graze one.
             if (skillShot.active && meta.kind !== 'wall') endSkillShot();
+            // Phantom-scoring audit fix: handleDrain() sets ballInPlay=false the instant the ball
+            // first enters the drain trigger, but the ball itself isn't teleported away until
+            // resetBallToPlunger() actually runs - up to BALL_SAVE_RETURN_DELAY_MS/1500ms later
+            // (longer still on a real drain, since startBonusCount()'s payout sequence runs
+            // first). Havok keeps simulating it for that whole window, so it can keep bouncing
+            // off nearby bumpers/slingshots/walls/flippers and firing real COLLISION_STARTED
+            // events for contact the player didn't make. None of that may score once the ball has
+            // already left play.
+            if (!ballInPlay) return;
             if (isOnCooldown(mesh)) return;
             if (meta.kind === 'bumper') {
                 setCooldown(mesh, COOLDOWN_BUMPER_MS);
@@ -4635,6 +4653,13 @@ import {
         function handleTriggerHit(mesh) {
             const meta = mesh.metadata;
             if (!meta) return;
+            if (triggerEnterLog) {
+                triggerEnterLog.push({
+                    t: gameplayClockMs, kind: meta.kind, side: meta.side, index: meta.index,
+                    ballInPlay, onCooldown: isOnCooldown(mesh)
+                });
+                if (triggerEnterLog.length > 300) triggerEnterLog.shift();
+            }
             // Upper-lane skill shot (user-requested) - same "any real contact ends the window"
             // reasoning as handlePhysicalHit()'s guard; 'skillShotLane' is exempt since touching
             // one only ever upgrades the pending result (its own branch below), never closes the
@@ -4644,6 +4669,17 @@ import {
                 handleDrain();
                 return;
             }
+            // Phantom-scoring audit fix: same reasoning as handlePhysicalHit()'s own ballInPlay
+            // guard just above - handleDrain() (above) sets ballInPlay=false the instant the ball
+            // first enters the drain trigger, but the ball keeps physically rolling for up to
+            // ~1.5s+ before resetBallToPlunger() actually moves it. The drain zone spans the full
+            // table width right behind the flippers (DRAIN_ZONE_WIDTH_M = TABLE_WIDTH_M), so a
+            // drained ball can still cross the inlanes/outlanes, re-enter an orbit, or even
+            // re-enter the Vision Gate before it's actually removed from play - none of those are
+            // a real shot once the ball has left play, so nothing below may score, arm, or capture
+            // against it. Checked after the drainZone branch above (not before) so the drain
+            // trigger that sets ballInPlay=false in the first place is unaffected by its own guard.
+            if (!ballInPlay) return;
             if (isOnCooldown(mesh)) return;
             if (meta.kind === 'skillShotLane') {
                 // Doesn't score or close the window here - see skillShot's own block comment for
@@ -5369,6 +5405,13 @@ import {
         let updateDevHud = null;
 
         if (devMode) {
+            // Phantom/double-scoring audit instrumentation - see triggerEnterLog's own declaration
+            // comment (near hitCooldowns) for what this captures and why. Exposed on window so it
+            // can be inspected from devtools (or an automated test) during on-device tuning without
+            // adding any visible UI.
+            triggerEnterLog = [];
+            window.__triggerDebug = { log: triggerEnterLog };
+
             const statusFps = document.getElementById('status-fps');
             const statusFrameTime = document.getElementById('status-frame-time');
             const statusPhysicsBodies = document.getElementById('status-physics-bodies');
