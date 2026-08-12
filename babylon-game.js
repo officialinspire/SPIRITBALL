@@ -5451,6 +5451,23 @@ import {
             updateMuteButtonLabel();
         });
 
+        // Pause/duplicate-activation audit fix: this used to also listen for 'touchstart'
+        // (with e.preventDefault() to suppress the browser's compatibility 'click' that would
+        // otherwise follow) - a common pattern for shaving off perceived tap latency. Confirmed
+        // via Playwright that a real single tap does NOT double-fire this on the current build
+        // (Chromium correctly honors the synchronous preventDefault()), but that safety depends
+        // entirely on an implicit browser contract that isn't guaranteed everywhere (older
+        // WebViews, some in-app browsers, assistive-tech input paths that synthesize 'click'
+        // directly without ever dispatching touch events at all) - and there's no redundant
+        // guard in this code if that contract ever doesn't hold: a synthetic click landing after
+        // touchstart, bypassing the suppression, was confirmed to double-toggle pause/resume back
+        // to back. touch-action: none (index.html) plus the page's own
+        // width=device-width viewport meta already eliminate the legacy ~300ms tap-delay 'click'
+        // is sometimes blamed for, so the extra listener buys nothing today. Removed in favor of
+        // a single canonical 'click' listener - the exact same pattern every other button in this
+        // pause/controls flow already uses (pause-resume-btn/pause-newgame-btn/pause-controls-btn/
+        // controls-back-btn are all click-only) - which structurally cannot double-fire, since
+        // only one event type is registered at all.
         function togglePauseFromButton(e) {
             e.preventDefault();
             if (isPaused) {
@@ -5460,7 +5477,6 @@ import {
             }
         }
         pauseBtn.addEventListener('click', togglePauseFromButton);
-        pauseBtn.addEventListener('touchstart', togglePauseFromButton, { passive: false });
 
         // ESC: single persistent listener (archive/release-prompts/07-*.md's lesson - check state each
         // time a key event fires, don't re-register a resume/back shortcut every time a screen
