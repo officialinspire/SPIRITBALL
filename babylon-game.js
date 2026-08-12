@@ -3631,8 +3631,14 @@ import {
         // touches the real score directly - only startBonusCount() (below) ever does, at drain,
         // via the shared addScore() so high-score tracking stays exactly as it already works.
         // Deliberately separate from `scoreMultiplier`/`powerUp` (a temporary, real-time 2x
-        // applied to every hit while its own window is running) - the two combine additively
-        // through addScore() during the bonus count, not by referencing each other.
+        // applied to every ordinary hit while its own window is running) in every sense, not just
+        // by name - scoring-accounting audit fix: addScore()'s payout call from the bonus count
+        // now explicitly bypasses scoreMultiplier (its own `applyMultiplier=false` argument), so
+        // the bonus always pays out exactly points*multiplierX - this pool's own dedicated
+        // multiplier - regardless of whether the temporary power-up happens to be active at drain
+        // time. An earlier version of this comment described the two as "combining additively
+        // through addScore()", which was true of the code but not a deliberate design decision -
+        // see addScore()'s own comment for why that combination never should have applied here.
         const ballBonus = { points: 0, multiplierX: 1 };
 
         // Pause-aware gameplay clock (timer audit fix) - accumulates the render loop's own
@@ -3749,8 +3755,12 @@ import {
         setScore(0);
         setLives(lives);
 
-        function addScore(points) {
-            score += points * scoreMultiplier;
+        // Scoring-accounting audit fix: `applyMultiplier` defaults true for every ordinary call
+        // (every ordinary hit legitimately gets the temporary scoreMultiplier power-up while it's
+        // running - that's its whole point). The end-of-ball bonus count is the one exception -
+        // see startBonusCount()/updateBonusCount()'s own comments for why it passes false.
+        function addScore(points, applyMultiplier = true) {
+            score += applyMultiplier ? points * scoreMultiplier : points;
             setScore(score);
             if (score > backglass.state.highScore) {
                 backglass.state.highScore = score;
@@ -3793,7 +3803,9 @@ import {
                 // not a per-tick sequence. Still routed through updateBonusCount() below (with
                 // ticksRemaining already at 0) rather than resolved synchronously here, so a
                 // pause landing in the same instant can't skip the completion callback.
-                addScore(total);
+                // Scoring-accounting audit fix - see updateBonusCount()'s own call for why this
+                // bypasses scoreMultiplier.
+                addScore(total, false);
                 backglass.showMessage('BONUS x' + ballBonus.multiplierX + ': ' + total.toLocaleString(), BONUS_COUNT_REDUCED_MOTION_MS);
                 bonusCount.active = true;
                 bonusCount.ticksRemaining = 0;
@@ -3834,7 +3846,21 @@ import {
             // `total` always lands exactly rather than drifting off by a few points.
             const step = isLastTick ? (bonusCount.total - bonusCount.awarded) : Math.round(bonusCount.total / BONUS_COUNT_TICKS);
             bonusCount.awarded += step;
-            addScore(step);
+            // Scoring-accounting audit fix: the end-of-ball bonus already carries its OWN
+            // dedicated multiplier (ballBonus.multiplierX, earned via lane-bank clears, capped at
+            // BONUS_MULTIPLIER_MAX) - that's the traditional-pinball "bonus multiplier" mechanic.
+            // Routing this payout through addScore()'s default path also let it inherit whatever
+            // temporary, real-time scoreMultiplier power-up happened to still be active (or
+            // frozen, since its own countdown pauses while ballInPlay is false during this exact
+            // sequence - see updatePowerUp()'s call site) at the moment of drain - never a
+            // deliberate design (the power-up's own commit describes it as applying to "every
+            // hit" during live play, not to a deferred lump-sum payout added by an unrelated,
+            // later feature purely reusing addScore() for its high-score-tracking side effect).
+            // Confirmed via Playwright: an active 2x power-up at drain time doubled the bonus
+            // payout on top of ballBonus.multiplierX. Bypassing scoreMultiplier here makes the
+            // bonus count always pay out exactly points*multiplierX, matching what the on-screen
+            // "BONUS x{multiplierX}" message already claims.
+            addScore(step, false);
             playBonusTickSound();
             backglass.showMessage(
                 isLastTick ? 'BONUS AWARDED' : 'BONUS x' + bonusCount.multiplierX + ': ' + bonusCount.awarded.toLocaleString(),
