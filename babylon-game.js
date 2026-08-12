@@ -5560,8 +5560,31 @@ import {
                 // out of the gate mid-sequence with a random kick. The ball is never actually
                 // "stuck" here - it's being held on purpose - so this is the correct guard, not a
                 // workaround.
-                if (!visionGate.active) {
+                //
+                // Anti-stuck audit fix - same reasoning extends to !ballInPlay: confirmed via a
+                // real 60fps-cadence replay of the exact algorithm that a ball resting on the
+                // plunger (charging or just waiting for launch input) reaches STUCK_TIME_
+                // THRESHOLD_MS in under half a second - its resting velocity there is genuinely
+                // near-zero, same as any other settled ball, so nothing about the speed/time check
+                // itself distinguishes "waiting to be launched" from "actually stuck". The same
+                // window covers the ball sitting wherever it lands after a real drain, before
+                // resetBallToPlunger() runs (also !ballInPlay) - in both cases the ball is exactly
+                // where the game means it to be, not stuck, so a random kick there is a false
+                // positive, not a rescue. Every other scenario tested (resting against a wall/
+                // flipper/bumper, between posts, in a lane channel, mid-roll downhill) stayed
+                // ballInPlay===true the whole time and never produced a false trigger on its
+                // own - gravity's table tilt keeps a genuinely free ball moving above
+                // STUCK_SPEED_THRESHOLD_MS almost immediately unless something is actually
+                // blocking it, which is exactly the state this mechanism exists to rescue.
+                if (!visionGate.active && ballInPlay) {
                     updateBallPhysics(mainBall, deltaMs);
+                } else if (!ballInPlay) {
+                    // Defensive, same "unconditional reset" idiom resetBallToPlunger() itself
+                    // uses - keeps stuckTimeMs consistently at 0 for the whole !ballInPlay window
+                    // (not just whatever it happened to be when this branch started) rather than
+                    // leaving a stale accumulated value sitting there until the next
+                    // resetBallToPlunger() call happens to clear it.
+                    mainBall.stuckTimeMs = 0;
                 }
                 testBalls.forEach((ball) => updateBallPhysics(ball, deltaMs));
                 // Dev HUD "ball trail" toggle (default on, zero impact for normal players - this
