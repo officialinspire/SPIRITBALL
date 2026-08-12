@@ -242,7 +242,18 @@ import {
     // ===================================
     let audioCtx = null;
     let masterGainNode = null;
-    let audioMuted = localStorage.getItem('spiritball-muted') === 'true';
+    // High-score audit fix (same "storage failures never break the game" policy the fix was
+    // written for, applied here too): this runs at module load, before main() and its own
+    // defensive high-score storage wrapper even exist - a throwing localStorage (blocked/disabled
+    // storage in the current context) used to take the ENTIRE game down before a single frame
+    // rendered, matching this block's own "a failure here must never break gameplay" comment in
+    // spirit but not, until now, in the actual code.
+    let audioMuted = false;
+    try {
+        audioMuted = localStorage.getItem('spiritball-muted') === 'true';
+    } catch (e) {
+        // Default to unmuted and move on - see the comment above.
+    }
 
     function getAudioContext() {
         if (!audioCtx) {
@@ -265,7 +276,12 @@ import {
 
     function setAudioMuted(muted) {
         audioMuted = muted;
-        localStorage.setItem('spiritball-muted', String(muted));
+        try {
+            localStorage.setItem('spiritball-muted', String(muted));
+        } catch (e) {
+            // Storage unavailable/blocked - the toggle still works for this session, it just
+            // won't be remembered next time. Same policy as the read above.
+        }
         if (masterGainNode) masterGainNode.gain.value = muted ? 0 : 1;
     }
 
@@ -2877,7 +2893,36 @@ import {
         // kept even after the 2D build's own removal, since it's still just "the" high-score key
         // now, and changing it again would silently reset everyone's saved score for no reason.
         const highScoreKey = 'spiritball-highscore';
-        backglass.state.highScore = parseInt(localStorage.getItem(highScoreKey), 10) || 0;
+        // High-score audit fix: localStorage can THROW synchronously, not just return null - real
+        // browsers do this for ANY access (including getItem) when storage is blocked in the
+        // current context (a sandboxed/embedded iframe, some private-browsing configurations, a
+        // user-disabled storage permission). Confirmed via Playwright: without this try/catch, a
+        // throwing localStorage took the entire game down at load with an uncaught SecurityError
+        // before a single frame ever rendered - a persistence nicety breaking the whole game. Also
+        // validates the parsed value is actually sane (a finite, non-negative integer) rather than
+        // just non-NaN - `parseInt('-500', 10) || 0` used to happily accept a corrupted/hand-
+        // edited negative value as a real high score. storageAvailable is checked once here and
+        // remembered (see writeHighScoreToStorage() below) so a known-broken browser doesn't retry
+        // - and risk re-throwing - on every single high score set during the session.
+        let highScoreStorageAvailable = true;
+        function readHighScoreFromStorage() {
+            try {
+                const parsed = parseInt(localStorage.getItem(highScoreKey), 10);
+                return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+            } catch (e) {
+                highScoreStorageAvailable = false;
+                return 0;
+            }
+        }
+        function writeHighScoreToStorage(value) {
+            if (!highScoreStorageAvailable) return; // already known broken this session - don't retry/re-throw
+            try {
+                localStorage.setItem(highScoreKey, String(value));
+            } catch (e) {
+                highScoreStorageAvailable = false;
+            }
+        }
+        backglass.state.highScore = readHighScoreFromStorage();
         backglass.redraw();
 
         // Glow layer picks up every emissive material already assigned above/below automatically
@@ -3570,6 +3615,17 @@ import {
         // values themselves ("COLLISION_STARTED" etc.) are part of the same source and not at risk
         // of changing independently, so comparing against them directly sidesteps that question.
         let score = 0;
+        // High-score audit fix: addScore() keeps backglass.state.highScore synced to `score` in
+        // real time (as soon as either is exceeded, both read the same value from then on) - by
+        // Game Over time, `score === backglass.state.highScore` is true both when this GAME
+        // genuinely set a new record AND when it merely tied a pre-existing one (never actually
+        // exceeded it), so comparing the two numbers there can't tell those apart. This flag is
+        // the real "did this game set a new record" signal: set exactly once, at the exact moment
+        // addScore()'s own strict `score > backglass.state.highScore` check fires for real, reset
+        // per-game (not per-ball - an earlier ball's record in a multi-ball game still counts at
+        // the end of THIS game) by startNewGame(). showGameOverScreen() reads this instead of
+        // re-deriving (and getting wrong) the same comparison from score/highScore directly.
+        let newHighScoreThisGame = false;
         let lives = STARTING_LIVES;
         // Simple hit counters, ported from gameState.statistics in ../index.js - just the ones
         // that actually exist given Stage 6's scoped-down obstacle set (bumper/satellite/mission-
@@ -3764,7 +3820,8 @@ import {
             setScore(score);
             if (score > backglass.state.highScore) {
                 backglass.state.highScore = score;
-                localStorage.setItem(highScoreKey, String(score));
+                writeHighScoreToStorage(score); // high-score audit fix - see its own comment; a throwing/unavailable browser keeps the in-memory record for this session without crashing
+                newHighScoreThisGame = true; // high-score audit fix - see its own declaration comment
             }
             backglass.redraw();
         }
@@ -5242,6 +5299,9 @@ import {
             // that line that used to live here was removed.
             cancelVisionGateCapture('newGame');
             score = 0;
+            // High-score audit fix - see its own declaration comment; a fresh game hasn't set a
+            // record yet, regardless of whether the previous one did.
+            newHighScoreThisGame = false;
             lives = STARTING_LIVES;
             stats.bumperHits = 0;
             stats.cometHits = 0;
@@ -5315,6 +5375,12 @@ import {
             lampSystem.setLampMode('multiplier', LAMP_MODE.OFF);
             setScore(0);
             setLives(lives);
+            // High-score audit fix: the menu screen's own high-score line is only ever painted
+            // once, at initial page load - nothing currently re-shows that overlay after this
+            // point in a session, but keeping its text in sync here is cheap and means it can
+            // never go stale if a future path (or a dev/debug route) does bring it back.
+            const menuHighScoreEl = document.getElementById('menu-highscore');
+            if (menuHighScoreEl) menuHighScoreEl.textContent = 'HIGH SCORE: ' + backglass.state.highScore;
             backglass.redraw();
             resetBallToPlunger();
             isPaused = false;
@@ -5384,8 +5450,11 @@ import {
             // to back it; backglass.state.rank now holds this run's genuine final rank.
             document.getElementById('gameover-rank-line').textContent = 'FINAL RANK: ' + backglass.state.rank;
 
+            // High-score audit fix - see newHighScoreThisGame's own declaration comment for why
+            // this can't just compare score to backglass.state.highScore here (addScore() already
+            // synced them by now, in both the "genuinely beat it" and "merely tied it" cases).
             const hsLine = document.getElementById('gameover-highscore-line');
-            if (score >= backglass.state.highScore) {
+            if (newHighScoreThisGame) {
                 hsLine.textContent = 'NEW HIGH SCORE!';
                 hsLine.classList.add('pulse-text');
             } else {
