@@ -3195,6 +3195,16 @@ import {
         }
 
         function resetBallToPlunger() {
+            // Interruption-lifecycle audit fix - an active Vision Gate capture holds the ball
+            // kinematic (ANIMATED) and owns a bunch of its own timers/visuals; this used to be
+            // skipped entirely here, so a hard reset (this function's own dev button, or any
+            // future call site) while captured left the ball's mesh moved to the plunger but its
+            // physics body still kinematic, unable to respond to a real launch, with the capture's
+            // lamp/glow/color-cycle still running and its eject timer still pending to later fire
+            // and teleport the ball back to the gate mid-play. cancelVisionGateCapture() is a
+            // correct no-op when no capture is active (see its own comment), so this is safe
+            // unconditionally - same reasoning startNewGame() already relies on for its own call.
+            cancelVisionGateCapture('resetBallToPlunger');
             mainBall.mesh.position.set(plunger.baseX, BALL_REST_Y_M, BALL_REST_Z_M);
             mainBall.aggregate.body.setLinearVelocity(BABYLON.Vector3.Zero());
             mainBall.aggregate.body.setAngularVelocity(BABYLON.Vector3.Zero());
@@ -3949,9 +3959,38 @@ import {
             }
         }
 
-        // Ends an in-progress capture: restores the gate's rest-state visuals, cleans up the
-        // sparkle particle system, and ejects the captured ball back into real (dynamic) physics.
-        function endVisionGateCapture() {
+        // Interruption-lifecycle audit fix: shared teardown for every path that can end a capture
+        // early or on schedule - a natural eject (endVisionGateCapture(), below), a hard reset via
+        // New Game or the dev "RESET BALL TO PLUNGER" button (resetBallToPlunger()), or any future
+        // interruption. Cancels this capture's own eject timer (and any version of it already
+        // deferred by a pause), the color-cycle timers, stops/disposes the sparkle, clears
+        // visionGate.active/ball, hands the lamp back to its normal rest look, drops the glow
+        // boost, and restores the captured ball's motion type to DYNAMIC.
+        //
+        // Deliberately does NOT touch the ball's position or velocity - callers want different
+        // post-cancel physics (a natural eject kicks it back out toward -Z at
+        // VISION_GATE_EJECT_SPEED_MS; a hard reset sends it to the plunger instead), so that stays
+        // each caller's own job, right after this returns.
+        //
+        // Safe to call unconditionally regardless of whether a capture is actually active - every
+        // field here already degrades to a harmless no-op on an inactive gate (same "unconditional,
+        // correct no-op" reasoning startNewGame() already used before this helper existed). Bug
+        // fix (interruption-lifecycle audit): resetBallToPlunger() used to skip all of this
+        // entirely - confirmed via Playwright that the dev "RESET BALL TO PLUNGER" button during an
+        // active capture left the ball's mesh moved to the plunger but its physics body still
+        // kinematic (ANIMATED, not DYNAMIC), with the capture's lamp/glow/color-cycle still running
+        // and its eject timer still pending - which would later fire and teleport the ball back to
+        // the gate mid-play. `reason` is caller-supplied context for future debugging, not branched
+        // on.
+        //
+        // Returns the ball that was captured (or null), so endVisionGateCapture() doesn't need to
+        // read visionGate.ball itself after this has already cleared it.
+        function cancelVisionGateCapture(reason) {
+            if (visionGateEjectTimeoutHandle !== null) {
+                clearTimeout(visionGateEjectTimeoutHandle);
+                visionGateEjectTimeoutHandle = null;
+            }
+            pendingVisionGateEject = null;
             visionGate.colorTimers.forEach(clearTimeout);
             visionGate.colorTimers = [];
             lampSystem.setLampMode('visionGate', LAMP_MODE.ON); // hands control back from the capture's own bespoke color-cycle to the lamp system's normal rest look
@@ -3969,10 +4008,20 @@ import {
             const ball = visionGate.ball;
             visionGate.ball = null;
             visionGate.active = false;
+            if (ball && ball.aggregate.body) {
+                ball.aggregate.body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
+            }
+            return ball;
+        }
+
+        // Ends an in-progress capture on its own natural schedule: runs the shared teardown above,
+        // then ejects the captured ball back into real (dynamic) physics.
+        function endVisionGateCapture() {
+            const ball = cancelVisionGateCapture('eject');
             // Defensive only - the ball is kinematic and off-screen state changes (drain, new
-            // game) can't reach a frozen body, but startNewGame() clears visionGate.active/ball
-            // directly on a hard reset, so this can legitimately be null if that raced ahead of
-            // this timer somehow.
+            // game) can't reach a frozen body, but startNewGame()/resetBallToPlunger() clear
+            // visionGate.active/ball directly on a hard reset, so this can legitimately be null if
+            // that raced ahead of this timer somehow.
             if (!ball || !ball.aggregate.body) return;
 
             const body = ball.aggregate.body;
@@ -3985,7 +4034,6 @@ import {
             // real margin on both, unlike ejecting toward Saturn/the orbit rail's much tighter
             // quarters on the other sides of this gate.
             ball.mesh.position.set(VISION_GATE_POS.x, BALL_REST_Y_M, VISION_GATE_POS.z - 0.03);
-            body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
             body.setLinearVelocity(new BABYLON.Vector3(-0.05, 0, -VISION_GATE_EJECT_SPEED_MS));
             clampBodySpeed(body, MAX_BALL_SPEED_MS);
         }
@@ -5095,31 +5143,15 @@ import {
             // pendingDrainAction above, extended to a Vision Gate capture that might genuinely be
             // in progress (color-cycle timers running, sparkle alive, ball held kinematic) at the
             // moment of a hard reset (e.g. the dev "RESET BALL TO PLUNGER" button, or a future
-            // menu path). Restoring the ball to DYNAMIC unconditionally here - not just when
-            // visionGate.active is true - is deliberate: it's a correct no-op on an already-
-            // dynamic ball, and guarantees resetBallToPlunger() below (which assumes a normal
-            // dynamic body and doesn't itself touch motion type) can never leave the ball
-            // permanently frozen.
-            pendingVisionGateEject = null;
-            // Stale-callback audit fix - see visionGateEjectTimeoutHandle's own comment: the
-            // pendingVisionGateEject clear above only catches a capture whose eject already fired
-            // while paused; this cancels one still genuinely in flight, so it can never fire later
-            // against whatever capture (if any) this new game's own play starts.
-            if (visionGateEjectTimeoutHandle !== null) {
-                clearTimeout(visionGateEjectTimeoutHandle);
-                visionGateEjectTimeoutHandle = null;
-            }
-            visionGate.colorTimers.forEach(clearTimeout);
-            visionGate.colorTimers = [];
-            if (visionGate.sparkle) {
-                visionGate.sparkle.stop();
-                if (!visionGate.sparkle.isDisposed) visionGate.sparkle.dispose();
-                visionGate.sparkle = null;
-            }
-            visionGate.active = false;
-            visionGate.ball = null;
-            lampSystem.setLampMode('visionGate', LAMP_MODE.ON);
-            glowLayer.intensity = restGlowIntensity;
+            // menu path). Interruption-lifecycle audit fix: consolidated into the shared
+            // cancelVisionGateCapture() helper (also used by endVisionGateCapture()'s natural eject
+            // and resetBallToPlunger()'s own hard reset) instead of duplicating the same ~15 lines
+            // here. The explicit unconditional setMotionType(DYNAMIC) right after stays regardless
+            // - not just for the visionGate.active case cancelVisionGateCapture() already covers,
+            // but as a last-resort guarantee that resetBallToPlunger() below (which assumes a
+            // normal dynamic body and doesn't itself touch motion type) can never leave the ball
+            // permanently frozen from ANY cause.
+            cancelVisionGateCapture('newGame');
             mainBall.aggregate.body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
             score = 0;
             lives = STARTING_LIVES;
