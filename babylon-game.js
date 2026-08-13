@@ -1592,6 +1592,14 @@ import {
         // reason to push against the playfield, walls, or other scenery.
         aggregate.shape.filterCollideMask = COLLISION_CATEGORY_BALL;
 
+        // Bug fix (user-reported, with a reference image - flippers rest pointing DOWN-and-
+        // INWARD, toward the center gap, and lift UP while staying pointed inward when fired -
+        // see FLIPPER_LEFT_REST_RAD/FLIPPER_RIGHT_REST_RAD's own comment for the exact angles).
+        // LEFT sweeps by INCREASING angle (down-in at rest -> up-in when fired, passing through
+        // purely-horizontal-inward at the midpoint) and RIGHT by DECREASING - back to this
+        // function's very first (pre-any-of-these-fixes) sign convention; only the REST angle
+        // values themselves changed (see their own comment), not which direction each side
+        // sweeps in.
         const motorSign = isLeft ? 1 : -1;
         const minAngleRad = isLeft ? restAngleRad : restAngleRad - FLIPPER_SWEEP_RAD;
         const maxAngleRad = isLeft ? restAngleRad + FLIPPER_SWEEP_RAD : restAngleRad;

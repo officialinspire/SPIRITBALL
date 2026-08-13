@@ -191,27 +191,46 @@ export const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s com
 // 25 degrees lost it entirely). Mirroring relationship (RIGHT_REST = 180 - LEFT_REST) preserved
 // exactly as established above.
 //
-// Bug fix (user-reported - "flippers flip down instead of up"): the "verified numerically"
-// claim above checked that the active tip crosses the centerline (X) and moves further from the
-// rest position than at rest, but never actually checked the active tip's Z position against
-// the PIVOT's own Z - the number that determines whether the tip visually ends up above (up-
-// table) or below (down-table, toward the player) the hinge. It doesn't: with the old 70-degree
-// sweep, LEFT's active angle landed at -45 degrees, whose tip sits ~53mm further TOWARD THE
-// PLAYER than its own pivot - confirmed both by direct position readout and by Playwright
-// screenshots showing the "fired" flipper stretching further down-screen than at rest, exactly
-// backwards from every real pinball machine. The sweep was simply too small to ever reach
-// "up-table" starting from this rest angle (25 degrees off vertical, i.e. mostly-vertical) - the
-// active tip's Z only ever crosses to positive (above the pivot) once the sweep is large enough
-// to carry the angle up through horizontal (0 degrees) and beyond. The fix keeps both REST
-// angles exactly as tuned above (not reported wrong) and only widens the sweep so the active
-// angle becomes the mirror-across-horizontal of the old (broken) one - same magnitude of travel
-// and the same ~16mm tip overlap when both flippers fire together (no new gap), just correctly
-// signed: LEFT's active tip is now ~53mm above (not below) its pivot, matching a normal
-// pinball flip. Re-verified the same way as above (direct tip-position computation, not by eye)
-// and confirmed visually via Playwright screenshots.
-export const FLIPPER_SWEEP_RAD = (160 * Math.PI) / 180;
-export const FLIPPER_LEFT_REST_RAD = (-115 * Math.PI) / 180;
-export const FLIPPER_RIGHT_REST_RAD = (-65 * Math.PI) / 180;
+// Bug fix (user-reported - "flippers flip down instead of up"), superseded by the fix directly
+// below - kept for history: the "verified numerically" claim above checked that the active tip
+// crosses the centerline (X) and moves further from the rest position than at rest, but never
+// actually checked the active tip's Z position against the PIVOT's own Z - the number that
+// determines whether the tip visually ends up above (up-table) or below (down-table, toward the
+// player) the hinge. It doesn't: with the old 70-degree sweep, LEFT's active angle landed at -45
+// degrees, whose tip sits ~53mm further TOWARD THE PLAYER than its own pivot - confirmed both by
+// direct position readout and by Playwright screenshots showing the "fired" flipper stretching
+// further down-screen than at rest. The sweep was simply too small to ever reach "up-table"
+// starting from a REST angle that pointed down-and-outward - the active tip's Z only ever
+// crosses to positive (above the pivot) once the sweep is large enough to carry the angle up
+// through horizontal (0 degrees) and beyond, so that first fix widened the sweep to 160 degrees
+// instead, keeping the down-and-outward REST angles untouched.
+//
+// Bug fix, attempt 2 (user-reported, with a reference image - "tip up versus tip down"),
+// superseded by attempt 3 directly below - kept for history: read the reference as "the REST
+// silhouette itself needs to point up-and-outward, not down-and-outward", so REST was mirrored
+// across the horizontal axis (LEFT_REST +115 instead of -115, RIGHT_REST +65 instead of -65) with
+// FLIPPER_SWEEP_RAD back to 70 degrees. Confirmed via Playwright screenshots to genuinely keep
+// the tip above its pivot's Z at both rest and fired - but the user then clarified this still
+// didn't match the reference: the tips needed to point INWARD (toward the center gap) at rest,
+// not outward, only the up/down component was about direction, not in/out.
+//
+// Bug fix, attempt 3 (user-clarified explicitly, in plain language): "the tips point toward the
+// center and downwards, and when pressed lift up towards center" - i.e. REST = down-and-INWARD,
+// FIRED = up-and-INWARD, with the inward lean roughly unchanged between the two (only the
+// vertical component flips) rather than any outward lean at either extreme. This is achieved by
+// swapping which rest angle belongs to which side from the very first (pre-any-of-these-fixes)
+// values - LEFT_REST is now what RIGHT_REST used to be (-65 degrees) and vice versa (-115
+// degrees) - each still 25 degrees off vertical (same paddle silhouette magnitude as ever), just
+// aimed at the opposite (inward, not outward) horizontal side. FLIPPER_SWEEP_RAD widened to 130
+// degrees so firing carries the angle up through horizontal-inward and into "lifted, still
+// inward" territory (LEFT: -65 -> +65, RIGHT: -115 -> +115) rather than stopping short of it.
+// createFlipper()'s motorSign/minAngleRad/maxAngleRad reverted to their very first (pre-any-of-
+// these-fixes) direction convention to match - only the REST values swapped sides, not which way
+// each side sweeps. Verified numerically (tip position vs. pivot, both axes, both states) and
+// visually via Playwright screenshots.
+export const FLIPPER_SWEEP_RAD = (130 * Math.PI) / 180;
+export const FLIPPER_LEFT_REST_RAD = (-65 * Math.PI) / 180;
+export const FLIPPER_RIGHT_REST_RAD = (-115 * Math.PI) / 180;
 
 // Motor tuning - NOT ported from anything (flippers are an entirely new mechanism in this
 // 3D rewrite; the 2D version's velocity-injection formula has no equivalent here). These are
