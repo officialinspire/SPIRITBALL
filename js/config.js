@@ -190,7 +190,26 @@ export const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s com
 // shift up to 25 before picking 15, since a 20-degree shift left only ~3mm of that overlap and
 // 25 degrees lost it entirely). Mirroring relationship (RIGHT_REST = 180 - LEFT_REST) preserved
 // exactly as established above.
-export const FLIPPER_SWEEP_RAD = (70 * Math.PI) / 180;
+//
+// Bug fix (user-reported - "flippers flip down instead of up"): the "verified numerically"
+// claim above checked that the active tip crosses the centerline (X) and moves further from the
+// rest position than at rest, but never actually checked the active tip's Z position against
+// the PIVOT's own Z - the number that determines whether the tip visually ends up above (up-
+// table) or below (down-table, toward the player) the hinge. It doesn't: with the old 70-degree
+// sweep, LEFT's active angle landed at -45 degrees, whose tip sits ~53mm further TOWARD THE
+// PLAYER than its own pivot - confirmed both by direct position readout and by Playwright
+// screenshots showing the "fired" flipper stretching further down-screen than at rest, exactly
+// backwards from every real pinball machine. The sweep was simply too small to ever reach
+// "up-table" starting from this rest angle (25 degrees off vertical, i.e. mostly-vertical) - the
+// active tip's Z only ever crosses to positive (above the pivot) once the sweep is large enough
+// to carry the angle up through horizontal (0 degrees) and beyond. The fix keeps both REST
+// angles exactly as tuned above (not reported wrong) and only widens the sweep so the active
+// angle becomes the mirror-across-horizontal of the old (broken) one - same magnitude of travel
+// and the same ~16mm tip overlap when both flippers fire together (no new gap), just correctly
+// signed: LEFT's active tip is now ~53mm above (not below) its pivot, matching a normal
+// pinball flip. Re-verified the same way as above (direct tip-position computation, not by eye)
+// and confirmed visually via Playwright screenshots.
+export const FLIPPER_SWEEP_RAD = (160 * Math.PI) / 180;
 export const FLIPPER_LEFT_REST_RAD = (-115 * Math.PI) / 180;
 export const FLIPPER_RIGHT_REST_RAD = (-65 * Math.PI) / 180;
 
