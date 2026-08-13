@@ -2855,7 +2855,17 @@ import {
         scene.clearColor = new BABYLON.Color4(0.02, 0.0, 0.06, 1);
 
         setStatus('loading Havok WASM…');
-        const havokInstance = await withTimeout(HavokPhysics(), 20000, 'HavokPhysics() WASM load');
+        // Stabilization fix: this label must not contain "wasm"/"webassembly"/"simd" - it feeds
+        // directly into withTimeout()'s own generated timeout message ("<label> did not finish
+        // within Xs"), which is exactly what main()'s outer .catch() below pattern-matches to
+        // decide "unsupported device" vs. a generic failure. Confirmed via Playwright: a plain
+        // slow-network stall while fetching the Havok WASM (no incompatibility at all) timed out
+        // with a message that happened to contain the word "WASM" purely from this label, and
+        // was misclassified as "Unsupported device" - telling a player with a slow connection
+        // their device/browser can't run the game at all. A genuine WASM/SIMD incompatibility
+        // still reaches that branch correctly, since it comes from HavokPhysics() itself
+        // rejecting with its own real WebAssembly-engine error message, not from this label.
+        const havokInstance = await withTimeout(HavokPhysics(), 20000, 'Havok physics engine load');
 
         setStatus('initializing physics world…');
         const hk = new BABYLON.HavokPlugin(true, havokInstance);
