@@ -1960,6 +1960,20 @@ import {
         return strip;
     }
 
+    // Obstacle visual-polish pass (user-requested - "readable height differences... make the
+    // table read like a designed pinball machine"): a round counterpart to addLaneFloorTint()
+    // above, for the board's floating spherical features (Saturn, comet) rather than a lane
+    // corridor - a thin backlit-insert disc laid on the playfield directly beneath the sphere,
+    // giving it a visible "landing pad" grounding presence instead of just floating over bare
+    // playfield the way a primitive-only sphere does. Same paper-thin/no-physics/no-z-fight
+    // treatment as addLaneFloorTint(), just circular.
+    function addFeatureFloorGlow(scene, name, mat, diameter, x, z) {
+        const glow = BABYLON.MeshBuilder.CreateCylinder(name, { diameter, height: 0.002, tessellation: 24 }, scene);
+        glow.position.set(x, 0.002, z);
+        glow.material = mat;
+        return glow;
+    }
+
     function buildObstacles(scene) {
         // Same dev-mode flag setDevPanelVisible() checks at module load - re-read here (cheap,
         // stateless) rather than threaded through as a parameter, purely to decide whether the new
@@ -2171,6 +2185,20 @@ import {
             backing.position.set(pos.x, 0.015, pos.z + 0.006);
             backing.material = housingMat;
 
+            // Mounting-bracket trim frame (obstacle visual-polish pass, user-requested - "trim...
+            // contrasting materials"): a slightly larger, thinner panel directly behind the
+            // backing, peeking out as a border on all sides - reuses railCapMat (the same
+            // polished-trim material every guide rail's bevel cap already shares) so the target
+            // bank's hardware reads as the same "trim language" as the rest of the board's
+            // fixtures, not a one-off.
+            const frame = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Frame', {
+                width: TARGET_RADIUS_M * 2.7,
+                height: 0.038,
+                depth: 0.003
+            }, scene);
+            frame.position.set(pos.x, 0.015, pos.z + 0.009);
+            frame.material = railCapMat;
+
             // Its own cloned material (not shared with the flag's targetMats[i] like before) so
             // the lamp can independently show the target's raised/dropped state - matching the
             // per-instance-clone treatment every other stateful lamp in this file already gets
@@ -2189,6 +2217,36 @@ import {
             missionTargetMeshes.push(mesh);
             missionTargetLamps.push(lamp);
         });
+
+        // Target-bank header rail (obstacle visual-polish pass, user-requested - "layered
+        // geometry... make the table read like a designed pinball machine instead of a
+        // collection of primitives"): MISSION_TARGET_BANK's 3 positions sit exactly colinear (a
+        // straight diagonal bank, verified from their own config values, not assumed) - a single
+        // raised trim strip spanning that line reads as one designed fixture the 3 flags mount
+        // to, rather than 3 independent stakes that happen to share a color family. Computed from
+        // the bank's own endpoints rather than hardcoded, so it stays correct if the bank layout
+        // ever changes. Same "long axis along local X, then rotationY = atan2(-dz, dx)" rail
+        // convention every other angled wall/rail in this file uses (see inlaneGuide's own
+        // comment for how that formula was derived) - purely decorative, no physics.
+        {
+            const first = MISSION_TARGET_BANK[0];
+            const last = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
+            const dx = last.x - first.x;
+            const dz = last.z - first.z;
+            const bankLength = Math.sqrt(dx * dx + dz * dz) + TARGET_RADIUS_M * 3; // overhangs past the end targets, like a real mounting rail would
+            const bankRotationY = Math.atan2(-dz, dx);
+            const bankCenterX = (first.x + last.x) / 2;
+            const bankCenterZ = (first.z + last.z) / 2;
+            const header = BABYLON.MeshBuilder.CreateBox('missionTargetHeader', {
+                width: bankLength,
+                height: 0.006,
+                depth: 0.01
+            }, scene);
+            header.position.set(bankCenterX, 0.034, bankCenterZ);
+            header.rotation.y = bankRotationY;
+            header.material = housingMat;
+            addRailBevel(scene, 'missionTargetHeaderCap', railCapMat, bankLength, 0.01, bankCenterX, 0.037, bankCenterZ, bankRotationY);
+        }
 
         // ===================================
         // Giant spinning Saturn (board redesign) - the table's new visual/gameplay centerpiece.
@@ -2239,6 +2297,30 @@ import {
         // against each other reads as a much more alive, "spinning" system than one ring alone.
         const saturnRings = [saturnRing1, saturnRing2];
 
+        // Polar highlight cap (obstacle visual-polish pass, user-requested - "subtle emissive
+        // inserts... contrasting materials"): a small flattened sphere at Saturn's own peak, a
+        // brighter neutral-warm material distinct from the body's own gold, the same "cap reads
+        // as a highlight, not a lighting artifact" treatment the bumper cluster's caps already
+        // established. Purely decorative, embedded slightly into the body to hide the seam.
+        const saturnCapMat = new BABYLON.PBRMaterial('saturnCapMat', scene);
+        saturnCapMat.albedoColor = new BABYLON.Color3(1, 0.95, 0.82);
+        saturnCapMat.metallic = 0.15;
+        saturnCapMat.roughness = 0.2;
+        saturnCapMat.emissiveColor = COLOR_SATURN.scale(0.85);
+        const saturnCap = BABYLON.MeshBuilder.CreateSphere('saturnCap', { diameter: SATURN_RADIUS_M * 0.7, segments: 12 }, scene);
+        saturnCap.scaling.y = 0.4;
+        saturnCap.position.set(SATURN_POS.x, SATURN_RADIUS_M * 1.85, SATURN_POS.z);
+        saturnCap.material = saturnCapMat;
+
+        // Landing-pad floor glow (see addFeatureFloorGlow()'s own comment) - grounds the
+        // floating sphere with a visible presence on the playfield itself, the same "a raised
+        // object needs a visible base" cue this pass gives every other floating obstacle
+        // (bumpers' skirt, slingshots' new base plate below). Sized to the sphere's own
+        // footprint, deliberately smaller than the tilted decorative rings above it so the pad
+        // doesn't visually compete with them.
+        const saturnFloorMat = makeLaneFloorMat('saturnFloorMat', COLOR_SATURN_RING, 0.22);
+        addFeatureFloorGlow(scene, 'saturnFloorGlow', saturnFloorMat, SATURN_RADIUS_M * 2.4, SATURN_POS.x, SATURN_POS.z);
+
         // ===================================
         // Comet (board redesign) - the old "satellite" object, re-themed now that Saturn is a
         // real dedicated piece. Same role (a physical, scored bumper with its own decorative
@@ -2273,6 +2355,12 @@ import {
         cometRing.position.set(COMET_POS.x, COMET_RADIUS_M, COMET_POS.z);
         cometRing.rotation.x = Math.PI / 2.4;
         cometRing.material = cometRingMat;
+
+        // Landing-pad floor glow - see saturnFloorGlow's own comment for the reasoning. Sized
+        // and dimmed a step down from Saturn's own pad, matching this object's existing "simpler
+        // than Saturn" design language (see cometRing's own comment).
+        const cometFloorMat = makeLaneFloorMat('cometFloorMat', COLOR_COMET, 0.18);
+        addFeatureFloorGlow(scene, 'cometFloorGlow', cometFloorMat, COMET_RADIUS_M * 2.6, COMET_POS.x, COMET_POS.z);
 
         // ===================================
         // Score-multiplier power-up orb (board redesign) - hidden at load, toggled visible/
@@ -2333,6 +2421,37 @@ import {
             // main()) brightens this material directly, and it must only affect this one
             // slingshot's housing, not every object on the board that happens to share housingMat.
             housing.material = housingMat.clone('slingshotHousingMat' + i);
+
+            // Base mount plate (obstacle visual-polish pass, user-requested - "caps/bases...
+            // readable height differences"): grounds the wedge with a visible low foot instead of
+            // it appearing to hover just above the playfield, the same base-under-fixture cue the
+            // bumpers' skirt already gives them. Shares housingMat (not the housing's own hit-
+            // flash clone above) - the base never flashes on a kick, only the housing does.
+            const base = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Base', {
+                width: SLINGSHOT_SIZE_M * 1.3,
+                height: 0.006,
+                depth: SLINGSHOT_SIZE_M * 0.75
+            }, scene);
+            base.position.set(def.x, 0.003, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.1);
+            base.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20);
+            base.material = housingMat;
+
+            // Ridge trim along the housing's own peak (obstacle visual-polish pass - "trim...
+            // subtle emissive inserts... contrasting materials"): a thin bright magenta line
+            // distinct from the dark housing beneath it, reading as a neon accent along the
+            // wedge's top edge rather than one flat-colored mass. A per-instance clone (each
+            // slingshot's own trim, matching the housing's own per-instance-clone convention just
+            // above) so a future skin pass can recolor one slingshot's trim independently.
+            const ridgeMat = slingshotMat.clone('slingshotRidgeMat' + i);
+            ridgeMat.emissiveColor = new BABYLON.Color3(1, 0.35, 1);
+            const ridge = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Ridge', {
+                width: SLINGSHOT_SIZE_M * 0.9,
+                height: 0.004,
+                depth: 0.008
+            }, scene);
+            ridge.position.set(def.x, 0.027, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.15);
+            ridge.rotation.y = mesh.rotation.y;
+            ridge.material = ridgeMat;
 
             // Referenced by snapSlingshot() (in main(), via the collider mesh's metadata below) so
             // the hit handler - which only ever receives the collider mesh from the collision
