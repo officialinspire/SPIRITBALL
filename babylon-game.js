@@ -1291,43 +1291,79 @@ import {
     }
 
     // Ball trail: emitter attached directly to the ball mesh (particles spawn at its current
-    // position every frame automatically), cyan/eyeball-tinted, additive - direct port of
-    // setupParticles()'s follow-the-ball ballTrail emitter. Started immediately but with emitRate
-    // driven every frame from the ball's actual speed (see updateBallTrail() in main()'s render
-    // loop) rather than a constant rate, so it reads as "the ball is moving fast" per the
-    // acceptance criteria instead of a trail that's equally visible at rest.
+    // position every frame automatically), additive-blended for a luminous (not opaque) look -
+    // direct port of setupParticles()'s follow-the-ball ballTrail emitter, kept as the one and
+    // only trail system (no second/competing implementation). Started immediately but with
+    // emitRate AND lifetime driven every frame from the ball's actual speed (see
+    // updateBallTrail() in main()'s render loop) rather than fixed constants, so both the density
+    // and the physical length of the trail track how fast the ball is actually moving instead of
+    // a trail that looks the same whether the ball is crawling or flying.
+    //
+    // Cosmic/ethereal pass (user-requested - "subtle luminous comet-like trail... not giant fire
+    // particles, not opaque, not visually distracting"): near-zero emit power keeps each particle
+    // essentially anchored to the spot it was born at (a "breadcrumb" left behind by the moving
+    // emitter) instead of scattering outward - that's what makes this read as a comet tail
+    // following the ball's actual recent path rather than a puff of smoke drifting on its own.
+    // Two-stop color gradient - a bright cyan-white core (matching the ball's own eyeball tint)
+    // cooling to a soft violet (the same cosmic hue family as buildDrainVortex()'s purple/indigo)
+    // before fading to fully transparent - gives "brightest close to the ball, smoothly fades
+    // with distance" without needing per-particle gradient APIs beyond what this file's other
+    // particle systems already use (color1/color2/colorDead, proven elsewhere in this exact
+    // function group).
+    const BALL_TRAIL_CORE_COLOR = new BABYLON.Color3(0.75, 1, 1); // cyan-white, blended toward white for a brighter "hot" core than the flat eyeball tint alone
+    const BALL_TRAIL_COOL_COLOR = new BABYLON.Color3(0.55, 0.35, 0.95); // soft cosmic violet, same family as the drain vortex's purple/indigo
     function buildBallTrail(scene, texture, ballMesh, highFidelity) {
         const trail = new BABYLON.ParticleSystem('ballTrail', highFidelity ? 200 : 80, scene);
         trail.particleTexture = texture;
         trail.emitter = ballMesh;
         trail.minEmitBox = new BABYLON.Vector3(0, 0, 0);
         trail.maxEmitBox = new BABYLON.Vector3(0, 0, 0);
-        trail.color1 = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0.7);
-        trail.color2 = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0.4);
-        trail.colorDead = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0);
+        trail.color1 = new BABYLON.Color4(BALL_TRAIL_CORE_COLOR.r, BALL_TRAIL_CORE_COLOR.g, BALL_TRAIL_CORE_COLOR.b, 0.65); // brightest, right at the ball - well short of opaque
+        trail.color2 = new BABYLON.Color4(BALL_TRAIL_COOL_COLOR.r, BALL_TRAIL_COOL_COLOR.g, BALL_TRAIL_COOL_COLOR.b, 0.22); // cooling and dimming with age/distance
+        trail.colorDead = new BABYLON.Color4(BALL_TRAIL_COOL_COLOR.r, BALL_TRAIL_COOL_COLOR.g, BALL_TRAIL_COOL_COLOR.b, 0);
         trail.minSize = 0.005;
-        trail.maxSize = 0.012;
-        trail.minLifeTime = 0.25;
-        trail.maxLifeTime = 0.4; // matches the 2D version's 400ms lifespan
+        trail.maxSize = 0.012; // well under the ball's own 27mm diameter - a wisp, not a fireball
+        trail.minLifeTime = 0.25; // base range at low speed; updateBallTrail() scales both up together for a longer trail at higher speed
+        trail.maxLifeTime = 0.4;
         trail.emitRate = 0; // driven per-frame by updateBallTrail() based on ball speed
         trail.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
-        trail.direction1 = new BABYLON.Vector3(-0.05, 0, -0.05);
-        trail.direction2 = new BABYLON.Vector3(0.05, 0.05, 0.05);
-        trail.minEmitPower = 0.02;
-        trail.maxEmitPower = 0.08;
+        trail.direction1 = new BABYLON.Vector3(-0.01, 0, -0.01); // a whisper of outward drift for a soft ethereal shimmer, not real scatter
+        trail.direction2 = new BABYLON.Vector3(0.01, 0.015, 0.01);
+        trail.minEmitPower = 0.005; // near-stationary once spawned - what makes it read as a trail tracing the path, not a cloud
+        trail.maxEmitPower = 0.02;
         trail.start();
         return trail;
     }
 
-    // Continuously adjusts the ball trail's emit rate from its actual current speed - called once
-    // per frame from the render loop. Below the stuck-speed threshold it's effectively off; above
-    // MAX_BALL_SPEED_MS it's at full rate.
+    // Continuously adjusts the ball trail's emit rate AND per-particle lifetime from its actual
+    // current speed - called once per frame from the render loop. Below the stuck-speed-ish
+    // threshold it's effectively off (nearly disappears once the ball settles); above
+    // MAX_BALL_SPEED_MS both density and length are at their maximum. Reading getLinearVelocity()
+    // once and doing only scalar math after it (no `new` calls) keeps this allocation-free beyond
+    // whatever that single existing physics-API read itself costs - not adding a second, separate
+    // per-frame allocation to what updateBallPhysics() already produces this same frame.
     function updateBallTrail(trail, ball, highFidelity) {
         const velocity = ball.aggregate.body.getLinearVelocity();
         const speed = velocity.length();
         const speedFraction = Math.min(speed / MAX_BALL_SPEED_MS, 1);
+        // Reduced-motion: this trail is a motion-READABILITY aid tied directly to gameplay (not
+        // pure ambient decoration like buildChakraSparkle(), which fully disables under reduced
+        // motion) - same "tone down, don't remove" treatment buildDrainVortex() gives its own
+        // continuous emitter, just applied to both rate and length here.
+        const reducedMotion = window.SPIRITBALL_reducedMotion;
+        const rateScale = reducedMotion ? 0.35 : 1;
         const maxRate = highFidelity ? 60 : 25; // ~40/sec at 2D's frequency:25ms was the baseline; scaled up a bit since this trail fades with speed instead of running constantly
-        trail.emitRate = speedFraction > 0.1 ? maxRate * speedFraction : 0;
+        trail.emitRate = speedFraction > 0.1 ? maxRate * speedFraction * rateScale : 0;
+
+        // Trail length scales moderately with speed: growing minLifeTime/maxLifeTime (not just
+        // emitRate) means a fast ball leaves a genuinely LONGER streak, not just a denser one at
+        // a fixed length - up to ~1.6x the base lifetime at full speed (a moderate stretch, not
+        // an exaggerated one). Babylon reads life{Min,Max}Time only at each particle's own
+        // emission, so this never disturbs particles already in flight, only the ones about to
+        // spawn.
+        const lengthScale = (1 + speedFraction * 0.6) * (reducedMotion ? 0.7 : 1);
+        trail.minLifeTime = 0.25 * lengthScale;
+        trail.maxLifeTime = 0.4 * lengthScale;
     }
 
     // Drain vortex: ambient, always-running emitter at the drain zone, purple/black/indigo -
