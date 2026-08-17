@@ -933,9 +933,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // convincingly "chrome" they read without real reflections.
         const wallMat = new BABYLON.PBRMaterial('wallMat', scene);
         wallMat.albedoColor = COLOR_WALL;
-        wallMat.metallic = 0.6;
+        // Lighting/material hierarchy pass (user-requested - "RAILS/STRUCTURE: metallic or
+        // physical-material definition" vs. "not every object should glow"): metallic raised
+        // (0.6 -> 0.72) and emissive cut roughly in half (0.15 -> 0.07) - these are the table's
+        // structural boundary, not a light source, so their identity should read from reflective/
+        // metallic response under the scene's direct lights, not from a self-glow competing with
+        // the actual lamps/bumpers/ball for the eye's attention. Left with a small emissive
+        // residue rather than zero: fully unlit walls read as flat black silhouettes against the
+        // dark space background at this camera angle (verified via screenshot), which loses the
+        // wall's own presence entirely rather than looking appropriately "structural."
+        wallMat.metallic = 0.72;
         wallMat.roughness = 0.3;
-        wallMat.emissiveColor = COLOR_WALL.scale(0.15);
+        wallMat.emissiveColor = COLOR_WALL.scale(0.07);
         // Cabinet/table artwork skin slot (visual-architecture pass, user-requested) - shared by
         // every structural boundary wall below. No-op until assets/skins/cabinet/cabinet-rails.png
         // actually exists (see SKINS.md) - the chrome look above stays exactly as-is either way.
@@ -1061,9 +1070,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     function buildLaunchLane(scene) {
         const laneMat = new BABYLON.PBRMaterial('laneWallMat', scene); // same chrome treatment as buildTable()'s walls
         laneMat.albedoColor = COLOR_WALL;
-        laneMat.metallic = 0.6;
+        // Lighting/material hierarchy pass (user-requested) - same metallic-up/emissive-down
+        // rebalance as buildTable()'s wallMat above (see its own comment); this is the identical
+        // "chrome rail" material family, just one more wall segment.
+        laneMat.metallic = 0.72;
         laneMat.roughness = 0.3;
-        laneMat.emissiveColor = COLOR_WALL.scale(0.15);
+        laneMat.emissiveColor = COLOR_WALL.scale(0.07);
 
         const wall = BABYLON.MeshBuilder.CreateBox('launchLaneWall', {
             width: 8 * PX_TO_M,
@@ -2141,7 +2153,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         railCapMat.albedoColor = new BABYLON.Color3(0.18, 0.19, 0.22);
         railCapMat.metallic = 0.85;
         railCapMat.roughness = 0.22;
-        railCapMat.emissiveColor = new BABYLON.Color3(0.08, 0.2, 0.26);
+        // Lighting/material hierarchy pass (user-requested - "RAILS/STRUCTURE: metallic or
+        // physical-material definition"): this one material is reused by EVERY guide-rail bevel
+        // cap on the entire board (dividers, inlane guides, orbit rails, reentry-lane rails,
+        // target-bank header) - dozens of small instances all sharing one emissive value, so its
+        // brightness has an outsized cumulative effect on how "glowy vs. structural" the whole
+        // table reads. Cut to a quarter of its old value (was a fairly noticeable cyan glint) so
+        // its "polished trim" read comes from the already-glossy metallic/roughness (0.85/0.22)
+        // catching direct light, the same way real machined trim does, rather than from the trim
+        // itself glowing.
+        railCapMat.emissiveColor = new BABYLON.Color3(0.02, 0.05, 0.065);
 
         // Shared floor-tint materials for addLaneFloorTint() above - one per lane family (inlane,
         // outlane, orbit), each reused by both mirrored sides, matching the lamp identities those
@@ -3148,8 +3169,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         const apronTrimMat = new BABYLON.PBRMaterial('apronTrimMat', scene);
         apronTrimMat.albedoColor = COLOR_CHAKRA[0];
-        apronTrimMat.emissiveColor = COLOR_CHAKRA[0].scale(0.6);
-        apronTrimMat.metallic = 0.1;
+        // Lighting/material hierarchy pass (user-requested) - this is cabinet trim, not a lamp
+        // or gameplay indicator, so it belongs in the RAILS/STRUCTURE tier: metallic raised
+        // (0.1 -> 0.4) and emissive halved (0.6 -> 0.3) so its violet identity reads as a colored
+        // metal inlay catching light, not a light source competing with the actual lamps/ball.
+        apronTrimMat.emissiveColor = COLOR_CHAKRA[0].scale(0.3);
+        apronTrimMat.metallic = 0.4;
         apronTrimMat.roughness = 0.4;
         const apronTrim = BABYLON.MeshBuilder.CreateBox('apronTrim', {
             width: TABLE_WIDTH_M * 0.92,
@@ -3669,6 +3694,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // only place glowLayer.intensity is ever set outside that one feature.
         const restGlowIntensity = highFidelity ? 0.8 : 0.5;
         glowLayer.intensity = restGlowIntensity;
+        // Lighting/material hierarchy pass (user-requested - "SPACE BACKGROUND: darkest visual
+        // layer"): GlowLayer scans every emissive material in the WHOLE scene automatically,
+        // including the skybox - its starfield is itself an emissiveTexture (see buildSkybox()),
+        // so without this exclusion every star gets the same soft outward blur/bloom treatment as
+        // the actual playfield's lamps/bumpers, turning the backdrop into a hazy glow instead of a
+        // crisp, DARK field the illuminated table is meant to visually float in front of. Excluding
+        // it here is the one glow-layer-level fix that establishes the space background as its own
+        // distinct (darkest, non-glowing) tier, rather than tuning down every individual star's
+        // brightness in createStarfieldTexture() and losing the "sparse bright stars" contrast
+        // that texture is deliberately built around.
+        glowLayer.addExcludedMesh(skybox);
 
         // Hoisted to a `let` (not a const declared only inside the if-block) so the dev HUD's
         // "post-processing" checkbox (below, once devMode is confirmed) can toggle
@@ -3865,7 +3901,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         ballMat.albedoColor = COLOR_BALL;
         ballMat.metallic = 0.1;
         ballMat.roughness = 0.25;
-        ballMat.emissiveColor = COLOR_EYEBALL.scale(0.4);
+        // Lighting/material hierarchy pass (user-requested - "BALL: highest motion readability"):
+        // raised from 0.4 - at the old value the ball's own glow was DIMMER than the flippers
+        // (0.5) and roughly level with the bumpers (0.6), so the single object every player's eye
+        // needs to track continuously wasn't actually the brightest thing on the board. Bumped
+        // above every other object's resting emissive scale (flippers 0.5, bumpers 0.6, mission
+        // targets 0.55) so the ball reads as the clear top of the hierarchy at a glance, moving or
+        // still, without needing a value so extreme it blooms into a shapeless blob.
+        ballMat.emissiveColor = COLOR_EYEBALL.scale(0.7);
 
         // --- The main game ball (Stage 3): one canonical ball, physics-maintained every frame
         // via updateBallPhysics(). Now spawned resting on the plunger (Stage 5), matching
