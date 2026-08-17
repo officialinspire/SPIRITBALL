@@ -1677,11 +1677,29 @@ import {
     }
 
     // Advances each flipper's angle by simple, fully deterministic JS arithmetic (called once per
-    // frame for both flippers, from the render loop) - see createFlipper()'s comment for why this
-    // replaced a physics-constraint motor entirely. While active, sweeps toward the extended
-    // limit at FLIPPER_ACTIVATE_SPEED_RAD_S, clamped so it can't overshoot; once released, sweeps
-    // back toward restAngleRad at FLIPPER_RETURN_SPEED_RAD_S, also clamped so it settles exactly
-    // at rest instead of oscillating past it.
+    // frame for both flippers, from the render loop, with real elapsed time via deltaMs - see the
+    // call site's engine.getDeltaTime()) - see createFlipper()'s comment for why this replaced a
+    // physics-constraint motor entirely. Deliberately a hard-clamped constant-angular-velocity
+    // ramp, not an eased/lerped animation - see FLIPPER_ACTIVATE_SPEED_RAD_S/
+    // FLIPPER_RETURN_SPEED_RAD_S's own comment for why. Because the step is derived from real
+    // elapsed seconds (not a fixed per-frame increment), a flip takes the same real-world time
+    // regardless of frame rate - the same electromechanical motion, just sampled at more or fewer
+    // points.
+    //
+    // PRESS/HOLD (flipper.active): activateFlipper() flips `active` synchronously on the input
+    // event, so the very next frame already starts ramping - no queued/delayed response. Each
+    // frame steps flipper.currentAngleRad toward the active stop (maxAngleRad for LEFT,
+    // minAngleRad for RIGHT) at FLIPPER_ACTIVATE_SPEED_RAD_S, hard-clamped via Math.min/Math.max
+    // so it can never overshoot the stop. Once there, `next` (current + step) is always past the
+    // clamp, so the SAME clamp re-selects the stop's exact value every subsequent frame - the
+    // flipper holds bit-for-bit at the active angle with no oscillation or creep for as long as
+    // the button stays down, using the identical code path as the initial swing.
+    //
+    // RELEASE (else branch): steps back toward restAngleRad at FLIPPER_RETURN_SPEED_RAD_S. The
+    // `Math.abs(diff) <= maxStep` branch snaps directly to the exact rest angle on whichever frame
+    // would otherwise overshoot it, instead of taking one more full-length step past it and
+    // correcting later - so the return settles at precisely restAngleRad with no overshoot and no
+    // jitter, the same guarantee the active-stop clamp gives the other direction.
     function updateFlipperMotor(flipper, deltaMs) {
         const dt = deltaMs / 1000;
         if (flipper.active) {

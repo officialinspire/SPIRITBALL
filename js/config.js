@@ -215,25 +215,25 @@ export const FLIPPER_RIGHT_REST_RAD = (25 * Math.PI) / 180;
 // Motor tuning - NOT ported from anything (flippers are an entirely new mechanism in this
 // 3D rewrite; the 2D version's velocity-injection formula has no equivalent here). These are
 // angle-per-second rates consumed directly by updateFlipperMotor()'s kinematic stepping (see
-// createFlipper()'s comment for why this isn't a physics-constraint motor).
+// createFlipper()'s comment for why this isn't a physics-constraint motor) - a hard-clamped,
+// constant-angular-velocity ramp toward the target angle each frame, deliberately NOT an
+// eased/lerped animation: real flipper hardware is two distinct mechanisms with two distinct
+// characters, a powered solenoid punching up fast and a passive return spring pulling back
+// slightly slower, not one smoothed curve - see updateFlipperMotor()'s own comment for how the
+// clamp guarantees an exact, jitter-free landing on both the active stop and the rest angle.
 //
-// Bug fix (user-reported - "when I fire the flippers they literally jump out of position" instead
-// of visibly swinging from the hinge): a kinematic body's rotation is only as smooth as the
-// frames sampling it - a real solenoid's near-instant physical snap doesn't need to look
-// continuous to the eye the way an ANIMATED (not physically simulated) mesh's per-frame
-// teleport does. The fix is to keep each flip spanning enough real frames (roughly 7+ even at a
-// modest 24fps) to read as a hinge swing rather than a jump, which means the angular speed has
-// to scale with FLIPPER_SWEEP_RAD, not be picked independently of it.
-//
-// FLIPPER_SWEEP_RAD dropped from a 160-degree workaround to a real 65-degree stroke (see its own
-// comment) as part of the pivot-geometry fix, so these two speeds were scaled down by the same
-// ratio (65/160) to land on the same real-world durations the original fix targeted, rather than
-// leaving the old rad/s values in place and accidentally undoing that fix by finishing a much
-// smaller sweep in much less wall-clock time: ~277ms for the 65-degree activate sweep (~6.6
-// frames at 24fps, ~16.6 at 60fps) and ~306ms for the return sweep (~7.3 frames at 24fps) -
-// both still comfortably inside the original fix's 7-17 frame safety margin.
-export const FLIPPER_ACTIVATE_SPEED_RAD_S = 4.1; // fast "punch" (~277ms for the current 65-degree sweep) - see this constant's own bug-fix comment for why it's not picked independently of FLIPPER_SWEEP_RAD
-export const FLIPPER_RETURN_SPEED_RAD_S = 3.7; // slower, controlled return (magnitude only - direction is per-flipper, see createFlipper())
+// Electromechanical-feel pass (user-requested - "very fast powered upstroke... spring-like
+// return, slightly slower than the upstroke"): FLIPPER_SWEEP_RAD is a real 65-degree stroke (see
+// its own comment), so these speeds are picked as durations for THAT sweep, not as arbitrary
+// rad/s numbers - FLIPPER_ACTIVATE_SPEED_RAD_S = 9.9 completes the 65-degree upstroke in ~115ms
+// (a snap, not a lerp - about 2.7 rendered frames even at a modest 24fps, comfortably more at
+// 60fps), and FLIPPER_RETURN_SPEED_RAD_S = 7.1 completes the return in ~160ms, ~40% slower than
+// the upstroke - close enough to read as the same mechanism relaxing back, not a second copy of
+// the punch. If FLIPPER_SWEEP_RAD ever changes, these two should be rescaled by the same ratio
+// (speed = sweep / desired-duration) rather than left as-is, or the durations above silently
+// drift with it.
+export const FLIPPER_ACTIVATE_SPEED_RAD_S = 9.9; // fast "punch" (~115ms for the current 65-degree sweep) - see this constant's own comment for why it's not picked independently of FLIPPER_SWEEP_RAD
+export const FLIPPER_RETURN_SPEED_RAD_S = 7.1; // spring-like, slightly slower return (~160ms - magnitude only, direction is per-flipper, see createFlipper())
 
 // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
 export const BUMPER_RADIUS_M = 0.02;
