@@ -1867,6 +1867,13 @@ import {
     //     a bigger glyph since there's no chip/padding to fill.
     //   planeSize - defaults to 0.05 (every existing label's size); markers use a smaller one to
     //     stay subtle rather than reading as signage.
+    // Numeric 0xRRGGBB (this file's/config.js's HEX_* convention) -> CSS hex string, for the rare
+    // spot (bumper inserts) that needs a HEX_* color fed into a canvas-2d ctx.fillStyle rather
+    // than a BABYLON.Color3.
+    function cssColor(hex) {
+        return '#' + hex.toString(16).padStart(6, '0');
+    }
+
     function createLabelPlane(scene, text, x, z, color, opts) {
         opts = opts || {};
         const texW = 128, texH = 48;
@@ -2018,42 +2025,107 @@ import {
             return mat;
         });
 
-        // Pop-bumper silhouette: the collider stays the exact same sphere it always was (shape,
-        // position, material, physics aggregate, metadata all unchanged) - a wide low "skirt"
-        // base and a glowing "collar" ring around its equator are purely decorative additions
-        // with no physics body, giving it the cap-on-a-base read a real pop bumper has instead of
-        // a bare sphere floating above the table.
+        // Premium pop-bumper cap material (visual-upgrade pass, user-requested - "resemble
+        // premium 3D pinball pop bumpers"): a single glossy off-white plastic material shared by
+        // every bumper's cap, same instance reused across all 4 - real machines mold every pop
+        // bumper's cap from the same plastic regardless of that bumper's own color identity, so
+        // sharing it here (rather than tinting the cap per-bumper) is both cheaper and more
+        // faithful to the reference silhouette. Never mutated by pulseMesh() (see its own comment
+        // on why hit-flash is scale-only for extra meshes) - flashing this shared instance would
+        // bleed into every other bumper's cap at once.
+        const bumperCapMat = new BABYLON.PBRMaterial('bumperCapMat', scene);
+        bumperCapMat.albedoColor = new BABYLON.Color3(0.86, 0.86, 0.92);
+        bumperCapMat.metallic = 0.1;
+        bumperCapMat.roughness = 0.18;
+        bumperCapMat.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.07);
+
+        // Pop-bumper silhouette (visual-upgrade pass, user-requested): the collider stays the
+        // exact same sphere it always was (shape, size, position, physics aggregate, and the
+        // 'bumper'/boss metadata this file's scoring/kick/cooldown logic keys off of, all
+        // unchanged) - it also still IS the visible "raised bumper body" layer, doubling as both
+        // collider and dome. Everything else here is new, purely decorative dressing with no
+        // physics body of its own, layered around that unchanged sphere: a wide "base" skirt, a
+        // tapered "riser" neck connecting the base up to the body, the pre-existing glowing
+        // "collar" ring (now reparented, unchanged otherwise), a small flattened-sphere "cap"
+        // sitting on the body's peak, and a decorative color-matched "insert" glyph on the cap's
+        // face (built via createLabelPlane() - the same DynamicTexture-based emissiveTexture
+        // technique the lane markers use, so a future skin pass can swap in a real image texture
+        // by editing exactly one texture assignment, not this geometry). All new meshes are
+        // parented under one TransformNode per bumper purely for organizational/hierarchy
+        // purposes - reparenting purely decorative, physics-free meshes doesn't affect the
+        // collider sphere above, which is never parented and never touched after creation. Low
+        // tessellation throughout (12-20 segments), matching this file's existing "cheap
+        // primitives, not high-poly meshes" budget for every other obstacle.
         //
         // Board redesign: index 0 (closest to the new giant Saturn centerpiece, at the top of the
         // cluster) is a "boss" bumper - 50% bigger radius and worth notably more (SCORE_BOSS_
         // BUMPER vs SCORE_ATTACK_BUMPER, see handlePhysicalHit()) - so the cluster reads as having
-        // real internal variety instead of 4 identical clones in different colors.
+        // real internal variety instead of 4 identical clones in different colors. Every
+        // dimension below is derived from that same per-bumper radius, so the boss bumper's whole
+        // fixture (base/riser/cap/insert, not just the body) scales up together with it.
         BUMPER_CLUSTER.forEach((pos, i) => {
             const isBoss = i === 0;
             const radius = isBoss ? BUMPER_RADIUS_M * 1.5 : BUMPER_RADIUS_M;
+            const colorMat = bumperMats[i % bumperMats.length];
+
             const mesh = BABYLON.MeshBuilder.CreateSphere('bumper' + i, { diameter: radius * 2 }, scene);
             mesh.position.set(pos.x, radius, pos.z);
-            mesh.material = bumperMats[i % bumperMats.length];
-            mesh.metadata = { kind: 'bumper', boss: isBoss };
+            mesh.material = colorMat;
             // Physical body, not a trigger - restitution alone gives the bounce; the ball's
             // collision observable (see main()) reports the hit for scoring on top of that.
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
 
-            const skirt = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Skirt', {
-                diameter: radius * 2.6,
+            const rig = new BABYLON.TransformNode('bumper' + i + 'Rig', scene);
+            rig.position.set(pos.x, 0, pos.z);
+
+            const base = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Base', {
+                diameterTop: radius * 2.6,
+                diameterBottom: radius * 2.9,
                 height: radius * 0.35,
                 tessellation: 20
             }, scene);
-            skirt.position.set(pos.x, radius * 0.18, pos.z);
-            skirt.material = housingMat;
+            base.parent = rig;
+            base.position.y = radius * 0.18;
+            base.material = housingMat;
+
+            const riser = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Riser', {
+                diameterTop: radius * 1.7,
+                diameterBottom: radius * 2.2,
+                height: radius * 0.5,
+                tessellation: 20
+            }, scene);
+            riser.parent = rig;
+            riser.position.y = radius * 0.55;
+            riser.material = housingMat;
 
             const collar = BABYLON.MeshBuilder.CreateTorus('bumper' + i + 'Collar', {
                 diameter: radius * 2.15,
                 thickness: radius * 0.14,
                 tessellation: 20
             }, scene);
-            collar.position.set(pos.x, radius * 0.75, pos.z);
-            collar.material = bumperMats[i % bumperMats.length]; // shares the dome's own material/color - reads as one glowing fixture, not a mismatched add-on
+            collar.parent = rig;
+            collar.position.y = radius * 0.85;
+            collar.material = colorMat; // shares the body's own material/color - reads as one glowing fixture, not a mismatched add-on, and flashes together with the body on hit (see pulseMesh())
+
+            // Flattened sphere, not a hemisphere primitive - simpler geometry, and sinking its
+            // equator slightly below the body's own peak hides the seam between the two so the
+            // cap reads as continuous with the dome beneath it rather than a disc stuck on top.
+            const cap = BABYLON.MeshBuilder.CreateSphere('bumper' + i + 'Cap', { diameter: radius * 1.3, segments: 12 }, scene);
+            cap.scaling.y = 0.55;
+            cap.parent = rig;
+            cap.position.y = radius * 1.85;
+            cap.material = bumperCapMat;
+
+            // Decorative insert/icon: a single glyph tinted to this bumper's own color, reusing
+            // createLabelPlane()'s DynamicTexture/emissiveTexture pattern instead of a bespoke
+            // one - see this block's own comment for why that keeps a future textured-skin pass
+            // to a one-line change. createLabelPlane() places its plane at a fixed low playfield
+            // height tilted to face this game's fixed camera; overriding .position.y afterward
+            // lifts that same already-camera-tuned tilt up to the cap's face instead.
+            const insert = createLabelPlane(scene, '●', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: 30, planeSize: radius * 1.5 });
+            insert.position.y = radius * 2.05;
+
+            mesh.metadata = { kind: 'bumper', boss: isBoss, capMesh: cap, insertMesh: insert };
         });
 
         // CONFIG.colors.chakra (7 colors) - each mission target gets its own chakra color
@@ -4703,7 +4775,17 @@ import {
         // Lightweight scale-pulse as this stage's hit feedback - a 3D-appropriate stand-in for
         // the 2D version's tween-based flash (Stage 8's particle/VFX system will do this properly
         // later; this is enough to make a hit feel registered in the meantime).
-        function pulseMesh(mesh, scale = 1.3) {
+        //
+        // extraMeshes (bumper visual-upgrade pass, user-requested - "tiny scale/impact reaction if
+        // safe"): optional companion meshes (the bumpers' decorative cap/insert) that get the same
+        // brief scale pulse as the primary mesh, WITHOUT the emissive-flash half of the treatment -
+        // some of those companion materials (the shared bumper cap) are reused across multiple
+        // fixtures, so mutating their emissiveColor here the way the primary mesh's material is
+        // mutated below would bleed the flash into every other fixture sharing that material at
+        // once. Scale-only sidesteps that while still giving the whole fixture a unified "impact"
+        // read, not just its collider. Defaults to none - every pre-existing call site is
+        // unaffected.
+        function pulseMesh(mesh, scale = 1.3, extraMeshes = []) {
             const original = mesh.scaling.clone();
             mesh.scaling.scaleInPlace(scale);
             // Emissive flash to near-white on top of the scale pulse - the doc's "briefly
@@ -4715,10 +4797,14 @@ import {
             if (originalEmissive) {
                 mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
             }
+            const extras = extraMeshes.filter(Boolean).map((m) => ({ mesh: m, original: m.scaling.clone() }));
+            extras.forEach(({ mesh: m }) => m.scaling.scaleInPlace(scale));
             setTimeout(() => {
-                if (mesh.isDisposed()) return;
-                mesh.scaling.copyFrom(original);
-                if (originalEmissive) mat.emissiveColor.copyFrom(originalEmissive);
+                if (!mesh.isDisposed()) {
+                    mesh.scaling.copyFrom(original);
+                    if (originalEmissive) mat.emissiveColor.copyFrom(originalEmissive);
+                }
+                extras.forEach(({ mesh: m, original: o }) => { if (!m.isDisposed()) m.scaling.copyFrom(o); });
             }, 100);
         }
 
@@ -5136,7 +5222,7 @@ import {
                 // touch punchier than a passive bounce, without changing scoring or any other
                 // obstacle kind's feedback (all other pulseMesh()/playHitSound() call sites are
                 // untouched, defaulting back to their original 1.3x/0.14 values).
-                pulseMesh(mesh, 1.4);
+                pulseMesh(mesh, 1.4, [meta.capMesh, meta.insertMesh]); // extends the flash/pulse to the bumper's decorative cap+insert (see pulseMesh()'s own comment on why those two are scale-only)
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + points, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
                 triggerCameraShake(130, meta.boss ? 0.009 : 0.007); // was 120/0.008/0.006 - a bit stronger, matching the new active-kick feel
