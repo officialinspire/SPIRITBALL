@@ -165,109 +165,75 @@ export const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s com
 // caught, reported failure) if the CDN is blocked, ahead of where the error-handling
 // listeners further down even get registered.
 //
-// The 70-degree sweep magnitude reuses the OLD 2D game's already-tuned value (20deg rest to
-// -50deg active - see archive/release-prompts/01-*.md) but the actual REST ANGLES below are NOT
-// reused from 2D - flippers are a brand-new 3D mechanism (motorized hinge constraint, not a
-// velocity-injection formula), and naively reusing the 2D angle numbers via this file's
-// toWorldRotationY() wall-conversion helper produced physically wrong geometry (paddle tips
-// crossing the centerline AT REST, before activation - verified with a standalone Node
-// script, not by eye, since this sandbox can't render). These values were instead derived by
-// numerically searching for a (rest angle, direction) pair that actually produces correct
-// real-world flipper geometry: tip pointing outward-and-toward-the-near/player-end at rest,
-// swinging toward center-and-up-table when activated - then mirrored exactly for the right
-// flipper (mirroring an angle-plus-rotation-direction pair requires negating both the angle
-// reflection AND the sweep direction, not just the angle - also verified numerically).
+// ROOT CAUSE of every earlier "wrong sweep angle" bug fix (all superseded, no longer kept
+// verbatim - see git history if the blow-by-blow is ever needed again): createFlipper()'s old
+// setFlipperAngle() computed the paddle mesh's world position by hand each frame - orbiting a
+// CENTER-origin box around the pivot with pivot + halfLength*(cos angle, sin angle) - while
+// separately handing that same `angle` to BABYLON.Quaternion.RotationAxisToRef(Axis.Y, angle)
+// for the mesh's rotation. Those two formulas silently disagreed: Babylon's actual left-handed
+// Y-axis rotation maps local +X to world (cos angle, -sin angle) - a MINUS on the Z term - not
+// the (cos angle, +sin angle) the position code assumed. Verified directly against the
+// vendored engine (BABYLON.Vector3.TransformNormal through the real rotation matrix), and by
+// replaying the exact old position formula: at this file's own rest angles the paddle's
+// "pivot" end actually drifted up to 68mm from the real fixed pivot (FLIPPER_LENGTH_M is only
+// 75mm) - i.e. the flipper wasn't hinging at all, it was sliding through an arc that only
+// coincidentally passed through the intended pivot at angle=0. Every earlier fix (rest-angle
+// sign flips, mirroring swaps, and above all the 160-degree sweep - nearly 2.5x a real
+// flipper's throw) was blind trial-and-error against that drift, not a fix for it.
 //
-// Bug fix (user-reported - "rest position angle looks wrong"): the original -100/-80 pair put
-// the rest angle only 10 degrees off perfectly vertical (nearly straight down, toward the
-// player), which reads on screen as a stubby vertical pillar rather than a classic pinball
-// flipper's diagonal paddle silhouette. Shifted 15 degrees further from vertical (each rest
-// angle now 25 degrees off vertical instead of 10), re-verified numerically the same way the
-// original pair was: LEFT's rest tip is still further outward (more negative X) than its own
-// pivot (no crossing at rest, same invariant as before), and with FLIPPER_SWEEP_RAD unchanged,
-// both ACTIVE tips still cross well past the centerline AND still overlap each other by ~6mm
-// when fired simultaneously (no new gap for the ball to sneak through - checked at every 5-degree
-// shift up to 25 before picking 15, since a 20-degree shift left only ~3mm of that overlap and
-// 25 degrees lost it entirely). Mirroring relationship (RIGHT_REST = 180 - LEFT_REST) preserved
-// exactly as established above.
+// THE FIX (see createFlipper()'s own comment in babylon-game.js for the code): the paddle mesh
+// is now a child of a small pivot TransformNode, offset by a constant, never-changing local
+// (FLIPPER_LENGTH_M / 2, 0, 0). Only the pivot node's rotationQuaternion changes per frame,
+// stepped by updateFlipperMotor(). Babylon's own transform hierarchy - not hand-rolled trig -
+// turns that into the mesh's world transform, so the base end is mathematically pinned to the
+// pivot's world position at every angle (checked programmatically for this exact rest/active
+// pair below: 0.00mm drift, versus the old formula's 68mm). There is no separate position
+// formula left to disagree with the rotation, so this whole bug class can't recur.
 //
-// Bug fix (user-reported - "flippers flip down instead of up"), superseded by the fix directly
-// below - kept for history: the "verified numerically" claim above checked that the active tip
-// crosses the centerline (X) and moves further from the rest position than at rest, but never
-// actually checked the active tip's Z position against the PIVOT's own Z - the number that
-// determines whether the tip visually ends up above (up-table) or below (down-table, toward the
-// player) the hinge. It doesn't: with the old 70-degree sweep, LEFT's active angle landed at -45
-// degrees, whose tip sits ~53mm further TOWARD THE PLAYER than its own pivot - confirmed both by
-// direct position readout and by Playwright screenshots showing the "fired" flipper stretching
-// further down-screen than at rest. The sweep was simply too small to ever reach "up-table"
-// starting from a REST angle that pointed down-and-outward - the active tip's Z only ever
-// crosses to positive (above the pivot) once the sweep is large enough to carry the angle up
-// through horizontal (0 degrees) and beyond, so that first fix widened the sweep to 160 degrees
-// instead, keeping the down-and-outward REST angles untouched.
-//
-// Bug fix, attempt 2 (user-reported, with a reference image - "tip up versus tip down"),
-// superseded by attempt 3 directly below - kept for history: read the reference as "the REST
-// silhouette itself needs to point up-and-outward, not down-and-outward", so REST was mirrored
-// across the horizontal axis (LEFT_REST +115 instead of -115, RIGHT_REST +65 instead of -65) with
-// FLIPPER_SWEEP_RAD back to 70 degrees. Confirmed via Playwright screenshots to genuinely keep
-// the tip above its pivot's Z at both rest and fired - but the user then clarified this still
-// didn't match the reference: the tips needed to point INWARD (toward the center gap) at rest,
-// not outward, only the up/down component was about direction, not in/out.
-//
-// Bug fix, attempt 3 (user-clarified explicitly, in plain language): "the tips point toward the
-// center and downwards, and when pressed lift up towards center" - i.e. REST = down-and-INWARD,
-// FIRED = up-and-INWARD, with the inward lean roughly unchanged between the two (only the
-// vertical component flips) rather than any outward lean at either extreme. Superseded by
-// attempt 4 directly below - kept for history: this was achieved by swapping which rest angle
-// belongs to which side from the very first (pre-any-of-these-fixes) values (LEFT_REST -65,
-// RIGHT_REST -115) with FLIPPER_SWEEP_RAD widened to 130 degrees. The user then reported this was
-// STILL inverted from a real machine after a hard refresh (ruling out stale-cache confusion with
-// attempt 2's up-and-outward rest) and asked for flippers that "function and operate exactly like
-// a normal pinball machine" instead of continuing to interpret the original reference image.
-//
-// Bug fix, attempt 4 (real-pinball-mechanics baseline, per explicit user request - "exactly like
-// a normal pinball machine"): on every real (and virtual) pinball table, the flipper's spring-
-// loaded REST position points DOWN-and-OUTWARD (hanging toward the player/outlane, away from
-// center - this is what lets a ball that misses the flipper drain past it), and the solenoid-
-// fired ACTIVE position snaps UP-and-INWARD (toward the other flipper, to intercept and redirect
-// the ball back up the table) - this is the universally standard flipper motion, independent of
-// any particular reference image. This restores the REST angles to the very first (pre-any-of-
-// these-fixes) down-and-outward values (LEFT -115, RIGHT -65 - see the numerically-searched
-// derivation above for why these specific angles) and keeps FLIPPER_SWEEP_RAD at 160 degrees
-// (from the "flippers flip down instead of up" fix above) so ACTIVE lands up-and-inward (LEFT:
-// -115 -> 45, RIGHT: -65 -> -135/225) rather than still-downward. createFlipper()'s motorSign/
-// minAngleRad/maxAngleRad needs no further change - it's already back at its very first
-// direction convention from the previous fix, which is exactly what these REST values need.
-// Verified numerically (tip position vs. pivot, both axes, both states) and visually via
-// Playwright screenshots.
-export const FLIPPER_SWEEP_RAD = (160 * Math.PI) / 180;
-export const FLIPPER_LEFT_REST_RAD = (-115 * Math.PI) / 180;
-export const FLIPPER_RIGHT_REST_RAD = (-65 * Math.PI) / 180;
+// REST/ACTIVE ANGLES, re-derived from scratch for the fixed (correct) transform - the pre-fix
+// values are meaningless here since they were tuned against the broken formula's drift, not
+// against real geometry. Also re-derived, rather than reused, is the SWEEP itself: a real
+// flipper's rest is only diagonal-ish (down-and-outward), not close to vertical, and its fired
+// position is only diagonal-ish (up-and-inward relative to rest), not close to horizontal - a
+// single rigid hinge simply cannot swing between a genuinely-vertical-leaning rest and a
+// genuinely-horizontal-leaning active in under ~90 degrees (provable: the two would sit in
+// non-adjacent quadrants of the rotation circle). Splitting the difference the way real
+// hardware does - rest tilted a modest 25 degrees below the outward-horizontal line, active
+// tilted 40 degrees above that same line, 65 degrees apart - keeps both ends genuinely diagonal
+// (rest: outward-dominant with a real downward lean; active: still net-outward but visibly
+// LESS outward than rest, and strongly upward) while landing squarely in a real 50-70 degree
+// mechanical stroke. Confirmed numerically against the actual pivot-hierarchy transform (not by
+// eye): LEFT rest tip sits 68mm outward/32mm down from its pivot; LEFT active tip sits 58mm
+// outward/48mm up - clearly up, clearly closer to center than rest, clearly still a diagonal
+// paddle silhouette at both ends. RIGHT is the exact mirror (RIGHT_REST = 180 - LEFT_REST, same
+// relationship this file used before) - verified as an exact x-sign-flip of every LEFT number,
+// same z values.
+export const FLIPPER_SWEEP_RAD = (65 * Math.PI) / 180;
+export const FLIPPER_LEFT_REST_RAD = (155 * Math.PI) / 180;
+export const FLIPPER_RIGHT_REST_RAD = (25 * Math.PI) / 180;
 
 // Motor tuning - NOT ported from anything (flippers are an entirely new mechanism in this
 // 3D rewrite; the 2D version's velocity-injection formula has no equivalent here). These are
 // angle-per-second rates consumed directly by updateFlipperMotor()'s kinematic stepping (see
-// createFlipper()'s comment for why this isn't a physics-constraint motor).
+// createFlipper()'s comment for why this isn't a physics-constraint motor) - a hard-clamped,
+// constant-angular-velocity ramp toward the target angle each frame, deliberately NOT an
+// eased/lerped animation: real flipper hardware is two distinct mechanisms with two distinct
+// characters, a powered solenoid punching up fast and a passive return spring pulling back
+// slightly slower, not one smoothed curve - see updateFlipperMotor()'s own comment for how the
+// clamp guarantees an exact, jitter-free landing on both the active stop and the rest angle.
 //
-// Bug fix (user-reported - "when I fire the flippers they literally jump out of position" instead
-// of visibly swinging from the hinge): at the original 26 rad/s, the current 160-degree
-// FLIPPER_SWEEP_RAD (see its own comment) completes in ~107ms - only 2-3 rendered frames on a
-// real device at a typical 24-30fps, and a single frame in this sandbox's own much slower ~2fps
-// headless rendering (confirmed directly: a captured per-frame angle trace showed the entire
-// rest-to-active sweep landing in exactly one frame, a literal 160-degree jump with zero
-// intermediate samples - see this fix's own testing note in the PR). A kinematic body's rotation
-// is only as smooth as the frames sampling it - a real solenoid's near-instant physical snap
-// doesn't need to look continuous to the eye the way an ANIMATED (not physically simulated)
-// mesh's per-frame teleport does. Slowed to 10 rad/s so the same 160-degree sweep takes ~279ms -
-// still a fast, snappy flip (nowhere near sluggish), but now spans roughly 7-17 frames across the
-// realistic 24-60fps range instead of 2-3, enough to read as a hinge swing rather than a jump.
-// This sandbox's own ~2fps headless rendering still can't show it as multi-frame motion (a
-// pre-existing, documented environment limitation, not something this fix can address) - could
-// not be re-verified visually here, only reasoned about via frame-count math; needs confirming on
-// real hardware. FLIPPER_RETURN_SPEED_RAD_S was already slow enough (310ms for the same sweep) to
-// not exhibit this problem and is unchanged.
-export const FLIPPER_ACTIVATE_SPEED_RAD_S = 10; // fast "punch" (~279ms for the current 160-degree sweep), fast enough to still land in Havok's own next physics step like a real solenoid, slow enough to visibly swing across multiple frames instead of teleporting - see this constant's own bug-fix comment
-export const FLIPPER_RETURN_SPEED_RAD_S = 9; // slower, controlled return (magnitude only - direction is per-flipper, see createFlipper())
+// Electromechanical-feel pass (user-requested - "very fast powered upstroke... spring-like
+// return, slightly slower than the upstroke"): FLIPPER_SWEEP_RAD is a real 65-degree stroke (see
+// its own comment), so these speeds are picked as durations for THAT sweep, not as arbitrary
+// rad/s numbers - FLIPPER_ACTIVATE_SPEED_RAD_S = 9.9 completes the 65-degree upstroke in ~115ms
+// (a snap, not a lerp - about 2.7 rendered frames even at a modest 24fps, comfortably more at
+// 60fps), and FLIPPER_RETURN_SPEED_RAD_S = 7.1 completes the return in ~160ms, ~40% slower than
+// the upstroke - close enough to read as the same mechanism relaxing back, not a second copy of
+// the punch. If FLIPPER_SWEEP_RAD ever changes, these two should be rescaled by the same ratio
+// (speed = sweep / desired-duration) rather than left as-is, or the durations above silently
+// drift with it.
+export const FLIPPER_ACTIVATE_SPEED_RAD_S = 9.9; // fast "punch" (~115ms for the current 65-degree sweep) - see this constant's own comment for why it's not picked independently of FLIPPER_SWEEP_RAD
+export const FLIPPER_RETURN_SPEED_RAD_S = 7.1; // spring-like, slightly slower return (~160ms - magnitude only, direction is per-flipper, see createFlipper())
 
 // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
 export const BUMPER_RADIUS_M = 0.02;
@@ -375,13 +341,14 @@ export const REENTRY_LANES = [
 // Layout (left side; SIDE_LANES' mirror flips everything for the right):
 //   [leftWall -0.2267] -- OUTLANE (trigger @ -0.185) -- [divider rail @ -0.145] -- INLANE
 //   (trigger @ -0.095, bounded on its inner side by an angled guide tapering from -0.14 down
-//   to -0.06 - see INLANE_GUIDE_TOP_X_M/INLANE_GUIDE_BOTTOM_X_M) -- open onto the flipper's
+//   to -0.125 - see INLANE_GUIDE_TOP_X_M/INLANE_GUIDE_BOTTOM_X_M's own comment for why that's
+//   -0.125 and not the -0.06 this paragraph originally described) -- open onto the flipper's
 //   own approach beyond that.
 // Z runs from LANE_Z_TOP_M (just clear of the slingshot's own footprint) to LANE_Z_BOTTOM_M
-// (within the flipper's operating Z range, but the divider/guide both stay far enough out in
-// X at every point along their length - divider fixed at 0.145, guide tapering only as far in
-// as 0.06, vs the flipper's own -0.058..+0.02 sweep envelope - that neither can ever
-// physically overlap the flipper mechanism at any angle). Below LANE_Z_BOTTOM_M, both lanes
+// (within the flipper's operating Z range - the divider stays clear at a fixed 0.145 throughout,
+// but the guide's own clearance from the flipper's real swept footprint is a live geometric
+// constraint, not a fixed number here - see INLANE_GUIDE_BOTTOM_X_M's own comment for the actual
+// current clearance value and how it's verified). Below LANE_Z_BOTTOM_M, both lanes
 // are left open (no wall) - gravity/tilt alone carries an outlane ball into the existing
 // full-width drainZone trigger exactly the way any unguided ball past the flippers already
 // does today, and an inlane ball - already redirected inward by the guide by this point -
@@ -412,11 +379,33 @@ export const LANE_TRIGGER_DEPTH_M = 0.025;
 // "inlanes should naturally feed toward their corresponding flipper": it starts almost flush
 // with the divider (so the inlane's mouth, right where a ball exits the slingshot area, has no
 // gap a ball could fall through untouched) and tapers inward as Z decreases, ending near the
-// flipper's own resting reach (left flipper's extrapolated rest-tip sits around x=-0.058 - see
-// SIDE_LANES' block comment) - so a ball riding this rail down arrives close enough for the
+// flipper's own resting reach - so a ball riding this rail down arrives close enough for the
 // flipper to actually reach it, matching how a real inlane guide is shaped, not just labeled.
+//
+// Physics QA fix (flipper collision audit): INLANE_GUIDE_BOTTOM_X_M was 0.06, calibrated
+// against this file's now-superseded flipper geometry (see FLIPPER_LEFT_REST_RAD's own
+// comment for the full pivot/angle history) whose swept footprint stayed much closer to its
+// pivot. The current, corrected flipper geometry sweeps a genuinely real down-and-outward
+// REST to up-and-inward ACTIVE stroke, and its paddle's own outward reach (a box, not a point -
+// its long axis plus half its own thickness) extends out to roughly x=-0.12 at points along that
+// stroke - well past the old 0.06 guide endpoint (mirrored -0.06). Left unfixed, the guide rail
+// and the flipper paddle genuinely overlap in 3D space for most of the stroke (confirmed via
+// Babylon's own precise mesh-intersection test, swept in 1-degree steps across the full rest-
+// to-active range: 43 of 67 sampled angles intersected at the old 0.06) - two solid static
+// colliders occupying the same space, which produced a real, reproducible bug: a ball merely
+// resting on or gently dropped onto the flipper could get trapped in the unstable double-contact
+// where the two overlapping colliders meet, and be flung off the table at several m/s (confirmed
+// via real Havok collision events - the ball's first contact was with this guide, not the
+// flipper, exactly where their volumes overlap). Raised to 0.125 (0.115 is the exact geometric
+// clearance threshold from the same sweep test, swept in fine 0.002 steps: 0.113 still
+// intersects, 0.115 is clean - 0.125 keeps 10mm of headroom above that threshold rather than
+// sitting right on it) - re-verified with the same 1-degree sweep: zero intersecting angles
+// across the full stroke, both flippers (right is an exact mirror). This does shrink the guide's
+// taper (it now stays closer to flush with the divider than to the flipper) - an unavoidable
+// consequence of the corrected flipper's genuinely larger real-pinball-scale reach, not a design
+// preference.
 export const INLANE_GUIDE_TOP_X_M = 0.14; // mirrored - almost flush with LANE_DIVIDER_X_M (0.145)
-export const INLANE_GUIDE_BOTTOM_X_M = 0.06; // mirrored - tapers inward to near the flipper's reach
+export const INLANE_GUIDE_BOTTOM_X_M = 0.125; // mirrored - tapers toward the flipper, clearing its full swept footprint (see this constant's own comment)
 // mirror is a plain position-sign multiplier here (unlike SLINGSHOTS'/BUMPER_CLUSTER's own
 // `mirror`, which only flips rotation handedness - their X positions are hardcoded per-entry
 // instead) - left is negative X throughout this file (see FLIPPER_GAP_HALF_M's left pivot at
@@ -851,10 +840,21 @@ export const HEX_SATURN_RING = 0xffd700;
 export const HEX_COMET = 0x66e0ff;
 export const HEX_MISSION_ACTIVE = 0x00ff00;
 // Classic amber/gold pinball insert-lamp color - deliberately distinct from HEX_MISSION_ACTIVE
-// (green), so the new inlane/outlane lamps read as their own thing, not a re-skin of the
-// reentry lanes' mission-tied "lit" state (a genuinely different mechanic, see SIDE_LANES'
-// block comment).
+// (green), so the inlane/outlane lamps read as their own thing, not a re-skin of the reentry
+// lanes' mission-tied "lit" state (a genuinely different mechanic, see SIDE_LANES' block
+// comment). Visual-polish pass (user-requested - "clear visual separation between inlanes/
+// outlanes/orbits"): this identity now belongs to the INLANE specifically - see
+// HEX_OUTLANE_LAMP directly below for why the outlane split off its own color instead of
+// continuing to share this one.
 export const HEX_LANE_LAMP = 0xffaa00;
+// Outlanes previously shared HEX_LANE_LAMP with inlanes - visually identical despite being the
+// "safe return" vs. "likely drain" halves of the same rollover pair, exactly the ambiguity a
+// player relies on lane color to resolve at a glance on a real machine. A saturated warning red,
+// picked to sit clearly apart from every other warm color already on the board (HEX_KICKBACK_LAMP
+// 0xff5500's orange, HEX_SKILL_SHOT_LAMP 0xff3366's pink-red) - important since the kickback lamp
+// physically sits on this same outlane, further down toward the drain, and the two must still
+// read as separate signals when both are visible together.
+export const HEX_OUTLANE_LAMP = 0xff1a33;
 // Electric cyan-white - the orbit lamps' own identity, distinct from HEX_LANE_LAMP's amber
 // (inlane/outlane) and HEX_MISSION_ACTIVE's green (reentry lanes), so the board's three
 // "lit insert" mechanics each read as visually distinct at a glance.

@@ -103,9 +103,13 @@ import {
     DRAIN_ZONE_CENTER_Y_PX, STARTING_LIVES, hexToColor3, HEX_BALL,
     HEX_EYEBALL, HEX_FLIPPER, HEX_WALL, HEX_BUMPERS,
     HEX_CHAKRA, HEX_SATURN, HEX_SATURN_RING, HEX_COMET,
-    HEX_MISSION_ACTIVE, HEX_LANE_LAMP, HEX_ORBIT_LAMP, HEX_SKILL_SHOT_LAMP,
+    HEX_MISSION_ACTIVE, HEX_LANE_LAMP, HEX_OUTLANE_LAMP, HEX_ORBIT_LAMP, HEX_SKILL_SHOT_LAMP,
     HEX_BALL_SAVE_LAMP, HEX_KICKBACK_LAMP, HEX_BACKGROUND
 } from './js/config.js';
+// Decorative-skin manifest (visual-architecture pass, user-requested) - pure data, see its own
+// file header for why it stays BABYLON-free, and SKINS.md at the repo root for the full asset-
+// folder spec this powers. Imported the same bare-identifier way as js/config.js above.
+import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
 (function () {
     'use strict';
@@ -790,7 +794,7 @@ import {
     // main(), after BABYLON is confirmed loaded - see the "Populate deferred COLOR_* constants"
     // block there.
     let COLOR_BALL, COLOR_EYEBALL, COLOR_FLIPPER, COLOR_WALL, COLOR_BUMPERS, COLOR_CHAKRA,
-        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_ORBIT_LAMP,
+        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_OUTLANE_LAMP, COLOR_ORBIT_LAMP,
         COLOR_SKILL_SHOT_LAMP, COLOR_BALL_SAVE_LAMP, COLOR_KICKBACK_LAMP, COLOR_VISION_GATE, COLOR_BACKGROUND;
 
     // Device-tier gate, ported from PerformanceManager.detectPerformance() in ../index.js -
@@ -814,6 +818,104 @@ import {
     }
 
     // ===================================
+    // Decorative-skin texture loader (visual-architecture pass, user-requested - "prepare
+    // SPIRITBALL's visual architecture for custom generated artwork... WITHOUT adding the final
+    // artwork yet"). This is the ONLY place in the whole file that ever loads a skin image - see
+    // js/skins.js for the manifest (SKIN_MANIFEST/SKIN_ASSET_BASE) and SKINS.md at the repo root
+    // for the asset-folder spec. Every call site below (buildTable()/buildObstacles()) already
+    // builds its material with the existing procedural look FIRST, then calls this - so a slot
+    // with no path configured (every slot, until real artwork exists - see skins.js) is a true
+    // no-op, not a missing-texture glitch.
+    //
+    // Null-path slots return immediately below WITHOUT ever issuing a network request - not just
+    // an implementation detail. A real attempted load that 404s still gets logged by Chromium's
+    // own network stack as a "Failed to load resource: 404" console entry, regardless of any
+    // onError handler here - that's a browser-level diagnostic tied to the raw HTTP response, not
+    // something JS can suppress (confirmed via a headless Chromium run against a real 404 while
+    // building this). With multiple skin slots, attempting every one of them speculatively before
+    // any artwork exists would mean that many console entries on every single load - a real
+    // regression against this project's own zero-console-error bar. Skipping the request entirely
+    // for an unset slot (see skins.js's own comment on why paths default to null, not a guessed
+    // future filename) is what actually keeps an artwork-free build's console silent.
+    //
+    // Deliberately fire-and-forget: BABYLON.Texture's own onLoad/onError callbacks below are how
+    // this resolves once a path IS configured, not a Promise a caller could accidentally await
+    // and block scene/game startup on. onError is passed explicitly (required - without it, a
+    // failed load also calls BABYLON's own Tools.Error internally; with it, the failure path
+    // taken by THIS code is entirely this callback) so a genuine load failure on a configured
+    // slot (wrong filename, bad deploy, network hiccup) still never throws, never rejects
+    // unhandled, and never touches the material beyond disposing the failed attempt - startup and
+    // every other decorative surface are unaffected either way. The one thing it can't do (see
+    // above) is keep Chromium's own network-failure console line from appearing for that specific
+    // configured-but-broken slot; that's expected, standard browser diagnostic behavior for any
+    // failed HTTP request, not a bug in this function.
+    //
+    // entry: one SKIN_MANIFEST value, i.e. { path, kind } - kind picks which material property
+    // gets the loaded texture ('albedo' -> albedoTexture/diffuseTexture, 'emissive' ->
+    // emissiveTexture), matching whichever of those properties that material's own procedural
+    // look already relies on for its base color. Passing a falsy entry (e.g. an out-of-range
+    // missionTargetFace index) is a safe no-op, not an error - callers don't need to guard first.
+    function applySkinTexture(scene, material, entry) {
+        if (!entry || !entry.path || !material) return;
+        const property = entry.kind === 'emissive' ? 'emissiveTexture' : (material.albedoColor ? 'albedoTexture' : 'diffuseTexture');
+        try {
+            const url = SKIN_ASSET_BASE + entry.path;
+            const texture = new BABYLON.Texture(
+                url,
+                scene,
+                undefined,
+                undefined,
+                undefined,
+                () => {
+                    // onLoad - only reached once the file has genuinely been fetched and decoded
+                    // successfully, safe to swap in now.
+                    material[property] = texture;
+                    // Reset the tint this property's own color multiplies against, so the loaded
+                    // artwork's real colors show through under scene lighting instead of getting
+                    // multiplied by whatever flat procedural color that material used as its
+                    // plain-color fallback (e.g. playfieldMat's dark cosmic tint would otherwise
+                    // significantly darken/wash out real playfield artwork layered on top of it -
+                    // exactly the "avoid washing out the artwork" requirement this exists for).
+                    // Only for 'albedo': an emissive texture is additive light output, not a
+                    // multiplied tint, so emissiveColor staying at its current (usually lamp-
+                    // system-controlled) value is correct as-is.
+                    if (entry.kind !== 'emissive') {
+                        if (material.albedoColor) material.albedoColor.set(1, 1, 1);
+                        else if (material.diffuseColor) material.diffuseColor.set(1, 1, 1);
+                    }
+                },
+                () => {
+                    // onError - includes a plain 404, the expected/default case for every slot
+                    // right now. Dispose the failed attempt and leave the material exactly as
+                    // its caller already set it up; deliberately silent, since a missing
+                    // optional skin asset is normal, not a bug.
+                    texture.dispose();
+                }
+            );
+            // Sensible filtering defaults for every skin texture (visual-integration pass, user-
+            // requested - "sensible texture filtering, anisotropic filtering if supported"). Clamp
+            // (not the Texture class default of wrap/repeat) since every one of these slots is a
+            // single "cover this surface" image, never a tiling pattern - repeat would risk a
+            // visible seam if UV drifts even slightly past 0/1 at a mesh edge. Anisotropic
+            // filtering sharpens a texture viewed at a raking angle - exactly this game's fixed
+            // camera relative to the playfield (see buildCamera()'s own "steeply-angled" note) -
+            // gated on the engine actually reporting hardware support (maxAnisotropy > 0; the
+            // WEBGL_ANISOTROPIC_FILTER extension isn't universal) rather than assumed present.
+            texture.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+            texture.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+            const maxAnisotropy = scene.getEngine().getCaps().maxAnisotropy;
+            if (maxAnisotropy > 0) {
+                texture.anisotropicFilteringLevel = Math.min(8, maxAnisotropy);
+            }
+        } catch (err) {
+            // Defensive only - BABYLON.Texture's own async loader is what normally reports
+            // failures via onError above; this catches anything more fundamental (e.g. an
+            // already-disposed scene) without ever letting a skin-loading problem escape to
+            // main()'s own startup error handling.
+        }
+    }
+
+    // ===================================
     // Table geometry, ported from ../index.js GameScene.setupTable(). Boundary only (matches
     // this stage's scope) - the center divider post between the flippers is NOT included here;
     // it belongs conceptually with the flipper/obstacle work in later stages, not the outer
@@ -831,9 +933,22 @@ import {
         // convincingly "chrome" they read without real reflections.
         const wallMat = new BABYLON.PBRMaterial('wallMat', scene);
         wallMat.albedoColor = COLOR_WALL;
-        wallMat.metallic = 0.6;
+        // Lighting/material hierarchy pass (user-requested - "RAILS/STRUCTURE: metallic or
+        // physical-material definition" vs. "not every object should glow"): metallic raised
+        // (0.6 -> 0.72) and emissive cut roughly in half (0.15 -> 0.07) - these are the table's
+        // structural boundary, not a light source, so their identity should read from reflective/
+        // metallic response under the scene's direct lights, not from a self-glow competing with
+        // the actual lamps/bumpers/ball for the eye's attention. Left with a small emissive
+        // residue rather than zero: fully unlit walls read as flat black silhouettes against the
+        // dark space background at this camera angle (verified via screenshot), which loses the
+        // wall's own presence entirely rather than looking appropriately "structural."
+        wallMat.metallic = 0.72;
         wallMat.roughness = 0.3;
-        wallMat.emissiveColor = COLOR_WALL.scale(0.15);
+        wallMat.emissiveColor = COLOR_WALL.scale(0.07);
+        // Cabinet/table artwork skin slot (visual-architecture pass, user-requested) - shared by
+        // every structural boundary wall below. No-op until assets/skins/cabinet/cabinet-rails.png
+        // actually exists (see SKINS.md) - the chrome look above stays exactly as-is either way.
+        applySkinTexture(scene, wallMat, SKIN_MANIFEST.cabinetRails);
 
         // [x2d, y2d, width2d, height2d, rotation2d] - lifted directly from setupTable() in
         // ../index.js so this stays a faithful port, not a redesign.
@@ -887,6 +1002,38 @@ import {
         playfieldMat.albedoColor = COLOR_BACKGROUND.scale(0.5);
         playfieldMat.metallic = 0.3;
         playfieldMat.roughness = 0.35; // glossy-varnished, not mirror-flat, per the doc
+        // Playfield background/art skin slot (visual-integration pass, user-requested - "Keep
+        // enough material response that the surface still looks like a physical pinball playfield
+        // rather than a flat webpage image"). Populated with real artwork (see SKINS.md). The two
+        // overrides just below apply UNCONDITIONALLY - to the flat-tint fallback above just as
+        // much as to the textured look once applySkinTexture() resolves - deliberately: the
+        // fallback and the textured surface are the same physical material with two different
+        // colors/patterns on it, not two different materials, so both should share one physical
+        // response:
+        //   - metallic dropped from 0.3 to near-zero: a real playfield's printed art sits under a
+        //     clear lacquer coat, it isn't itself a metal surface - the old 0.3 was tuned before
+        //     this pass and would read as an odd metallic sheen now that real printed artwork can
+        //     be layered under it.
+        //   - roughness tightened slightly (0.35 -> 0.28): a bit more clearcoat-like specular
+        //     "pop" under the scene's direct lights, without going glassy/mirror-flat.
+        // Only albedoColor differs between the two states, and only because applySkinTexture()
+        // itself resets it to white on a successful load (see that function's own comment) - nothing
+        // here sets it conditionally.
+        //
+        // No emissiveColor was added (stays at the PBRMaterial default of black/off) - the
+        // artwork's own bright glow elements (the flower-of-life's light points) already read as
+        // bright via albedo under direct light; adding material-level emissive on top would wash
+        // out their contrast rather than help, so none is added ("emissive contribution only
+        // where necessary" - none is necessary here).
+        //
+        // No scene.environmentTexture was added either: matches this project's existing,
+        // deliberate policy (see wallMat's own comment above) of not taking on a second fragile
+        // CDN texture fetch for IBL reflections. "Subtle environmental response" instead comes
+        // from the retained non-zero metallic/roughness Fresnel response Babylon's PBR model
+        // already computes from direct scene lights alone, the same tradeoff wallMat already made.
+        playfieldMat.metallic = 0.05;
+        playfieldMat.roughness = 0.28;
+        applySkinTexture(scene, playfieldMat, SKIN_MANIFEST.playfieldBackground);
         const playfield = BABYLON.MeshBuilder.CreateBox('playfield', {
             width: TABLE_WIDTH_M,
             height: 0.02,
@@ -923,9 +1070,12 @@ import {
     function buildLaunchLane(scene) {
         const laneMat = new BABYLON.PBRMaterial('laneWallMat', scene); // same chrome treatment as buildTable()'s walls
         laneMat.albedoColor = COLOR_WALL;
-        laneMat.metallic = 0.6;
+        // Lighting/material hierarchy pass (user-requested) - same metallic-up/emissive-down
+        // rebalance as buildTable()'s wallMat above (see its own comment); this is the identical
+        // "chrome rail" material family, just one more wall segment.
+        laneMat.metallic = 0.72;
         laneMat.roughness = 0.3;
-        laneMat.emissiveColor = COLOR_WALL.scale(0.15);
+        laneMat.emissiveColor = COLOR_WALL.scale(0.07);
 
         const wall = BABYLON.MeshBuilder.CreateBox('launchLaneWall', {
             width: 8 * PX_TO_M,
@@ -1085,7 +1235,29 @@ import {
     // backdrop, not a projection suited to wrapping around a 3D sphere - reusing it as-is would
     // look wrong, and re-authoring a proper equirectangular version wasn't worth doing sight-
     // unseen in a sandbox that can't render the result either way.
+    //
+    // Depth/variety pass (user-requested - "varied star sizes and brightness, sparse brighter
+    // stars, extremely subtle cosmic depth... no distracting fast animation"): still exactly one
+    // texture on the one existing skybox sphere - no second background layer, no extra meshes.
+    // Three drawing passes, in back-to-front order, all baked once into the DynamicTexture at
+    // startup (this whole function costs nothing per rendered frame - only its one-time canvas
+    // fill cost, same as before):
+    //   1. The original dark-purple-to-near-black gradient, unchanged.
+    //   2. A handful of large, extremely low-alpha (0.03-0.06) soft radial blobs in muted cosmic
+    //      hues - "depth" in the sense of faint nebula haze behind the stars, deliberately far too
+    //      dim to read as shapes or compete with any foreground geometry.
+    //   3. Two star tiers instead of one uniform scatter: many small dim stars (the bulk of the
+    //      field, alpha 0.12-0.55) plus a much smaller handful of larger, brighter stars (alpha
+    //      0.75-1.0, with a soft halo drawn under each) that read as the "sparse brighter stars"
+    //      the sky should have, and a light warm/cool tint on some of them for variety without
+    //      turning gaudy.
+    // Star/blob counts scale with highFidelity like every other decorative count in this file
+    // (particle systems, etc.) - detected locally rather than threaded in as a parameter, the same
+    // "cheap and stateless, re-read here" pattern buildObstacles() already uses for its own dev-
+    // mode flag, so this stays a self-contained drop-in and main()'s buildSkybox() call site needs
+    // no change.
     function createStarfieldTexture(scene) {
+        const highFidelity = detectHighFidelity();
         const size = 512;
         const texture = new BABYLON.DynamicTexture('starfieldTex', size, scene, false);
         const ctx = texture.getContext();
@@ -1096,11 +1268,49 @@ import {
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, size, size);
 
-        for (let i = 0; i < 300; i++) {
+        // Faint nebula haze - a few big, soft, near-invisible tinted blobs for cosmic depth. Kept
+        // to 3 regardless of tier (each is one cheap radial-gradient fill, not worth gating).
+        const nebulaHues = ['70,50,140', '30,90,100', '110,40,90'];
+        nebulaHues.forEach((rgb) => {
             const x = Math.random() * size;
             const y = Math.random() * size;
-            const r = Math.random() * 1.4 + 0.3;
-            ctx.fillStyle = 'rgba(255,255,255,' + Math.random().toFixed(2) + ')';
+            const r = size * (0.25 + Math.random() * 0.2);
+            const blob = ctx.createRadialGradient(x, y, 0, x, y, r);
+            blob.addColorStop(0, 'rgba(' + rgb + ',0.06)');
+            blob.addColorStop(1, 'rgba(' + rgb + ',0)');
+            ctx.fillStyle = blob;
+            ctx.fillRect(0, 0, size, size);
+        });
+
+        // Dim stars - the bulk of the field.
+        const dimCount = highFidelity ? 260 : 150;
+        for (let i = 0; i < dimCount; i++) {
+            const x = Math.random() * size;
+            const y = Math.random() * size;
+            const r = Math.random() * 0.9 + 0.2;
+            ctx.fillStyle = 'rgba(255,255,255,' + (0.12 + Math.random() * 0.43).toFixed(2) + ')';
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Sparse bright stars - noticeably fewer, bigger, and with a soft halo so they pop gently
+        // against the dim field instead of just being "bigger dots."
+        const brightCount = highFidelity ? 16 : 8;
+        for (let i = 0; i < brightCount; i++) {
+            const x = Math.random() * size;
+            const y = Math.random() * size;
+            const r = Math.random() * 1 + 1.3;
+            const roll = Math.random();
+            const tint = roll < 0.25 ? '190,225,255' : roll < 0.45 ? '255,240,215' : '255,255,255'; // mostly white, occasionally a soft cool or warm tint
+
+            const halo = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
+            halo.addColorStop(0, 'rgba(' + tint + ',0.18)');
+            halo.addColorStop(1, 'rgba(' + tint + ',0)');
+            ctx.fillStyle = halo;
+            ctx.fillRect(x - r * 4, y - r * 4, r * 8, r * 8);
+
+            ctx.fillStyle = 'rgba(' + tint + ',' + (0.75 + Math.random() * 0.25).toFixed(2) + ')';
             ctx.beginPath();
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.fill();
@@ -1119,8 +1329,26 @@ import {
 
         const skybox = BABYLON.MeshBuilder.CreateSphere('skybox', { diameter: 20, sideOrientation: BABYLON.Mesh.BACKSIDE }, scene);
         skybox.material = skyMat;
-        skybox.infiniteDistance = true;
+        skybox.infiniteDistance = true; // stays centered on the camera - translation never reveals an edge or creates parallax of its own
         return skybox;
+    }
+
+    // Gentle depth cue for the fixed gameplay camera (user-requested - "add gentle parallax/depth
+    // only if inexpensive and does not interfere with the fixed gameplay camera"): true multi-
+    // layer parallax needs camera movement or translation to read at all, and the gameplay camera
+    // is deliberately fixed (buildCamera()'s own comment - "must never be player-controllable
+    // during gameplay") - the only camera that ever moves is the pre-launch attract-mode orbit,
+    // which already reveals the skybox's texture from different angles for free, no extra code
+    // needed. What a fixed camera CAN show is the sky itself drifting - an extremely slow spin of
+    // the whole skybox sphere, independent of the camera, reads as ambient depth/vastness without
+    // ever being a distracting motion (one full rotation takes roughly 17 minutes - imperceptible
+    // frame to frame). Same "ambient decorative motion, reduced not stopped under reduced-motion"
+    // treatment as updateSaturnRotation() right above, not gameplay feedback so it stays running
+    // through pause/menu/game-over like that one does.
+    const SKYBOX_SPIN_RATE_RAD_MS = 0.000006;
+    function updateSkyboxRotation(skybox, deltaMs) {
+        const rate = window.SPIRITBALL_reducedMotion ? SKYBOX_SPIN_RATE_RAD_MS * 0.15 : SKYBOX_SPIN_RATE_RAD_MS;
+        skybox.rotation.y += rate * deltaMs;
     }
 
     // ===================================
@@ -1291,43 +1519,79 @@ import {
     }
 
     // Ball trail: emitter attached directly to the ball mesh (particles spawn at its current
-    // position every frame automatically), cyan/eyeball-tinted, additive - direct port of
-    // setupParticles()'s follow-the-ball ballTrail emitter. Started immediately but with emitRate
-    // driven every frame from the ball's actual speed (see updateBallTrail() in main()'s render
-    // loop) rather than a constant rate, so it reads as "the ball is moving fast" per the
-    // acceptance criteria instead of a trail that's equally visible at rest.
+    // position every frame automatically), additive-blended for a luminous (not opaque) look -
+    // direct port of setupParticles()'s follow-the-ball ballTrail emitter, kept as the one and
+    // only trail system (no second/competing implementation). Started immediately but with
+    // emitRate AND lifetime driven every frame from the ball's actual speed (see
+    // updateBallTrail() in main()'s render loop) rather than fixed constants, so both the density
+    // and the physical length of the trail track how fast the ball is actually moving instead of
+    // a trail that looks the same whether the ball is crawling or flying.
+    //
+    // Cosmic/ethereal pass (user-requested - "subtle luminous comet-like trail... not giant fire
+    // particles, not opaque, not visually distracting"): near-zero emit power keeps each particle
+    // essentially anchored to the spot it was born at (a "breadcrumb" left behind by the moving
+    // emitter) instead of scattering outward - that's what makes this read as a comet tail
+    // following the ball's actual recent path rather than a puff of smoke drifting on its own.
+    // Two-stop color gradient - a bright cyan-white core (matching the ball's own eyeball tint)
+    // cooling to a soft violet (the same cosmic hue family as buildDrainVortex()'s purple/indigo)
+    // before fading to fully transparent - gives "brightest close to the ball, smoothly fades
+    // with distance" without needing per-particle gradient APIs beyond what this file's other
+    // particle systems already use (color1/color2/colorDead, proven elsewhere in this exact
+    // function group).
+    const BALL_TRAIL_CORE_COLOR = new BABYLON.Color3(0.75, 1, 1); // cyan-white, blended toward white for a brighter "hot" core than the flat eyeball tint alone
+    const BALL_TRAIL_COOL_COLOR = new BABYLON.Color3(0.55, 0.35, 0.95); // soft cosmic violet, same family as the drain vortex's purple/indigo
     function buildBallTrail(scene, texture, ballMesh, highFidelity) {
         const trail = new BABYLON.ParticleSystem('ballTrail', highFidelity ? 200 : 80, scene);
         trail.particleTexture = texture;
         trail.emitter = ballMesh;
         trail.minEmitBox = new BABYLON.Vector3(0, 0, 0);
         trail.maxEmitBox = new BABYLON.Vector3(0, 0, 0);
-        trail.color1 = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0.7);
-        trail.color2 = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0.4);
-        trail.colorDead = new BABYLON.Color4(COLOR_EYEBALL.r, COLOR_EYEBALL.g, COLOR_EYEBALL.b, 0);
+        trail.color1 = new BABYLON.Color4(BALL_TRAIL_CORE_COLOR.r, BALL_TRAIL_CORE_COLOR.g, BALL_TRAIL_CORE_COLOR.b, 0.65); // brightest, right at the ball - well short of opaque
+        trail.color2 = new BABYLON.Color4(BALL_TRAIL_COOL_COLOR.r, BALL_TRAIL_COOL_COLOR.g, BALL_TRAIL_COOL_COLOR.b, 0.22); // cooling and dimming with age/distance
+        trail.colorDead = new BABYLON.Color4(BALL_TRAIL_COOL_COLOR.r, BALL_TRAIL_COOL_COLOR.g, BALL_TRAIL_COOL_COLOR.b, 0);
         trail.minSize = 0.005;
-        trail.maxSize = 0.012;
-        trail.minLifeTime = 0.25;
-        trail.maxLifeTime = 0.4; // matches the 2D version's 400ms lifespan
+        trail.maxSize = 0.012; // well under the ball's own 27mm diameter - a wisp, not a fireball
+        trail.minLifeTime = 0.25; // base range at low speed; updateBallTrail() scales both up together for a longer trail at higher speed
+        trail.maxLifeTime = 0.4;
         trail.emitRate = 0; // driven per-frame by updateBallTrail() based on ball speed
         trail.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
-        trail.direction1 = new BABYLON.Vector3(-0.05, 0, -0.05);
-        trail.direction2 = new BABYLON.Vector3(0.05, 0.05, 0.05);
-        trail.minEmitPower = 0.02;
-        trail.maxEmitPower = 0.08;
+        trail.direction1 = new BABYLON.Vector3(-0.01, 0, -0.01); // a whisper of outward drift for a soft ethereal shimmer, not real scatter
+        trail.direction2 = new BABYLON.Vector3(0.01, 0.015, 0.01);
+        trail.minEmitPower = 0.005; // near-stationary once spawned - what makes it read as a trail tracing the path, not a cloud
+        trail.maxEmitPower = 0.02;
         trail.start();
         return trail;
     }
 
-    // Continuously adjusts the ball trail's emit rate from its actual current speed - called once
-    // per frame from the render loop. Below the stuck-speed threshold it's effectively off; above
-    // MAX_BALL_SPEED_MS it's at full rate.
+    // Continuously adjusts the ball trail's emit rate AND per-particle lifetime from its actual
+    // current speed - called once per frame from the render loop. Below the stuck-speed-ish
+    // threshold it's effectively off (nearly disappears once the ball settles); above
+    // MAX_BALL_SPEED_MS both density and length are at their maximum. Reading getLinearVelocity()
+    // once and doing only scalar math after it (no `new` calls) keeps this allocation-free beyond
+    // whatever that single existing physics-API read itself costs - not adding a second, separate
+    // per-frame allocation to what updateBallPhysics() already produces this same frame.
     function updateBallTrail(trail, ball, highFidelity) {
         const velocity = ball.aggregate.body.getLinearVelocity();
         const speed = velocity.length();
         const speedFraction = Math.min(speed / MAX_BALL_SPEED_MS, 1);
+        // Reduced-motion: this trail is a motion-READABILITY aid tied directly to gameplay (not
+        // pure ambient decoration like buildChakraSparkle(), which fully disables under reduced
+        // motion) - same "tone down, don't remove" treatment buildDrainVortex() gives its own
+        // continuous emitter, just applied to both rate and length here.
+        const reducedMotion = window.SPIRITBALL_reducedMotion;
+        const rateScale = reducedMotion ? 0.35 : 1;
         const maxRate = highFidelity ? 60 : 25; // ~40/sec at 2D's frequency:25ms was the baseline; scaled up a bit since this trail fades with speed instead of running constantly
-        trail.emitRate = speedFraction > 0.1 ? maxRate * speedFraction : 0;
+        trail.emitRate = speedFraction > 0.1 ? maxRate * speedFraction * rateScale : 0;
+
+        // Trail length scales moderately with speed: growing minLifeTime/maxLifeTime (not just
+        // emitRate) means a fast ball leaves a genuinely LONGER streak, not just a denser one at
+        // a fixed length - up to ~1.6x the base lifetime at full speed (a moderate stretch, not
+        // an exaggerated one). Babylon reads life{Min,Max}Time only at each particle's own
+        // emission, so this never disturbs particles already in flight, only the ones about to
+        // spawn.
+        const lengthScale = (1 + speedFraction * 0.6) * (reducedMotion ? 0.7 : 1);
+        trail.minLifeTime = 0.25 * lengthScale;
+        trail.maxLifeTime = 0.4 * lengthScale;
     }
 
     // Drain vortex: ambient, always-running emitter at the drain zone, purple/black/indigo -
@@ -1548,6 +1812,30 @@ import {
     // PhysicsBody doc comment for PhysicsMotionType.ANIMATED). The ball still bounces off flippers
     // correctly; the flipper itself just isn't simulated anymore, it's animated - exactly right
     // for a player-controlled mechanism whose motion is fully specified by input state anyway.
+    //
+    // PIVOT FIX (root-caused after the ANIMATED rewrite above still didn't behave like a real
+    // flipper - see FLIPPER_SWEEP_RAD's comment in config.js for the full numeric proof): the
+    // very first ANIMATED version kept the paddle as a plain CENTER-origin box and re-derived its
+    // world position every frame by hand - pivot + halfLength*(cos angle, sin angle) - to fake a
+    // hinge at one end. That hand-rolled position formula silently used the OPPOSITE Z sign from
+    // what BABYLON.Quaternion.RotationAxisToRef(Axis.Y, angle) actually rotates the mesh by, so
+    // the "pivot" end wasn't pinned at all - it drifted up to 68mm (most of the paddle's own
+    // 75mm length) away from the real pivot as the angle changed, which is what forced every
+    // earlier fix into guessing rest/active angles and a 160-degree sweep against a moving target
+    // instead of fixing the actual hinge.
+    //
+    // The fix removes the hand-rolled formula entirely rather than patching its sign: the paddle
+    // mesh is now a child of a small pivot TransformNode, offset by a CONSTANT local
+    // (FLIPPER_LENGTH_M / 2, 0, 0) that never changes. Only the pivot node's own
+    // rotationQuaternion is touched per frame (in setFlipperAngle()) - Babylon's ordinary parent/
+    // child transform math (not hand trig) turns that into the paddle's world transform, so the
+    // base end is mathematically guaranteed to sit at the pivot's world position for every angle,
+    // and there's no second formula left to disagree with the rotation. The physics shape stays
+    // on the paddle mesh itself (not the pivot), so it's always exactly the visible box - Havok's
+    // ANIMATED sync already resolves a parented mesh's ABSOLUTE (world) position/rotation each
+    // step (confirmed against the vendored engine's own havokPlugin _getTransformInfos(), which
+    // explicitly branches on `mesh.parent` and uses absolutePosition/absoluteRotationQuaternion),
+    // so no other change was needed for collision to keep tracking the paddle correctly.
     // ===================================
     function createFlipper(scene, name, pivotWorldPos, isLeft, mat) {
         // Clearance above the playfield: the playfield's top face sits at exactly Y=0 (see its
@@ -1555,7 +1843,14 @@ import {
         // bottom face flush against it. Kept from the constraint-based version even though a
         // kinematic body can't "fight" a LOCK constraint anymore - real flippers don't drag
         // directly on the playfield surface either, and it costs nothing.
-        const pivot = new BABYLON.Vector3(pivotWorldPos.x, pivotWorldPos.y + FLIPPER_PLAYFIELD_CLEARANCE_M, pivotWorldPos.z);
+        const pivotPos = new BABYLON.Vector3(pivotWorldPos.x, pivotWorldPos.y + FLIPPER_PLAYFIELD_CLEARANCE_M, pivotWorldPos.z);
+
+        // The pivot itself: a bare TransformNode with no geometry, positioned once at the true
+        // stationary hinge point and never moved again - only ever rotated (see
+        // setFlipperAngle()). Everything else (paddle mesh, physics shape) hangs off it.
+        const pivotNode = new BABYLON.TransformNode(name + 'Pivot', scene);
+        pivotNode.position.copyFrom(pivotPos);
+        pivotNode.rotationQuaternion = BABYLON.Quaternion.Identity();
 
         // Rest angle and mirroring: see FLIPPER_LEFT_REST_RAD/FLIPPER_RIGHT_REST_RAD's comment -
         // these are NOT simple negations of each other, because mirroring a rotating object
@@ -1571,6 +1866,16 @@ import {
         mesh.material = mat;
         mesh.metadata = { kind: 'flipper' }; // Stage 10's flipper-contact camera shake
 
+        // Paddle offset outward from the pivot by half its own length, in the PIVOT's local
+        // space, so the paddle's inner edge sits exactly on the pivot and its outer edge (the
+        // tip) sits a full FLIPPER_LENGTH_M away. This local offset and the mesh's own
+        // rotationQuaternion (identity - no rotation relative to the pivot) are set ONCE and
+        // never touched again; every angle change happens on pivotNode instead, which is what
+        // makes the pivot mathematically stationary regardless of angle.
+        mesh.parent = pivotNode;
+        mesh.position.set(halfLength, 0, 0);
+        mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+
         const aggregate = new BABYLON.PhysicsAggregate(
             mesh,
             BABYLON.PhysicsShapeType.BOX,
@@ -1584,7 +1889,8 @@ import {
         // disablePreStep defaults to true (Havok's own default, for performance, since most
         // bodies are STATIC or DYNAMIC and never need it) - an ANIMATED body needs it OFF so
         // Havok reads this mesh's transform every step instead of ignoring it. Confirmed real
-        // property against physicsBody.ts.
+        // property against physicsBody.ts. Works the same for a parented mesh - see this
+        // function's own header comment for the confirmed engine-source proof.
         aggregate.body.disablePreStep = false;
         // Only the ball should ever physically collide with a flipper - see
         // COLLISION_CATEGORY_BALL's comment. No longer needed for LOCK-vs-collision fighting
@@ -1593,36 +1899,27 @@ import {
         aggregate.shape.filterCollideMask = COLLISION_CATEGORY_BALL;
 
         // Real-pinball-mechanics baseline (see FLIPPER_LEFT_REST_RAD/FLIPPER_RIGHT_REST_RAD's own
-        // "attempt 4" comment): REST points down-and-outward, ACTIVE points up-and-inward, same
-        // as every real (and virtual) pinball machine. LEFT sweeps by INCREASING angle and RIGHT
-        // by DECREASING - this function's very first (pre-any-of-these-fixes) sign convention,
-        // unchanged by any of the later flipper-geometry fixes (only the REST angle values
-        // themselves moved, see their own comment history).
+        // comment): REST points down-and-outward, ACTIVE points up-and-inward, same as every real
+        // (and virtual) pinball machine. LEFT sweeps by INCREASING angle and RIGHT by DECREASING.
         const motorSign = isLeft ? 1 : -1;
         const minAngleRad = isLeft ? restAngleRad : restAngleRad - FLIPPER_SWEEP_RAD;
         const maxAngleRad = isLeft ? restAngleRad + FLIPPER_SWEEP_RAD : restAngleRad;
 
-        const flipper = { mesh, aggregate, active: false, motorSign, pivot, halfLength, restAngleRad, minAngleRad, maxAngleRad, currentAngleRad: restAngleRad };
+        const flipper = { mesh, pivotNode, aggregate, active: false, motorSign, restAngleRad, minAngleRad, maxAngleRad, currentAngleRad: restAngleRad };
         setFlipperAngle(flipper, restAngleRad);
         return flipper;
     }
 
-    // Positions and orients the flipper mesh for a given absolute angle, orbiting its center
-    // around the fixed pivot point exactly like the old constraint's pivotB offset did (a
-    // rotating box pinned at one end moves its center along an arc, not just spins in place).
-    // Havok picks this transform up next physics step via disablePreStep = false (see
+    // Rotates the flipper's pivot node to the given absolute angle. The paddle mesh's own local
+    // position/rotation relative to the pivot never change (set once in createFlipper()) - moving
+    // only the parent pivot is what keeps the hinge point mathematically fixed at every angle,
+    // instead of re-deriving a world position by hand each frame (see createFlipper()'s "PIVOT
+    // FIX" comment for why the old per-frame hand-rolled version didn't actually do that). Havok
+    // picks the resulting transform up next physics step via disablePreStep = false (see
     // createFlipper()) and uses it for collision response against the ball.
     function setFlipperAngle(flipper, angleRad) {
         flipper.currentAngleRad = angleRad;
-        flipper.mesh.position.set(
-            flipper.pivot.x + flipper.halfLength * Math.cos(angleRad),
-            flipper.pivot.y,
-            flipper.pivot.z + flipper.halfLength * Math.sin(angleRad)
-        );
-        if (!flipper.mesh.rotationQuaternion) {
-            flipper.mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
-        }
-        BABYLON.Quaternion.RotationAxisToRef(BABYLON.Axis.Y, angleRad, flipper.mesh.rotationQuaternion);
+        BABYLON.Quaternion.RotationAxisToRef(BABYLON.Axis.Y, angleRad, flipper.pivotNode.rotationQuaternion);
     }
 
     function activateFlipper(flipper) {
@@ -1644,11 +1941,29 @@ import {
     }
 
     // Advances each flipper's angle by simple, fully deterministic JS arithmetic (called once per
-    // frame for both flippers, from the render loop) - see createFlipper()'s comment for why this
-    // replaced a physics-constraint motor entirely. While active, sweeps toward the extended
-    // limit at FLIPPER_ACTIVATE_SPEED_RAD_S, clamped so it can't overshoot; once released, sweeps
-    // back toward restAngleRad at FLIPPER_RETURN_SPEED_RAD_S, also clamped so it settles exactly
-    // at rest instead of oscillating past it.
+    // frame for both flippers, from the render loop, with real elapsed time via deltaMs - see the
+    // call site's engine.getDeltaTime()) - see createFlipper()'s comment for why this replaced a
+    // physics-constraint motor entirely. Deliberately a hard-clamped constant-angular-velocity
+    // ramp, not an eased/lerped animation - see FLIPPER_ACTIVATE_SPEED_RAD_S/
+    // FLIPPER_RETURN_SPEED_RAD_S's own comment for why. Because the step is derived from real
+    // elapsed seconds (not a fixed per-frame increment), a flip takes the same real-world time
+    // regardless of frame rate - the same electromechanical motion, just sampled at more or fewer
+    // points.
+    //
+    // PRESS/HOLD (flipper.active): activateFlipper() flips `active` synchronously on the input
+    // event, so the very next frame already starts ramping - no queued/delayed response. Each
+    // frame steps flipper.currentAngleRad toward the active stop (maxAngleRad for LEFT,
+    // minAngleRad for RIGHT) at FLIPPER_ACTIVATE_SPEED_RAD_S, hard-clamped via Math.min/Math.max
+    // so it can never overshoot the stop. Once there, `next` (current + step) is always past the
+    // clamp, so the SAME clamp re-selects the stop's exact value every subsequent frame - the
+    // flipper holds bit-for-bit at the active angle with no oscillation or creep for as long as
+    // the button stays down, using the identical code path as the initial swing.
+    //
+    // RELEASE (else branch): steps back toward restAngleRad at FLIPPER_RETURN_SPEED_RAD_S. The
+    // `Math.abs(diff) <= maxStep` branch snaps directly to the exact rest angle on whichever frame
+    // would otherwise overshoot it, instead of taking one more full-length step past it and
+    // correcting later - so the return settles at precisely restAngleRad with no overshoot and no
+    // jitter, the same guarantee the active-stop clamp gives the other direction.
     function updateFlipperMotor(flipper, deltaMs) {
         const dt = deltaMs / 1000;
         if (flipper.active) {
@@ -1692,13 +2007,34 @@ import {
     // panel. One small texture per label (drawn once, never redrawn - this is static signage, not
     // a HUD), kept tiny (128x48) to stay cheap. DOUBLESIDE sidesteps ever having to get the exact
     // facing-normal convention right.
-    function createLabelPlane(scene, text, x, z, color) {
+    // opts (all optional - every existing call site keeps its exact prior look untouched):
+    //   transparent - skips the dark background chip entirely, leaving the rest of the canvas
+    //     genuinely transparent instead of opaque-ish, so only the glyph itself glows. Added for
+    //     the lane visual-polish pass' "subtle emissive arrows/markers" - a small floating symbol
+    //     reads as a lane-flow indicator, where the existing opaque-chip look (right for a named
+    //     callout like "L ORBIT") would look like a second competing label instead.
+    //   fontSize - defaults to 20 (the size every existing text label already uses); markers use
+    //     a bigger glyph since there's no chip/padding to fill.
+    //   planeSize - defaults to 0.05 (every existing label's size); markers use a smaller one to
+    //     stay subtle rather than reading as signage.
+    // Numeric 0xRRGGBB (this file's/config.js's HEX_* convention) -> CSS hex string, for the rare
+    // spot (bumper inserts) that needs a HEX_* color fed into a canvas-2d ctx.fillStyle rather
+    // than a BABYLON.Color3.
+    function cssColor(hex) {
+        return '#' + hex.toString(16).padStart(6, '0');
+    }
+
+    function createLabelPlane(scene, text, x, z, color, opts) {
+        opts = opts || {};
         const texW = 128, texH = 48;
         const texture = new BABYLON.DynamicTexture('label' + text.replace(/\s/g, ''), { width: texW, height: texH }, scene, false);
+        texture.hasAlpha = true;
         const ctx = texture.getContext();
-        ctx.fillStyle = 'rgba(5, 0, 15, 0.55)';
-        ctx.fillRect(0, 0, texW, texH);
-        ctx.font = 'bold 20px monospace';
+        if (!opts.transparent) {
+            ctx.fillStyle = 'rgba(5, 0, 15, 0.55)';
+            ctx.fillRect(0, 0, texW, texH);
+        }
+        ctx.font = 'bold ' + (opts.fontSize || 20) + 'px monospace';
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1709,6 +2045,7 @@ import {
         mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
         mat.disableLighting = true;
         mat.emissiveTexture = texture;
+        mat.opacityTexture = opts.transparent ? texture : null;
         mat.backFaceCulling = false;
 
         // Verified via Playwright screenshot (not assumed): a flat, playfield-level decal reads
@@ -1719,15 +2056,72 @@ import {
         // angled riser rather than flat playfield paint. Standing the plane upright and tilting it
         // back to roughly match the camera's own downward look angle - the same rotation.x=0.4
         // buildBackglass() already uses to face its panel toward this exact camera - fixes that.
+        const size = opts.planeSize || 0.05;
         const plane = BABYLON.MeshBuilder.CreatePlane('labelPlane' + text.replace(/\s/g, ''), {
-            width: 0.05,
-            height: 0.05 * (texH / texW),
+            width: size,
+            height: size * (texH / texW),
             sideOrientation: BABYLON.Mesh.DOUBLESIDE
         }, scene);
         plane.material = mat;
         plane.position.set(x, 0.03, z);
         plane.rotation.x = 0.4;
         return plane;
+    }
+
+    // Lane visual-polish pass (user-requested - "raised guide rails... small depth/bevel details
+    // rather than flat primitive shapes"): a thin second box stacked on top of an existing rail's
+    // own flat top face, narrower and shorter than the rail itself so the rail's own material
+    // still shows as a border all the way around it - a "stepped bevel," the cheapest possible
+    // way to read as a milled/chamfered metal trim strip instead of a bare rectangular slab,
+    // costing exactly one extra low-poly box per rail (never more, regardless of the rail's own
+    // length - a 6-vertex-face box either way). Purely decorative, no PhysicsAggregate - the
+    // rail underneath is already the real collider and keeps its exact existing shape/position;
+    // this only ever adds a thin non-colliding cap on top of it, so ball physics/collision
+    // boundaries are untouched by construction, not just by care. One shared material (see
+    // buildObstacles()'s railCapMat) is reused across every call, matching housingMat's own
+    // "one material instance for every rail" discipline.
+    function addRailBevel(scene, name, mat, length, thickness, x, topY, z, rotationY) {
+        const capHeight = 0.006;
+        const cap = BABYLON.MeshBuilder.CreateBox(name, {
+            width: Math.max(length - 0.006, 0.002),
+            height: capHeight,
+            depth: Math.max(thickness - 0.004, 0.0015)
+        }, scene);
+        cap.position.set(x, topY + capHeight / 2, z);
+        if (rotationY) cap.rotation.y = rotationY;
+        cap.material = mat;
+        return cap;
+    }
+
+    // Lane visual-polish pass (user-requested - "inset/grooved lane surfaces where appropriate...
+    // clear visual separation between inlanes/outlanes/orbits"): a paper-thin, low-alpha colored
+    // film laid directly on the playfield surface along a lane's actual path, reusing exactly the
+    // technique buildObstacles() already established for the reentry lanes' own "lit indicator"
+    // box (a translucent colored PBR box, no collider) - just thinner and dimmer, since this is
+    // meant to read as ambient corridor tinting across a whole lane, not a single bright mission-
+    // state indicator. Deliberately NOT a new PhysicsAggregate and deliberately NOT touching the
+    // real playfield mesh/material - the ball's actual rolling surface is entirely unchanged;
+    // this sits a fraction of a millimeter above it purely so the two don't z-fight.
+    function addLaneFloorTint(scene, name, mat, width, depth, x, z, rotationY) {
+        const strip = BABYLON.MeshBuilder.CreateBox(name, { width, height: 0.001, depth }, scene);
+        strip.position.set(x, 0.0012, z);
+        if (rotationY) strip.rotation.y = rotationY;
+        strip.material = mat;
+        return strip;
+    }
+
+    // Obstacle visual-polish pass (user-requested - "readable height differences... make the
+    // table read like a designed pinball machine"): a round counterpart to addLaneFloorTint()
+    // above, for the board's floating spherical features (Saturn, comet) rather than a lane
+    // corridor - a thin backlit-insert disc laid on the playfield directly beneath the sphere,
+    // giving it a visible "landing pad" grounding presence instead of just floating over bare
+    // playfield the way a primitive-only sphere does. Same paper-thin/no-physics/no-z-fight
+    // treatment as addLaneFloorTint(), just circular.
+    function addFeatureFloorGlow(scene, name, mat, diameter, x, z) {
+        const glow = BABYLON.MeshBuilder.CreateCylinder(name, { diameter, height: 0.002, tessellation: 24 }, scene);
+        glow.position.set(x, 0.002, z);
+        glow.material = mat;
+        return glow;
     }
 
     function buildObstacles(scene) {
@@ -1750,6 +2144,47 @@ import {
         housingMat.metallic = 0.8;
         housingMat.roughness = 0.35;
 
+        // Shared bevel-cap material for addRailBevel() above - a touch glossier than housingMat
+        // and lifted by a faint cool cyan glint, so every guide rail's raised cap reads as one
+        // consistent polished-trim language across the whole board (dividers, inlane guides,
+        // orbit rails, reentry-lane flanking rails), independent of whichever lane-specific lamp
+        // color happens to be nearby. One instance, reused by every addRailBevel() call below.
+        const railCapMat = new BABYLON.PBRMaterial('railCapMat', scene);
+        railCapMat.albedoColor = new BABYLON.Color3(0.18, 0.19, 0.22);
+        railCapMat.metallic = 0.85;
+        railCapMat.roughness = 0.22;
+        // Lighting/material hierarchy pass (user-requested - "RAILS/STRUCTURE: metallic or
+        // physical-material definition"): this one material is reused by EVERY guide-rail bevel
+        // cap on the entire board (dividers, inlane guides, orbit rails, reentry-lane rails,
+        // target-bank header) - dozens of small instances all sharing one emissive value, so its
+        // brightness has an outsized cumulative effect on how "glowy vs. structural" the whole
+        // table reads. Cut to a quarter of its old value (was a fairly noticeable cyan glint) so
+        // its "polished trim" read comes from the already-glossy metallic/roughness (0.85/0.22)
+        // catching direct light, the same way real machined trim does, rather than from the trim
+        // itself glowing.
+        railCapMat.emissiveColor = new BABYLON.Color3(0.02, 0.05, 0.065);
+
+        // Shared floor-tint materials for addLaneFloorTint() above - one per lane family (inlane,
+        // outlane, orbit), each reused by both mirrored sides, matching the lamp identities those
+        // lanes already use elsewhere (COLOR_LANE_LAMP/COLOR_OUTLANE_LAMP/COLOR_ORBIT_LAMP) so the
+        // floor tint, the lamp, and (for inlane/outlane) the dev debug overlay all agree on what
+        // color means what. disableLighting + emissive-only (no albedo term) so the tint reads as
+        // a consistent backlit-insert glow rather than shifting with scene light like an ordinary
+        // painted surface would - the same unlit-emissive treatment this file's signage (labels,
+        // backglass) already uses, applied here to a floor film instead of a plane.
+        function makeLaneFloorMat(name, color, alpha) {
+            const mat = new BABYLON.PBRMaterial(name, scene);
+            mat.albedoColor = new BABYLON.Color3(0, 0, 0);
+            mat.disableLighting = true;
+            mat.emissiveColor = color.scale(0.55);
+            mat.alpha = alpha;
+            mat.backFaceCulling = false;
+            return mat;
+        }
+        const inlaneFloorMat = makeLaneFloorMat('inlaneFloorMat', COLOR_LANE_LAMP, 0.16);
+        const outlaneFloorMat = makeLaneFloorMat('outlaneFloorMat', COLOR_OUTLANE_LAMP, 0.16);
+        const orbitFloorMat = makeLaneFloorMat('orbitFloorMat', COLOR_ORBIT_LAMP, 0.14);
+
         // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
         // identity, not one shared color - each bumper is its own emissive-glass PBR material so
         // it can be individually recolored/pulsed on hit (pulseMesh() in main()).
@@ -1763,42 +2198,112 @@ import {
             return mat;
         });
 
-        // Pop-bumper silhouette: the collider stays the exact same sphere it always was (shape,
-        // position, material, physics aggregate, metadata all unchanged) - a wide low "skirt"
-        // base and a glowing "collar" ring around its equator are purely decorative additions
-        // with no physics body, giving it the cap-on-a-base read a real pop bumper has instead of
-        // a bare sphere floating above the table.
+        // Premium pop-bumper cap material (visual-upgrade pass, user-requested - "resemble
+        // premium 3D pinball pop bumpers"): a single glossy off-white plastic material shared by
+        // every bumper's cap, same instance reused across all 4 - real machines mold every pop
+        // bumper's cap from the same plastic regardless of that bumper's own color identity, so
+        // sharing it here (rather than tinting the cap per-bumper) is both cheaper and more
+        // faithful to the reference silhouette. Never mutated by pulseMesh() (see its own comment
+        // on why hit-flash is scale-only for extra meshes) - flashing this shared instance would
+        // bleed into every other bumper's cap at once.
+        const bumperCapMat = new BABYLON.PBRMaterial('bumperCapMat', scene);
+        bumperCapMat.albedoColor = new BABYLON.Color3(0.86, 0.86, 0.92);
+        bumperCapMat.metallic = 0.1;
+        bumperCapMat.roughness = 0.18;
+        bumperCapMat.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.07);
+        // Bumper cap skin slot (visual-architecture pass, user-requested) - one shared texture
+        // for all 4 caps, matching this material's own existing shared-instance design above.
+        // No-op until assets/skins/bumpers/bumper-cap.png actually exists (see SKINS.md); the
+        // glossy off-white plastic look stays the fallback either way.
+        applySkinTexture(scene, bumperCapMat, SKIN_MANIFEST.bumperCap);
+
+        // Pop-bumper silhouette (visual-upgrade pass, user-requested): the collider stays the
+        // exact same sphere it always was (shape, size, position, physics aggregate, and the
+        // 'bumper'/boss metadata this file's scoring/kick/cooldown logic keys off of, all
+        // unchanged) - it also still IS the visible "raised bumper body" layer, doubling as both
+        // collider and dome. Everything else here is new, purely decorative dressing with no
+        // physics body of its own, layered around that unchanged sphere: a wide "base" skirt, a
+        // tapered "riser" neck connecting the base up to the body, the pre-existing glowing
+        // "collar" ring (now reparented, unchanged otherwise), a small flattened-sphere "cap"
+        // sitting on the body's peak, and a decorative color-matched "insert" glyph on the cap's
+        // face (built via createLabelPlane() - the same DynamicTexture-based emissiveTexture
+        // technique the lane markers use, so a future skin pass can swap in a real image texture
+        // by editing exactly one texture assignment, not this geometry). All new meshes are
+        // parented under one TransformNode per bumper purely for organizational/hierarchy
+        // purposes - reparenting purely decorative, physics-free meshes doesn't affect the
+        // collider sphere above, which is never parented and never touched after creation. Low
+        // tessellation throughout (12-20 segments), matching this file's existing "cheap
+        // primitives, not high-poly meshes" budget for every other obstacle.
         //
         // Board redesign: index 0 (closest to the new giant Saturn centerpiece, at the top of the
         // cluster) is a "boss" bumper - 50% bigger radius and worth notably more (SCORE_BOSS_
         // BUMPER vs SCORE_ATTACK_BUMPER, see handlePhysicalHit()) - so the cluster reads as having
-        // real internal variety instead of 4 identical clones in different colors.
+        // real internal variety instead of 4 identical clones in different colors. Every
+        // dimension below is derived from that same per-bumper radius, so the boss bumper's whole
+        // fixture (base/riser/cap/insert, not just the body) scales up together with it.
         BUMPER_CLUSTER.forEach((pos, i) => {
             const isBoss = i === 0;
             const radius = isBoss ? BUMPER_RADIUS_M * 1.5 : BUMPER_RADIUS_M;
+            const colorMat = bumperMats[i % bumperMats.length];
+
             const mesh = BABYLON.MeshBuilder.CreateSphere('bumper' + i, { diameter: radius * 2 }, scene);
             mesh.position.set(pos.x, radius, pos.z);
-            mesh.material = bumperMats[i % bumperMats.length];
-            mesh.metadata = { kind: 'bumper', boss: isBoss };
+            mesh.material = colorMat;
             // Physical body, not a trigger - restitution alone gives the bounce; the ball's
             // collision observable (see main()) reports the hit for scoring on top of that.
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
 
-            const skirt = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Skirt', {
-                diameter: radius * 2.6,
+            const rig = new BABYLON.TransformNode('bumper' + i + 'Rig', scene);
+            rig.position.set(pos.x, 0, pos.z);
+
+            const base = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Base', {
+                diameterTop: radius * 2.6,
+                diameterBottom: radius * 2.9,
                 height: radius * 0.35,
                 tessellation: 20
             }, scene);
-            skirt.position.set(pos.x, radius * 0.18, pos.z);
-            skirt.material = housingMat;
+            base.parent = rig;
+            base.position.y = radius * 0.18;
+            base.material = housingMat;
+
+            const riser = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Riser', {
+                diameterTop: radius * 1.7,
+                diameterBottom: radius * 2.2,
+                height: radius * 0.5,
+                tessellation: 20
+            }, scene);
+            riser.parent = rig;
+            riser.position.y = radius * 0.55;
+            riser.material = housingMat;
 
             const collar = BABYLON.MeshBuilder.CreateTorus('bumper' + i + 'Collar', {
                 diameter: radius * 2.15,
                 thickness: radius * 0.14,
                 tessellation: 20
             }, scene);
-            collar.position.set(pos.x, radius * 0.75, pos.z);
-            collar.material = bumperMats[i % bumperMats.length]; // shares the dome's own material/color - reads as one glowing fixture, not a mismatched add-on
+            collar.parent = rig;
+            collar.position.y = radius * 0.85;
+            collar.material = colorMat; // shares the body's own material/color - reads as one glowing fixture, not a mismatched add-on, and flashes together with the body on hit (see pulseMesh())
+
+            // Flattened sphere, not a hemisphere primitive - simpler geometry, and sinking its
+            // equator slightly below the body's own peak hides the seam between the two so the
+            // cap reads as continuous with the dome beneath it rather than a disc stuck on top.
+            const cap = BABYLON.MeshBuilder.CreateSphere('bumper' + i + 'Cap', { diameter: radius * 1.3, segments: 12 }, scene);
+            cap.scaling.y = 0.55;
+            cap.parent = rig;
+            cap.position.y = radius * 1.85;
+            cap.material = bumperCapMat;
+
+            // Decorative insert/icon: a single glyph tinted to this bumper's own color, reusing
+            // createLabelPlane()'s DynamicTexture/emissiveTexture pattern instead of a bespoke
+            // one - see this block's own comment for why that keeps a future textured-skin pass
+            // to a one-line change. createLabelPlane() places its plane at a fixed low playfield
+            // height tilted to face this game's fixed camera; overriding .position.y afterward
+            // lifts that same already-camera-tuned tilt up to the cap's face instead.
+            const insert = createLabelPlane(scene, '●', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: 30, planeSize: radius * 1.5 });
+            insert.position.y = radius * 2.05;
+
+            mesh.metadata = { kind: 'bumper', boss: isBoss, capMesh: cap, insertMesh: insert };
         });
 
         // CONFIG.colors.chakra (7 colors) - each mission target gets its own chakra color
@@ -1823,6 +2328,15 @@ import {
             }, scene);
             mesh.position.set(pos.x, TARGET_RAISED_Y_M, pos.z);
             mesh.material = targetMats[i % targetMats.length];
+            // Mission target face skin slot (visual-architecture pass, user-requested) - per-
+            // target-index, matching this flag's own already-per-index material above. No-op
+            // until assets/skins/targets/mission-target-<i>.png actually exists (see SKINS.md);
+            // this flag's existing chakra-color material stays the fallback either way. Sharing
+            // one material instance across multiple indices (targetMats wraps at 7 entries, this
+            // bank only has 3) would mean two targets fighting over the same texture slot if
+            // that ever happened - guarded for by only ever touching THIS target's own material
+            // instance, never a shared one, same as the rest of this loop already assumes.
+            applySkinTexture(scene, mesh.material, SKIN_MANIFEST.missionTargetFace[i]);
             mesh.metadata = { kind: 'missionTarget', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
             // Trigger, not physical - detect-only per the doc (mission targets don't block the
@@ -1844,6 +2358,20 @@ import {
             backing.position.set(pos.x, 0.015, pos.z + 0.006);
             backing.material = housingMat;
 
+            // Mounting-bracket trim frame (obstacle visual-polish pass, user-requested - "trim...
+            // contrasting materials"): a slightly larger, thinner panel directly behind the
+            // backing, peeking out as a border on all sides - reuses railCapMat (the same
+            // polished-trim material every guide rail's bevel cap already shares) so the target
+            // bank's hardware reads as the same "trim language" as the rest of the board's
+            // fixtures, not a one-off.
+            const frame = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Frame', {
+                width: TARGET_RADIUS_M * 2.7,
+                height: 0.038,
+                depth: 0.003
+            }, scene);
+            frame.position.set(pos.x, 0.015, pos.z + 0.009);
+            frame.material = railCapMat;
+
             // Its own cloned material (not shared with the flag's targetMats[i] like before) so
             // the lamp can independently show the target's raised/dropped state - matching the
             // per-instance-clone treatment every other stateful lamp in this file already gets
@@ -1862,6 +2390,36 @@ import {
             missionTargetMeshes.push(mesh);
             missionTargetLamps.push(lamp);
         });
+
+        // Target-bank header rail (obstacle visual-polish pass, user-requested - "layered
+        // geometry... make the table read like a designed pinball machine instead of a
+        // collection of primitives"): MISSION_TARGET_BANK's 3 positions sit exactly colinear (a
+        // straight diagonal bank, verified from their own config values, not assumed) - a single
+        // raised trim strip spanning that line reads as one designed fixture the 3 flags mount
+        // to, rather than 3 independent stakes that happen to share a color family. Computed from
+        // the bank's own endpoints rather than hardcoded, so it stays correct if the bank layout
+        // ever changes. Same "long axis along local X, then rotationY = atan2(-dz, dx)" rail
+        // convention every other angled wall/rail in this file uses (see inlaneGuide's own
+        // comment for how that formula was derived) - purely decorative, no physics.
+        {
+            const first = MISSION_TARGET_BANK[0];
+            const last = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
+            const dx = last.x - first.x;
+            const dz = last.z - first.z;
+            const bankLength = Math.sqrt(dx * dx + dz * dz) + TARGET_RADIUS_M * 3; // overhangs past the end targets, like a real mounting rail would
+            const bankRotationY = Math.atan2(-dz, dx);
+            const bankCenterX = (first.x + last.x) / 2;
+            const bankCenterZ = (first.z + last.z) / 2;
+            const header = BABYLON.MeshBuilder.CreateBox('missionTargetHeader', {
+                width: bankLength,
+                height: 0.006,
+                depth: 0.01
+            }, scene);
+            header.position.set(bankCenterX, 0.034, bankCenterZ);
+            header.rotation.y = bankRotationY;
+            header.material = housingMat;
+            addRailBevel(scene, 'missionTargetHeaderCap', railCapMat, bankLength, 0.01, bankCenterX, 0.037, bankCenterZ, bankRotationY);
+        }
 
         // ===================================
         // Giant spinning Saturn (board redesign) - the table's new visual/gameplay centerpiece.
@@ -1912,6 +2470,34 @@ import {
         // against each other reads as a much more alive, "spinning" system than one ring alone.
         const saturnRings = [saturnRing1, saturnRing2];
 
+        // Polar highlight cap (obstacle visual-polish pass, user-requested - "subtle emissive
+        // inserts... contrasting materials"): a small flattened sphere at Saturn's own peak, a
+        // brighter neutral-warm material distinct from the body's own gold, the same "cap reads
+        // as a highlight, not a lighting artifact" treatment the bumper cluster's caps already
+        // established. Purely decorative, embedded slightly into the body to hide the seam.
+        const saturnCapMat = new BABYLON.PBRMaterial('saturnCapMat', scene);
+        saturnCapMat.albedoColor = new BABYLON.Color3(1, 0.95, 0.82);
+        saturnCapMat.metallic = 0.15;
+        saturnCapMat.roughness = 0.2;
+        saturnCapMat.emissiveColor = COLOR_SATURN.scale(0.85);
+        // Obstacle decal skin slot (visual-architecture pass, user-requested). No-op until
+        // assets/skins/obstacles/obstacle-decal-saturn.png actually exists (see SKINS.md); this
+        // highlight cap's neutral-warm material stays the fallback either way.
+        applySkinTexture(scene, saturnCapMat, SKIN_MANIFEST.obstacleDecalSaturn);
+        const saturnCap = BABYLON.MeshBuilder.CreateSphere('saturnCap', { diameter: SATURN_RADIUS_M * 0.7, segments: 12 }, scene);
+        saturnCap.scaling.y = 0.4;
+        saturnCap.position.set(SATURN_POS.x, SATURN_RADIUS_M * 1.85, SATURN_POS.z);
+        saturnCap.material = saturnCapMat;
+
+        // Landing-pad floor glow (see addFeatureFloorGlow()'s own comment) - grounds the
+        // floating sphere with a visible presence on the playfield itself, the same "a raised
+        // object needs a visible base" cue this pass gives every other floating obstacle
+        // (bumpers' skirt, slingshots' new base plate below). Sized to the sphere's own
+        // footprint, deliberately smaller than the tilted decorative rings above it so the pad
+        // doesn't visually compete with them.
+        const saturnFloorMat = makeLaneFloorMat('saturnFloorMat', COLOR_SATURN_RING, 0.22);
+        addFeatureFloorGlow(scene, 'saturnFloorGlow', saturnFloorMat, SATURN_RADIUS_M * 2.4, SATURN_POS.x, SATURN_POS.z);
+
         // ===================================
         // Comet (board redesign) - the old "satellite" object, re-themed now that Saturn is a
         // real dedicated piece. Same role (a physical, scored bumper with its own decorative
@@ -1923,6 +2509,12 @@ import {
         cometMat.metallic = 0.4;
         cometMat.roughness = 0.25;
         cometMat.emissiveColor = COLOR_COMET.scale(0.4);
+        // Obstacle decal skin slot (visual-architecture pass, user-requested) - applied to the
+        // comet's own material, not its collider: this only ever swaps a texture property on an
+        // existing PBRMaterial, the mesh/shape/physics/metadata below are entirely unaffected.
+        // No-op until assets/skins/obstacles/obstacle-decal-comet.png actually exists (see
+        // SKINS.md); the icy-cyan procedural material stays the fallback either way.
+        applySkinTexture(scene, cometMat, SKIN_MANIFEST.obstacleDecalComet);
         const cometMesh = BABYLON.MeshBuilder.CreateSphere('comet', { diameter: COMET_RADIUS_M * 2 }, scene);
         cometMesh.position.set(COMET_POS.x, COMET_RADIUS_M, COMET_POS.z);
         cometMesh.material = cometMat;
@@ -1946,6 +2538,12 @@ import {
         cometRing.position.set(COMET_POS.x, COMET_RADIUS_M, COMET_POS.z);
         cometRing.rotation.x = Math.PI / 2.4;
         cometRing.material = cometRingMat;
+
+        // Landing-pad floor glow - see saturnFloorGlow's own comment for the reasoning. Sized
+        // and dimmed a step down from Saturn's own pad, matching this object's existing "simpler
+        // than Saturn" design language (see cometRing's own comment).
+        const cometFloorMat = makeLaneFloorMat('cometFloorMat', COLOR_COMET, 0.18);
+        addFeatureFloorGlow(scene, 'cometFloorGlow', cometFloorMat, COMET_RADIUS_M * 2.6, COMET_POS.x, COMET_POS.z);
 
         // ===================================
         // Score-multiplier power-up orb (board redesign) - hidden at load, toggled visible/
@@ -2007,6 +2605,44 @@ import {
             // slingshot's housing, not every object on the board that happens to share housingMat.
             housing.material = housingMat.clone('slingshotHousingMat' + i);
 
+            // Base mount plate (obstacle visual-polish pass, user-requested - "caps/bases...
+            // readable height differences"): grounds the wedge with a visible low foot instead of
+            // it appearing to hover just above the playfield, the same base-under-fixture cue the
+            // bumpers' skirt already gives them. Shares housingMat (not the housing's own hit-
+            // flash clone above) - the base never flashes on a kick, only the housing does.
+            const base = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Base', {
+                width: SLINGSHOT_SIZE_M * 1.3,
+                height: 0.006,
+                depth: SLINGSHOT_SIZE_M * 0.75
+            }, scene);
+            base.position.set(def.x, 0.003, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.1);
+            base.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20);
+            base.material = housingMat;
+
+            // Ridge trim along the housing's own peak (obstacle visual-polish pass - "trim...
+            // subtle emissive inserts... contrasting materials"): a thin bright magenta line
+            // distinct from the dark housing beneath it, reading as a neon accent along the
+            // wedge's top edge rather than one flat-colored mass. A per-instance clone (each
+            // slingshot's own trim, matching the housing's own per-instance-clone convention just
+            // above) so a future skin pass can recolor one slingshot's trim independently.
+            const ridgeMat = slingshotMat.clone('slingshotRidgeMat' + i);
+            ridgeMat.emissiveColor = new BABYLON.Color3(1, 0.35, 1);
+            // Obstacle decal skin slot (visual-architecture pass, user-requested) - the "future
+            // skin pass" this material's own per-instance-clone comment above already flagged.
+            // Both slingshots share the same manifest path (two independent Texture loads of the
+            // same URL - the browser caches the actual fetch) since they're mirror images of one
+            // fixture, not two distinct ones. No-op until
+            // assets/skins/obstacles/obstacle-decal-slingshot.png actually exists (see SKINS.md).
+            applySkinTexture(scene, ridgeMat, SKIN_MANIFEST.obstacleDecalSlingshot);
+            const ridge = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Ridge', {
+                width: SLINGSHOT_SIZE_M * 0.9,
+                height: 0.004,
+                depth: 0.008
+            }, scene);
+            ridge.position.set(def.x, 0.027, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.15);
+            ridge.rotation.y = mesh.rotation.y;
+            ridge.material = ridgeMat;
+
             // Referenced by snapSlingshot() (in main(), via the collider mesh's metadata below) so
             // the hit handler - which only ever receives the collider mesh from the collision
             // event - can reach this decorative housing without a separate scene lookup.
@@ -2046,13 +2682,19 @@ import {
             // Decorative only, chrome-like (shares housingMat), doesn't change color on hit like
             // the lit-indicator box above does.
             [-1, 1].forEach((side) => {
+                const railX = pos.x + side * REENTRY_LANE_RADIUS_M * 1.1;
                 const rail = BABYLON.MeshBuilder.CreateBox('reentryLane' + i + 'Rail' + side, {
                     width: 0.004,
                     height: 0.018,
                     depth: REENTRY_LANE_RADIUS_M * 2.4
                 }, scene);
-                rail.position.set(pos.x + side * REENTRY_LANE_RADIUS_M * 1.1, 0.014, pos.z);
+                rail.position.set(railX, 0.014, pos.z);
                 rail.material = housingMat;
+                // Raised bevel cap (see addRailBevel()'s own comment) - this rail's own long axis
+                // runs along Z (not the X-then-rotated convention every other rail below uses), so
+                // the cap is built the same "long along local X" way and then rotated 90 degrees
+                // to match, rather than swapping which of width/depth means "length" in the helper.
+                addRailBevel(scene, 'reentryLane' + i + 'RailCap' + side, railCapMat, REENTRY_LANE_RADIUS_M * 2.4, 0.004, railX, 0.023, pos.z, Math.PI / 2);
             });
         });
 
@@ -2078,6 +2720,10 @@ import {
             divider.material = housingMat;
             divider.metadata = { kind: 'wall' };
             new BABYLON.PhysicsAggregate(divider, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            // Same "long axis along Z, rotated 90 degrees to match the helper's along-X default"
+            // case as the reentry lane rails above - this divider isn't built with the rotation-
+            // formula convention the angled inlane guide just below uses.
+            addRailBevel(scene, 'laneDivider' + laneDef.side + 'Cap', railCapMat, Math.abs(LANE_Z_TOP_M - LANE_Z_BOTTOM_M), 0.006, dividerX, 0.022, dividerCenterZ, Math.PI / 2);
 
             // End posts, capping the divider top/bottom - real guide rails read as bounded by
             // round posts, not a bare floating box segment, and give the ball a rounder surface to
@@ -2122,7 +2768,24 @@ import {
                 guide.material = housingMat;
                 guide.metadata = { kind: 'wall' };
                 new BABYLON.PhysicsAggregate(guide, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+                // This guide already uses the "long axis along local X, then rotationY" convention
+                // addRailBevel() itself assumes, so its own guideRotationY passes straight through.
+                addRailBevel(scene, 'inlaneGuide' + laneDef.side + 'Cap', railCapMat, guideLength, 0.006, (guideTopX + guideBottomX) / 2, 0.022, dividerCenterZ, guideRotationY);
             }
+
+            // Lane floor tints (visual-polish pass, user-requested - "inset/grooved lane surfaces
+            // where appropriate... clear visual separation between inlanes/outlanes/orbits") - see
+            // addLaneFloorTint()'s own comment. The outlane's corridor is a simple, unrotated
+            // rectangle running the divider's own full Z span, safely inside both the divider
+            // (0.04m inward of the trigger) and the outer wall (~0.055m outward of it, well past
+            // this strip's own half-width) - see SIDE_LANES' own block comment for those measured
+            // boundary values. The inlane strip stays a modest patch centered on the trigger
+            // itself instead: its real channel narrows to a taper against the inlane guide (see
+            // INLANE_GUIDE_TOP_X_M/INLANE_GUIDE_BOTTOM_X_M's comment) and the trigger sits inboard
+            // of most of that taper, so a full-span strip there would visually claim floor space
+            // that was never actually a walled channel.
+            addLaneFloorTint(scene, 'outlaneFloorTint' + laneDef.side, outlaneFloorMat, 0.055, Math.abs(LANE_Z_TOP_M - LANE_Z_BOTTOM_M) - 0.012, mirror * OUTLANE_TRIGGER_X_M, dividerCenterZ);
+            addLaneFloorTint(scene, 'inlaneFloorTint' + laneDef.side, inlaneFloorMat, 0.05, 0.06, mirror * INLANE_TRIGGER_X_M, LANE_TRIGGER_Z_M);
 
             // Inlane/outlane rollover triggers, each with its own indicator lamp insert. The lamp
             // (a flat disc, like a real backlit playfield insert) is the lane's only always-visible
@@ -2133,10 +2796,22 @@ import {
                 { kind: 'inlane', x: mirror * INLANE_TRIGGER_X_M, debugColor: new BABYLON.Color3(0.2, 1, 0.4) },
                 { kind: 'outlane', x: mirror * OUTLANE_TRIGGER_X_M, debugColor: new BABYLON.Color3(1, 0.2, 0.3) }
             ].forEach((laneKind) => {
+                // Visual-polish pass (user-requested - "clear visual separation between inlanes/
+                // outlanes/orbits"): inlane and outlane used to share one identity color
+                // (COLOR_LANE_LAMP for both) - now each kind gets its own, matching the debugColor
+                // split just above that already existed for the dev-only trigger overlay.
+                const laneLampColor = laneKind.kind === 'outlane' ? COLOR_OUTLANE_LAMP : COLOR_LANE_LAMP;
                 const lampMat = new BABYLON.PBRMaterial(laneKind.kind + 'LampMat' + laneDef.side, scene);
-                lampMat.albedoColor = COLOR_LANE_LAMP.scale(0.3);
+                lampMat.albedoColor = laneLampColor.scale(0.3);
                 lampMat.metallic = 0.2;
                 lampMat.roughness = 0.4;
+                // Lane insert skin slot (visual-architecture pass, user-requested) - shared per
+                // kind (inlane/outlane), both sides. Emissive, not albedo, matching the lamp
+                // system's own emissive-only on/off convention (registerLamp() in main()) - a
+                // loaded texture would only ever show up multiplied by however lit this lamp
+                // currently is, never override that state. No-op until the matching
+                // assets/skins/lanes/lane-insert-<kind>.png actually exists (see SKINS.md).
+                applySkinTexture(scene, lampMat, laneKind.kind === 'outlane' ? SKIN_MANIFEST.laneInsertOutlane : SKIN_MANIFEST.laneInsertInlane);
                 const lamp = BABYLON.MeshBuilder.CreateCylinder(laneKind.kind + 'Lamp' + laneDef.side, {
                     diameterTop: LANE_TRIGGER_WIDTH_M * 0.6,
                     diameterBottom: LANE_TRIGGER_WIDTH_M * 0.6,
@@ -2272,6 +2947,19 @@ import {
             rail.material = housingMat;
             rail.metadata = { kind: 'wall' }; // reuses the existing generic wall camera-shake/sound feedback, same as the inlane/outlane rails
             new BABYLON.PhysicsAggregate(rail, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            // Already built with the "long axis along local X, then rotationY" convention
+            // addRailBevel() assumes, so railRotationY passes straight through unchanged.
+            addRailBevel(scene, 'orbitRail' + orbitDef.side + 'Cap', railCapMat, railLength, 0.015, railCenterX, 0.022, railCenterZ, railRotationY);
+
+            // Lane floor tint (visual-polish pass, user-requested) - see addLaneFloorTint()'s own
+            // comment. Offset a little toward the playfield center from the rail's own centerline
+            // (the ball's actual travel lane sits inboard of the rail, which marks only the
+            // corridor's outer/wall-side edge) rather than directly under the rail itself. The
+            // rail is only a few degrees off vertical here (dx is tiny next to dz - see ORBITS'
+            // own ~5cm-wide corridor sizing), so a fixed inward X offset reads correctly without
+            // needing the rail's exact perpendicular.
+            const orbitFloorInward = orbitDef.side === 'left' ? 1 : -1;
+            addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side, orbitFloorMat, 0.03, railLength - 0.05, railCenterX + orbitFloorInward * 0.018, railCenterZ, railRotationY);
 
             // Only the TOP end gets a capping post, not the bottom - verified via Playwright that
             // a post at the rail's bottom tip sits close enough to a realistic entry trajectory to
@@ -2303,6 +2991,11 @@ import {
                 lampMat.albedoColor = COLOR_ORBIT_LAMP.scale(0.3);
                 lampMat.metallic = 0.2;
                 lampMat.roughness = 0.4;
+                // Lane insert skin slot (visual-architecture pass, user-requested) - shared by
+                // both orbit trigger kinds (entrance/completion) and both sides, same emissive-
+                // over-the-lamp-system reasoning as the inlane/outlane inserts above. No-op until
+                // assets/skins/lanes/lane-insert-orbit.png actually exists (see SKINS.md).
+                applySkinTexture(scene, lampMat, SKIN_MANIFEST.laneInsertOrbit);
                 const lamp = BABYLON.MeshBuilder.CreateCylinder(triggerDef.kind + 'Lamp' + orbitDef.side, {
                     diameterTop: ORBIT_TRIGGER_WIDTH_M * 0.6,
                     diameterBottom: ORBIT_TRIGGER_WIDTH_M * 0.6,
@@ -2476,8 +3169,12 @@ import {
 
         const apronTrimMat = new BABYLON.PBRMaterial('apronTrimMat', scene);
         apronTrimMat.albedoColor = COLOR_CHAKRA[0];
-        apronTrimMat.emissiveColor = COLOR_CHAKRA[0].scale(0.6);
-        apronTrimMat.metallic = 0.1;
+        // Lighting/material hierarchy pass (user-requested) - this is cabinet trim, not a lamp
+        // or gameplay indicator, so it belongs in the RAILS/STRUCTURE tier: metallic raised
+        // (0.1 -> 0.4) and emissive halved (0.6 -> 0.3) so its violet identity reads as a colored
+        // metal inlay catching light, not a light source competing with the actual lamps/ball.
+        apronTrimMat.emissiveColor = COLOR_CHAKRA[0].scale(0.3);
+        apronTrimMat.metallic = 0.4;
         apronTrimMat.roughness = 0.4;
         const apronTrim = BABYLON.MeshBuilder.CreateBox('apronTrim', {
             width: TABLE_WIDTH_M * 0.92,
@@ -2586,15 +3283,44 @@ import {
         // need a name to be understood at a glance: the skill-shot lane bank, the kickback
         // outlane, both orbit entrances, and the Vision Gate. Positioned near, not on top of,
         // each shot's own lamp/trigger geometry so nothing visually overlaps.
-        createLabelPlane(scene, 'SKILL SHOT', SKILL_SHOT_LANES[1].x, SKILL_SHOT_Z_M + 0.05, '#ff3366');
+        // Table-composition pass (user-requested - "immediate readability... inserts/lights
+        // communicating important areas"): this label's original position (SKILL_SHOT_Z_M+0.05 =
+        // z=0.07, at the lane's own x=0.08) sits almost exactly on top of BUMPER_CLUSTER[2]
+        // (x=0.08, z=0.06) - confirmed via screenshot the bumper's own raised cap (added in a
+        // later visual-upgrade pass, after this label was first placed) now visually occludes
+        // half the text from this game's fixed low camera angle. Pulled forward (away from the
+        // bumper cluster, toward the camera) and lifted slightly - same "read against open space,
+        // not crowded geometry" fix as visionGateBeacon's own comment below.
+        const skillShotLabel = createLabelPlane(scene, 'SKILL SHOT', SKILL_SHOT_LANES[1].x, SKILL_SHOT_Z_M - 0.06, '#ff3366');
+        skillShotLabel.position.y = 0.05;
         createLabelPlane(scene, 'KICKBACK', kickbackMirror * OUTLANE_TRIGGER_X_M, LANE_Z_BOTTOM_M - 0.03, '#ff5500');
+        // Subtle emissive lane-flow markers (visual-polish pass, user-requested) - unlike every
+        // label above, these use createLabelPlane()'s transparent option (no background chip) and
+        // a plain triangle glyph instead of a word, so they read as a small glowing flow cue next
+        // to each lamp rather than another named callout - inlane/outlane had no signage of their
+        // own at all before this (only the plain lamp disc). Up for inlane ("flows back into
+        // play"), down for outlane ("heads toward the drain") - the same safe/risky read a real
+        // machine's lane position already implies, just made explicit at a glance. Positioned a
+        // little toward LANE_Z_TOP_M from each lamp so the two don't overlap.
+        SIDE_LANES.forEach((laneDef) => {
+            const markerZ = LANE_TRIGGER_Z_M + 0.045;
+            createLabelPlane(scene, '▲', laneDef.mirror * INLANE_TRIGGER_X_M, markerZ, '#ffaa00', { transparent: true, fontSize: 26, planeSize: 0.03 });
+            createLabelPlane(scene, '▼', laneDef.mirror * OUTLANE_TRIGGER_X_M, markerZ, '#ff1a33', { transparent: true, fontSize: 26, planeSize: 0.03 });
+        });
         ORBITS.forEach((orbitDef) => {
             // Side-specific text (not a shared 'ORBIT' label for both) - doubles as telling the
             // two orbits apart at a glance and keeps each label's mesh/texture name unique.
             const orbitLabel = orbitDef.side === 'left' ? 'L ORBIT' : 'R ORBIT';
             createLabelPlane(scene, orbitLabel, orbitDef.entranceX, ORBIT_ENTRANCE_Z_M - 0.04, '#33ccff');
         });
-        createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x, VISION_GATE_POS.z - VISION_GATE_RADIUS_M - 0.03, '#cc66ff');
+        // Table-composition pass (user-requested) - the original placement (pulled TOWARD the
+        // bumper cluster, z = gate_z - 0.045) sat only ~0.03m from the boss bumper's own center,
+        // close enough that the bumper's raised cap visually occluded the leading "VI" from this
+        // game's fixed camera angle (confirmed via screenshot). Flipped to the far side of the
+        // gate instead (+ offset, away from the crowded bumper cluster) and lifted, so it reads
+        // clearly against open playfield the way visionGateBeacon already does against open sky.
+        const visionGateLabel = createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x, VISION_GATE_POS.z + 0.035, '#cc66ff');
+        visionGateLabel.position.y = 0.045;
 
         // 8. Physical backing around the backglass - a frame border plus a receding cabinet
         // "head" riser behind the panel buildBackglass() builds separately (called after this
@@ -2642,6 +3368,80 @@ import {
         }, scene);
         topTrim.position.set(0, 0.005, TABLE_LENGTH_M / 2 + 0.014);
         topTrim.material = housingMat;
+
+        // ===================================
+        // Table-composition pass (user-requested - "distinct upper/middle/lower table regions...
+        // visual rails leading the eye toward shots... clear ball pathways"): classic pinball
+        // tables (the doc's own Space-Cadet-style reference) read as three zones at a glance - a
+        // tight lower flipper zone, an open mid-table shooting gallery, and a further upper bank
+        // of targets/features - usually communicated with paint, ramps, or light rails marking
+        // the transitions, and often a visible "lane" cueing the ball's main path from the upper
+        // features back down to the flippers. SPIRITBALL has no ramps/paint to add either of
+        // those with, but it does already have a cosmic identity to draw on: a "constellation
+        // threshold" - a loose scatter of small flush starlight-colored inserts, no two evenly
+        // spaced, crossing the table at each zone boundary - reads as a deliberate cosmic dressing
+        // choice (not a technical ruled line) while still doing the same visual job a rope-light
+        // divider would on a physical machine. Purely decorative: flush with the playfield (same
+        // paper-thin/no-collision treatment as addLaneFloorTint()'s films), so nothing here can
+        // ever touch the ball physically, and nothing existing moved to make room for it.
+        // ===================================
+        const constellationMat = makeLaneFloorMat('constellationMat', new BABYLON.Color3(0.78, 0.74, 1), 0.85);
+
+        function addConstellationDot(name, x, z, diameter) {
+            const dot = BABYLON.MeshBuilder.CreateCylinder(name, { diameter, height: 0.001, tessellation: 8 }, scene);
+            dot.position.set(x, 0.0015, z);
+            dot.material = constellationMat;
+            return dot;
+        }
+
+        // Zone thresholds: lower/mid boundary sits just above the slingshots (LANE_Z_TOP_M=-0.33)
+        // and below the open mid-table, marking "the flipper zone starts here"; mid/upper sits
+        // just below the mission-target bank's nearest point and the bumper cluster's own top
+        // (z=0.16), marking the gateway into the crowded upper-table feature bank. Both scatter
+        // across most of the table's own inner width (TABLE_WIDTH_M/2 minus wall clearance), with
+        // per-dot jitter in Z/size so the line reads as a loose star-field, not a ruled boundary.
+        [
+            { name: 'zoneThresholdLower', z: -0.20, count: 9 },
+            { name: 'zoneThresholdUpper', z: 0.195, count: 9 }
+        ].forEach((zone) => {
+            const xHalf = TABLE_WIDTH_M / 2 - 0.05;
+            for (let i = 0; i < zone.count; i++) {
+                const t = i / (zone.count - 1);
+                const x = -xHalf + t * xHalf * 2;
+                const z = zone.z + (Math.random() - 0.5) * 0.024;
+                const size = 0.005 + Math.random() * 0.007;
+                addConstellationDot(zone.name + i, x, z, size);
+            }
+        });
+
+        // Central ball-pathway cue ("clear ball pathways... functional geometry should visually
+        // communicate where the player should shoot"): the open lane between the bumper cluster's
+        // lowest point (z~-0.02) and the flipper zone threshold above is the table's single
+        // biggest dark, unmarked area - the ball's main return path from every upper shot funnels
+        // through here. A faint vertical scatter down the center (low alpha, well under the lane
+        // floor tints' own 0.14-0.16, so it never competes with the playfield artwork underneath
+        // it) traces that path without implying a new physical lane or gameplay meaning.
+        {
+            const pathMat = makeLaneFloorMat('centerPathMat', new BABYLON.Color3(0.78, 0.74, 1), 0.4);
+            const pathCount = 8;
+            for (let i = 0; i < pathCount; i++) {
+                const t = i / (pathCount - 1);
+                const z = -0.03 + t * (-0.24); // -0.03 (just under the bumper cluster) down to -0.27 (just above the lower zone threshold)
+                const x = (Math.random() - 0.5) * 0.05;
+                const dot = addConstellationDot('centerPathDot' + i, x, z, 0.005 + Math.random() * 0.005);
+                dot.material = pathMat;
+            }
+        }
+
+        // Target-bank callout ("visible targets"): MISSION_TARGET_BANK had no signage of its own
+        // at all before this - just the 3 flags/header rail, easy to miss as a distinct shot
+        // against the busier bumper/orbit cluster next to it. Same text-label convention as
+        // L ORBIT/R ORBIT/SKILL SHOT above, placed just outside the bank's own nearest (lowest)
+        // target so it doesn't overlap the header rail or any flag.
+        {
+            const nearestTarget = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
+            createLabelPlane(scene, 'TARGETS', nearestTarget.x - 0.055, nearestTarget.z - 0.03, '#ff66cc');
+        }
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
         // Saturn's rings every frame, drive the power-up orb's spawn/despawn cycle, run the
@@ -2831,6 +3631,7 @@ import {
         COLOR_COMET = hexToColor3(HEX_COMET);
         COLOR_MISSION_ACTIVE = hexToColor3(HEX_MISSION_ACTIVE);
         COLOR_LANE_LAMP = hexToColor3(HEX_LANE_LAMP);
+        COLOR_OUTLANE_LAMP = hexToColor3(HEX_OUTLANE_LAMP);
         COLOR_ORBIT_LAMP = hexToColor3(HEX_ORBIT_LAMP);
         COLOR_SKILL_SHOT_LAMP = hexToColor3(HEX_SKILL_SHOT_LAMP);
         COLOR_BALL_SAVE_LAMP = hexToColor3(HEX_BALL_SAVE_LAMP);
@@ -2885,7 +3686,7 @@ import {
         statusHavok.className = 'ok';
 
         buildLighting(scene);
-        buildSkybox(scene);
+        const skybox = buildSkybox(scene);
 
         buildTable(scene);
         const camera = buildCamera(scene);
@@ -2905,7 +3706,10 @@ import {
             lampSystem.registerLamp('reentryLane' + i, mesh, COLOR_MISSION_ACTIVE, LAMP_MODE.OFF);
         });
         obstacles.sideLaneLampMeshes.forEach((entry) => {
-            lampSystem.registerLamp(entry.id, entry.mesh, COLOR_LANE_LAMP, LAMP_MODE.OFF);
+            // entry.id is e.g. 'inlaneLeft'/'outlaneRight' - see its own construction in
+            // buildObstacles() - so the kind prefix alone is enough to pick the right identity.
+            const laneLampColor = entry.id.startsWith('outlane') ? COLOR_OUTLANE_LAMP : COLOR_LANE_LAMP;
+            lampSystem.registerLamp(entry.id, entry.mesh, laneLampColor, LAMP_MODE.OFF);
         });
         obstacles.orbitLampMeshes.forEach((entry) => {
             lampSystem.registerLamp(entry.id, entry.mesh, COLOR_ORBIT_LAMP, LAMP_MODE.OFF);
@@ -2980,6 +3784,17 @@ import {
         // only place glowLayer.intensity is ever set outside that one feature.
         const restGlowIntensity = highFidelity ? 0.8 : 0.5;
         glowLayer.intensity = restGlowIntensity;
+        // Lighting/material hierarchy pass (user-requested - "SPACE BACKGROUND: darkest visual
+        // layer"): GlowLayer scans every emissive material in the WHOLE scene automatically,
+        // including the skybox - its starfield is itself an emissiveTexture (see buildSkybox()),
+        // so without this exclusion every star gets the same soft outward blur/bloom treatment as
+        // the actual playfield's lamps/bumpers, turning the backdrop into a hazy glow instead of a
+        // crisp, DARK field the illuminated table is meant to visually float in front of. Excluding
+        // it here is the one glow-layer-level fix that establishes the space background as its own
+        // distinct (darkest, non-glowing) tier, rather than tuning down every individual star's
+        // brightness in createStarfieldTexture() and losing the "sparse bright stars" contrast
+        // that texture is deliberately built around.
+        glowLayer.addExcludedMesh(skybox);
 
         // Hoisted to a `let` (not a const declared only inside the if-block) so the dev HUD's
         // "post-processing" checkbox (below, once devMode is confirmed) can toggle
@@ -3176,7 +3991,14 @@ import {
         ballMat.albedoColor = COLOR_BALL;
         ballMat.metallic = 0.1;
         ballMat.roughness = 0.25;
-        ballMat.emissiveColor = COLOR_EYEBALL.scale(0.4);
+        // Lighting/material hierarchy pass (user-requested - "BALL: highest motion readability"):
+        // raised from 0.4 - at the old value the ball's own glow was DIMMER than the flippers
+        // (0.5) and roughly level with the bumpers (0.6), so the single object every player's eye
+        // needs to track continuously wasn't actually the brightest thing on the board. Bumped
+        // above every other object's resting emissive scale (flippers 0.5, bumpers 0.6, mission
+        // targets 0.55) so the ball reads as the clear top of the hierarchy at a glance, moving or
+        // still, without needing a value so extreme it blooms into a shapeless blob.
+        ballMat.emissiveColor = COLOR_EYEBALL.scale(0.7);
 
         // --- The main game ball (Stage 3): one canonical ball, physics-maintained every frame
         // via updateBallPhysics(). Now spawned resting on the plunger (Stage 5), matching
@@ -4386,7 +5208,17 @@ import {
         // Lightweight scale-pulse as this stage's hit feedback - a 3D-appropriate stand-in for
         // the 2D version's tween-based flash (Stage 8's particle/VFX system will do this properly
         // later; this is enough to make a hit feel registered in the meantime).
-        function pulseMesh(mesh, scale = 1.3) {
+        //
+        // extraMeshes (bumper visual-upgrade pass, user-requested - "tiny scale/impact reaction if
+        // safe"): optional companion meshes (the bumpers' decorative cap/insert) that get the same
+        // brief scale pulse as the primary mesh, WITHOUT the emissive-flash half of the treatment -
+        // some of those companion materials (the shared bumper cap) are reused across multiple
+        // fixtures, so mutating their emissiveColor here the way the primary mesh's material is
+        // mutated below would bleed the flash into every other fixture sharing that material at
+        // once. Scale-only sidesteps that while still giving the whole fixture a unified "impact"
+        // read, not just its collider. Defaults to none - every pre-existing call site is
+        // unaffected.
+        function pulseMesh(mesh, scale = 1.3, extraMeshes = []) {
             const original = mesh.scaling.clone();
             mesh.scaling.scaleInPlace(scale);
             // Emissive flash to near-white on top of the scale pulse - the doc's "briefly
@@ -4398,10 +5230,14 @@ import {
             if (originalEmissive) {
                 mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
             }
+            const extras = extraMeshes.filter(Boolean).map((m) => ({ mesh: m, original: m.scaling.clone() }));
+            extras.forEach(({ mesh: m }) => m.scaling.scaleInPlace(scale));
             setTimeout(() => {
-                if (mesh.isDisposed()) return;
-                mesh.scaling.copyFrom(original);
-                if (originalEmissive) mat.emissiveColor.copyFrom(originalEmissive);
+                if (!mesh.isDisposed()) {
+                    mesh.scaling.copyFrom(original);
+                    if (originalEmissive) mat.emissiveColor.copyFrom(originalEmissive);
+                }
+                extras.forEach(({ mesh: m, original: o }) => { if (!m.isDisposed()) m.scaling.copyFrom(o); });
             }, 100);
         }
 
@@ -4819,7 +5655,7 @@ import {
                 // touch punchier than a passive bounce, without changing scoring or any other
                 // obstacle kind's feedback (all other pulseMesh()/playHitSound() call sites are
                 // untouched, defaulting back to their original 1.3x/0.14 values).
-                pulseMesh(mesh, 1.4);
+                pulseMesh(mesh, 1.4, [meta.capMesh, meta.insertMesh]); // extends the flash/pulse to the bumper's decorative cap+insert (see pulseMesh()'s own comment on why those two are scale-only)
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + points, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
                 triggerCameraShake(130, meta.boss ? 0.009 : 0.007); // was 120/0.008/0.006 - a bit stronger, matching the new active-kick feel
@@ -5036,7 +5872,7 @@ import {
                 addScore(points);
                 if (isOutlane) stats.outlaneHits++; else stats.inlaneHits++;
                 pulseMesh(mesh);
-                lampSystem.flashLamp(meta.lampId, 220, COLOR_LANE_LAMP);
+                lampSystem.flashLamp(meta.lampId, 220, isOutlane ? COLOR_OUTLANE_LAMP : COLOR_LANE_LAMP);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage((isOutlane ? 'OUTLANE! +' : 'INLANE! +') + points, 700);
                 triggerCameraShake(70, isOutlane ? 0.003 : 0.0025); // a modest rollover beat, not a collision - outlane a touch stronger, it's the more consequential of the two
@@ -5873,6 +6709,7 @@ import {
             // duration" requirement. Camera effects and the dev-panel status readouts are left
             // running during pause - harmless either way, and simpler than guarding everything.
             updateSaturnRotation(obstacles.saturnRings, deltaMs);
+            updateSkyboxRotation(skybox, deltaMs);
 
             if (!isPaused) {
                 // Timer audit fix - accumulates only while unpaused, see gameplayClockMs' own
