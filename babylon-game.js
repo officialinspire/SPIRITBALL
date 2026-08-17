@@ -870,6 +870,19 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     // onLoad - only reached once the file has genuinely been fetched and decoded
                     // successfully, safe to swap in now.
                     material[property] = texture;
+                    // Reset the tint this property's own color multiplies against, so the loaded
+                    // artwork's real colors show through under scene lighting instead of getting
+                    // multiplied by whatever flat procedural color that material used as its
+                    // plain-color fallback (e.g. playfieldMat's dark cosmic tint would otherwise
+                    // significantly darken/wash out real playfield artwork layered on top of it -
+                    // exactly the "avoid washing out the artwork" requirement this exists for).
+                    // Only for 'albedo': an emissive texture is additive light output, not a
+                    // multiplied tint, so emissiveColor staying at its current (usually lamp-
+                    // system-controlled) value is correct as-is.
+                    if (entry.kind !== 'emissive') {
+                        if (material.albedoColor) material.albedoColor.set(1, 1, 1);
+                        else if (material.diffuseColor) material.diffuseColor.set(1, 1, 1);
+                    }
                 },
                 () => {
                     // onError - includes a plain 404, the expected/default case for every slot
@@ -879,6 +892,21 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     texture.dispose();
                 }
             );
+            // Sensible filtering defaults for every skin texture (visual-integration pass, user-
+            // requested - "sensible texture filtering, anisotropic filtering if supported"). Clamp
+            // (not the Texture class default of wrap/repeat) since every one of these slots is a
+            // single "cover this surface" image, never a tiling pattern - repeat would risk a
+            // visible seam if UV drifts even slightly past 0/1 at a mesh edge. Anisotropic
+            // filtering sharpens a texture viewed at a raking angle - exactly this game's fixed
+            // camera relative to the playfield (see buildCamera()'s own "steeply-angled" note) -
+            // gated on the engine actually reporting hardware support (maxAnisotropy > 0; the
+            // WEBGL_ANISOTROPIC_FILTER extension isn't universal) rather than assumed present.
+            texture.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+            texture.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+            const maxAnisotropy = scene.getEngine().getCaps().maxAnisotropy;
+            if (maxAnisotropy > 0) {
+                texture.anisotropicFilteringLevel = Math.min(8, maxAnisotropy);
+            }
         } catch (err) {
             // Defensive only - BABYLON.Texture's own async loader is what normally reports
             // failures via onError above; this catches anything more fundamental (e.g. an
@@ -965,9 +993,37 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         playfieldMat.albedoColor = COLOR_BACKGROUND.scale(0.5);
         playfieldMat.metallic = 0.3;
         playfieldMat.roughness = 0.35; // glossy-varnished, not mirror-flat, per the doc
-        // Playfield background/art skin slot (visual-architecture pass, user-requested) - the
-        // ball's own rolling surface. No-op until assets/skins/playfield/playfield-background.png
-        // actually exists (see SKINS.md); this flat cosmic tint stays the fallback either way.
+        // Playfield background/art skin slot (visual-integration pass, user-requested - "Keep
+        // enough material response that the surface still looks like a physical pinball playfield
+        // rather than a flat webpage image"). Populated with real artwork (see SKINS.md). The two
+        // overrides just below apply UNCONDITIONALLY - to the flat-tint fallback above just as
+        // much as to the textured look once applySkinTexture() resolves - deliberately: the
+        // fallback and the textured surface are the same physical material with two different
+        // colors/patterns on it, not two different materials, so both should share one physical
+        // response:
+        //   - metallic dropped from 0.3 to near-zero: a real playfield's printed art sits under a
+        //     clear lacquer coat, it isn't itself a metal surface - the old 0.3 was tuned before
+        //     this pass and would read as an odd metallic sheen now that real printed artwork can
+        //     be layered under it.
+        //   - roughness tightened slightly (0.35 -> 0.28): a bit more clearcoat-like specular
+        //     "pop" under the scene's direct lights, without going glassy/mirror-flat.
+        // Only albedoColor differs between the two states, and only because applySkinTexture()
+        // itself resets it to white on a successful load (see that function's own comment) - nothing
+        // here sets it conditionally.
+        //
+        // No emissiveColor was added (stays at the PBRMaterial default of black/off) - the
+        // artwork's own bright glow elements (the flower-of-life's light points) already read as
+        // bright via albedo under direct light; adding material-level emissive on top would wash
+        // out their contrast rather than help, so none is added ("emissive contribution only
+        // where necessary" - none is necessary here).
+        //
+        // No scene.environmentTexture was added either: matches this project's existing,
+        // deliberate policy (see wallMat's own comment above) of not taking on a second fragile
+        // CDN texture fetch for IBL reflections. "Subtle environmental response" instead comes
+        // from the retained non-zero metallic/roughness Fresnel response Babylon's PBR model
+        // already computes from direct scene lights alone, the same tradeoff wallMat already made.
+        playfieldMat.metallic = 0.05;
+        playfieldMat.roughness = 0.28;
         applySkinTexture(scene, playfieldMat, SKIN_MANIFEST.playfieldBackground);
         const playfield = BABYLON.MeshBuilder.CreateBox('playfield', {
             width: TABLE_WIDTH_M,

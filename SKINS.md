@@ -1,10 +1,10 @@
 # SPIRITBALL decorative-skin architecture
 
-Status as of this document: **the plumbing exists, no artwork does.** This is the intended state,
-not a work-in-progress snapshot - `js/skins.js`'s manifest currently maps every skin slot to
-`path: null` on purpose (see that file's own comment for why null, not a guessed filename). This
-document describes how to actually add artwork once it exists, and the folder/image spec that
-artwork needs to follow.
+Status as of this document: **one slot populated (`playfieldBackground`), the rest still
+`path: null`.** Every other slot's default-null state is still the intended design, not a
+work-in-progress snapshot - see "Why every slot defaults to `path: null`" below for why. This
+document describes how to actually add artwork (playfieldBackground already shows the full
+worked example), and the folder/image spec that artwork needs to follow.
 
 ## What this is for
 
@@ -40,9 +40,18 @@ all.
      permanent fallback, not a temporary "loading" state.
    - Never throws, never rejects unhandled, and is never awaited by its caller - a skin texture
      can only ever improve the visuals if it loads; it can never delay or block game startup.
+   - On success, also resets whatever flat color that property multiplies against
+     (`albedoColor`/`diffuseColor`, for `kind: 'albedo'` only) to white, so the real artwork's own
+     colors show through instead of getting tinted/darkened by the procedural fallback's color -
+     see the visual-integration pass' commit for why this mattered in practice (playfieldMat's
+     dark cosmic tint would otherwise noticeably wash out real playfield artwork layered under
+     it).
+   - Sets `wrapU`/`wrapV` to `CLAMP_ADDRESSMODE` (every skin slot is a single "cover this surface"
+     image, never a tiling pattern) and `anisotropicFilteringLevel` (capped at 8, only when the
+     engine reports hardware support) on every loaded texture - sharpens texture detail at a
+     raking viewing angle, which is exactly how this game's fixed camera sees the playfield.
 
-3. **`assets/skins/`** - where the actual image files go, in the subfolders described below. Every
-   subfolder currently contains only a `.gitkeep` placeholder.
+3. **`assets/skins/`** - where the actual image files go, in the subfolders described below.
 
 ## Why every slot defaults to `path: null`, not a real-looking filename
 
@@ -63,6 +72,43 @@ still matters) for the case a path *is* configured but the file is temporarily m
 deploy, a typo) - that's a real failure mode worth defending against, just not the default state
 of an intentionally artwork-free repo.
 
+## Populated slots
+
+### `playfieldBackground`
+
+`assets/skins/playfield/playfield-background.webp` - a user-supplied portrait (887x1774) cosmic/
+sacred-geometry piece, applied to `playfieldMat` (the ball-rolling surface). Worked example of the
+full pipeline described above:
+
+- **Format:** shipped as the original `.webp` the artwork was supplied in, not re-encoded -
+  avoids introducing a second generation of compression artifacts on top of whatever the source
+  already has. See the format note below: webp is a fine choice alongside PNG/JPG as long as the
+  target browsers support it (every browser this WebGL2/WASM-Havok game already requires does).
+- **Aspect ratio:** the image is exactly 2:1 (887:1774, i.e. width:height = 0.5); the playfield's
+  own top-face aspect is `TABLE_WIDTH_M : TABLE_LENGTH_M` = 0.51:0.9067 ≈ 0.5625. Close enough
+  (~11%) that the default full-face box UV (a uniform stretch to fit, no custom crop) reads as a
+  natural part of the design rather than a visible distortion - confirmed via a headless Chromium
+  screenshot, not assumed. A custom UV crop (matching width, cropping the top/bottom ~5.5% each to
+  hit the exact target aspect) was considered but deliberately not implemented: getting the crop
+  axis and V-direction right without being able to visually distinguish a subtly-wrong crop from a
+  correct one (this particular image is close to top/bottom-symmetric) was a real risk for a
+  refinement that the plain stretch already made unnecessary.
+- **Material tuning:** `playfieldMat.metallic` dropped from 0.3 to 0.05 (real playfield art sits
+  under a clear lacquer coat, it isn't a metal surface itself) and `roughness` tightened from 0.35
+  to 0.28 (a bit more clearcoat-like specular response under the scene's direct lights). No
+  `emissiveColor` was added - the artwork's own bright elements already read as bright via albedo
+  under direct light, and material-level emissive on top would wash out their contrast rather than
+  help. No `scene.environmentTexture` was added either, matching this project's existing policy
+  (see `wallMat`'s own comment in `babylon-game.js`) of not taking on a second fragile CDN texture
+  fetch for IBL reflections - "subtle environmental response" instead comes from the retained
+  non-zero metallic/roughness Fresnel response Babylon's PBR model already computes from direct
+  lights alone.
+- **Verification:** confirmed via a temporary debug hook and headless Chromium screenshots that
+  the texture loads and renders correctly (right-side-up, centered, covering the full playfield,
+  no seams at the boundary), that removing the file falls back cleanly to the original flat cosmic
+  tint with zero console/page errors, and that the playfield mesh's position and physics body are
+  byte-for-byte unchanged from before this pass.
+
 ## How to add real artwork
 
 1. Drop the image at `assets/skins/<subfolder>/<filename>.png` (or `.jpg`/`.webp` - see format
@@ -81,7 +127,7 @@ was - there's no broken/blank-texture state to worry about.
 assets/
   skins/
     playfield/
-      playfield-background.png     - playfield background/art (playfieldMat)
+      playfield-background.webp    - playfield background/art (playfieldMat) - POPULATED
     cabinet/
       cabinet-rails.png            - cabinet/table artwork (wallMat - all boundary walls)
     bumpers/
@@ -110,10 +156,11 @@ should follow the same pattern: a new subfolder (or a new file in an existing on
 
 General:
 
-- **Format:** PNG (transparency support, no licensing/patent concerns). JPG is fine for fully
-  opaque slots (playfield background, cabinet rails) where alpha is never used. Keep files
-  reasonably small (target well under 1MB each) - this is a mobile-first game with no build-time
-  texture compression step.
+- **Format:** PNG (transparency support, no licensing/patent concerns). JPG or WebP are both fine
+  for fully opaque slots (playfield background, cabinet rails) where alpha is never used - WebP in
+  particular gives noticeably better compression at equivalent quality (the populated
+  `playfieldBackground` slot uses it: 887x1774 at ~325KB). Keep files reasonably small (target
+  well under 1MB each) - this is a mobile-first game with no build-time texture compression step.
 - **Power-of-two dimensions** (e.g. 512, 1024, 2048) are recommended but not required - Babylon
   will accept non-PoT textures, but PoT sizes mipmap and compress more predictably and avoid any
   GPU-specific edge cases.
@@ -140,9 +187,18 @@ Per slot:
 - **No gameplay geometry, collider shape/size/position, physics aggregate, trigger, score, or
   cooldown changed anywhere.** `applySkinTexture()` only ever assigns a texture property on an
   already-fully-configured material; it never touches a mesh's shape, transform, or physics body.
-- **No existing material was removed.** Every procedural material this pass touched keeps its
-  exact original `albedoColor`/`emissiveColor`/`metallic`/`roughness` setup - the skin texture is
-  an optional layer on top, not a replacement, and today (with every path `null`) every material
-  looks pixel-identical to before this pass.
-- **No artwork was created or committed.** Every subfolder under `assets/skins/` contains only a
-  `.gitkeep` placeholder.
+- **No existing material was removed.** Every material's own procedural fallback color/texture-
+  property state is still set first, on every load - the skin texture (where one is configured) is
+  an optional layer on top of that, not a replacement, and `albedoColor`/`diffuseColor` is only
+  ever touched by `applySkinTexture()` itself on a *successful* load (see above), never on
+  failure. `playfieldMat`'s `metallic`/`roughness` are the one exception worth calling out
+  explicitly: those were re-tuned (see "Populated slots" below) as a small unconditional
+  improvement to the surface's physical response, so they apply to the fallback flat-color look
+  too, not just the textured one - a deliberate choice (the two states should share the same
+  physical material, only the color/pattern differs), not an oversight. Removing
+  `playfield-background.webp` still reverts the *color* to exactly its pre-artwork flat cosmic
+  tint; the surface's roughness/metallic response stays at this pass' slightly glossier tuning
+  either way.
+- **No artwork was invented.** The one populated slot (`playfieldBackground`) uses artwork
+  supplied directly by the user, not generated. Every other subfolder under `assets/skins/`
+  contains only a `.gitkeep` placeholder.

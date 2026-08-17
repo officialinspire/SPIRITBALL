@@ -47,8 +47,12 @@ export const SKIN_ASSET_BASE = 'assets/skins/';
 // uses (see each call site in babylon-game.js).
 export const SKIN_MANIFEST = {
     // Playfield background/art - the ball-rolling surface itself (playfieldMat in buildTable()).
-    // Future path: 'playfield/playfield-background.png'
-    playfieldBackground: { path: null, kind: 'albedo' },
+    // Populated (user-supplied artwork, visual-integration pass) - a portrait 887x1774 cosmic/
+    // sacred-geometry piece (webp). See SKINS.md's "Populated slots" note for the aspect-ratio
+    // reasoning (the table's own top-face aspect is ~0.5625, the artwork's is exactly 0.5 - close
+    // enough that the default full-face UV stretch reads as a deliberate design, not a visible
+    // distortion bug, so no custom UV crop was added).
+    playfieldBackground: { path: 'playfield/playfield-background.webp', kind: 'albedo' },
 
     // Cabinet/table artwork - the perimeter wall/rail material (wallMat in buildTable()), shared
     // by every structural boundary wall on the board (top/left/right/slants/guides).
