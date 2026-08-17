@@ -3283,7 +3283,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // need a name to be understood at a glance: the skill-shot lane bank, the kickback
         // outlane, both orbit entrances, and the Vision Gate. Positioned near, not on top of,
         // each shot's own lamp/trigger geometry so nothing visually overlaps.
-        createLabelPlane(scene, 'SKILL SHOT', SKILL_SHOT_LANES[1].x, SKILL_SHOT_Z_M + 0.05, '#ff3366');
+        // Table-composition pass (user-requested - "immediate readability... inserts/lights
+        // communicating important areas"): this label's original position (SKILL_SHOT_Z_M+0.05 =
+        // z=0.07, at the lane's own x=0.08) sits almost exactly on top of BUMPER_CLUSTER[2]
+        // (x=0.08, z=0.06) - confirmed via screenshot the bumper's own raised cap (added in a
+        // later visual-upgrade pass, after this label was first placed) now visually occludes
+        // half the text from this game's fixed low camera angle. Pulled forward (away from the
+        // bumper cluster, toward the camera) and lifted slightly - same "read against open space,
+        // not crowded geometry" fix as visionGateBeacon's own comment below.
+        const skillShotLabel = createLabelPlane(scene, 'SKILL SHOT', SKILL_SHOT_LANES[1].x, SKILL_SHOT_Z_M - 0.06, '#ff3366');
+        skillShotLabel.position.y = 0.05;
         createLabelPlane(scene, 'KICKBACK', kickbackMirror * OUTLANE_TRIGGER_X_M, LANE_Z_BOTTOM_M - 0.03, '#ff5500');
         // Subtle emissive lane-flow markers (visual-polish pass, user-requested) - unlike every
         // label above, these use createLabelPlane()'s transparent option (no background chip) and
@@ -3304,7 +3313,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const orbitLabel = orbitDef.side === 'left' ? 'L ORBIT' : 'R ORBIT';
             createLabelPlane(scene, orbitLabel, orbitDef.entranceX, ORBIT_ENTRANCE_Z_M - 0.04, '#33ccff');
         });
-        createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x, VISION_GATE_POS.z - VISION_GATE_RADIUS_M - 0.03, '#cc66ff');
+        // Table-composition pass (user-requested) - the original placement (pulled TOWARD the
+        // bumper cluster, z = gate_z - 0.045) sat only ~0.03m from the boss bumper's own center,
+        // close enough that the bumper's raised cap visually occluded the leading "VI" from this
+        // game's fixed camera angle (confirmed via screenshot). Flipped to the far side of the
+        // gate instead (+ offset, away from the crowded bumper cluster) and lifted, so it reads
+        // clearly against open playfield the way visionGateBeacon already does against open sky.
+        const visionGateLabel = createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x, VISION_GATE_POS.z + 0.035, '#cc66ff');
+        visionGateLabel.position.y = 0.045;
 
         // 8. Physical backing around the backglass - a frame border plus a receding cabinet
         // "head" riser behind the panel buildBackglass() builds separately (called after this
@@ -3352,6 +3368,80 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }, scene);
         topTrim.position.set(0, 0.005, TABLE_LENGTH_M / 2 + 0.014);
         topTrim.material = housingMat;
+
+        // ===================================
+        // Table-composition pass (user-requested - "distinct upper/middle/lower table regions...
+        // visual rails leading the eye toward shots... clear ball pathways"): classic pinball
+        // tables (the doc's own Space-Cadet-style reference) read as three zones at a glance - a
+        // tight lower flipper zone, an open mid-table shooting gallery, and a further upper bank
+        // of targets/features - usually communicated with paint, ramps, or light rails marking
+        // the transitions, and often a visible "lane" cueing the ball's main path from the upper
+        // features back down to the flippers. SPIRITBALL has no ramps/paint to add either of
+        // those with, but it does already have a cosmic identity to draw on: a "constellation
+        // threshold" - a loose scatter of small flush starlight-colored inserts, no two evenly
+        // spaced, crossing the table at each zone boundary - reads as a deliberate cosmic dressing
+        // choice (not a technical ruled line) while still doing the same visual job a rope-light
+        // divider would on a physical machine. Purely decorative: flush with the playfield (same
+        // paper-thin/no-collision treatment as addLaneFloorTint()'s films), so nothing here can
+        // ever touch the ball physically, and nothing existing moved to make room for it.
+        // ===================================
+        const constellationMat = makeLaneFloorMat('constellationMat', new BABYLON.Color3(0.78, 0.74, 1), 0.85);
+
+        function addConstellationDot(name, x, z, diameter) {
+            const dot = BABYLON.MeshBuilder.CreateCylinder(name, { diameter, height: 0.001, tessellation: 8 }, scene);
+            dot.position.set(x, 0.0015, z);
+            dot.material = constellationMat;
+            return dot;
+        }
+
+        // Zone thresholds: lower/mid boundary sits just above the slingshots (LANE_Z_TOP_M=-0.33)
+        // and below the open mid-table, marking "the flipper zone starts here"; mid/upper sits
+        // just below the mission-target bank's nearest point and the bumper cluster's own top
+        // (z=0.16), marking the gateway into the crowded upper-table feature bank. Both scatter
+        // across most of the table's own inner width (TABLE_WIDTH_M/2 minus wall clearance), with
+        // per-dot jitter in Z/size so the line reads as a loose star-field, not a ruled boundary.
+        [
+            { name: 'zoneThresholdLower', z: -0.20, count: 9 },
+            { name: 'zoneThresholdUpper', z: 0.195, count: 9 }
+        ].forEach((zone) => {
+            const xHalf = TABLE_WIDTH_M / 2 - 0.05;
+            for (let i = 0; i < zone.count; i++) {
+                const t = i / (zone.count - 1);
+                const x = -xHalf + t * xHalf * 2;
+                const z = zone.z + (Math.random() - 0.5) * 0.024;
+                const size = 0.005 + Math.random() * 0.007;
+                addConstellationDot(zone.name + i, x, z, size);
+            }
+        });
+
+        // Central ball-pathway cue ("clear ball pathways... functional geometry should visually
+        // communicate where the player should shoot"): the open lane between the bumper cluster's
+        // lowest point (z~-0.02) and the flipper zone threshold above is the table's single
+        // biggest dark, unmarked area - the ball's main return path from every upper shot funnels
+        // through here. A faint vertical scatter down the center (low alpha, well under the lane
+        // floor tints' own 0.14-0.16, so it never competes with the playfield artwork underneath
+        // it) traces that path without implying a new physical lane or gameplay meaning.
+        {
+            const pathMat = makeLaneFloorMat('centerPathMat', new BABYLON.Color3(0.78, 0.74, 1), 0.4);
+            const pathCount = 8;
+            for (let i = 0; i < pathCount; i++) {
+                const t = i / (pathCount - 1);
+                const z = -0.03 + t * (-0.24); // -0.03 (just under the bumper cluster) down to -0.27 (just above the lower zone threshold)
+                const x = (Math.random() - 0.5) * 0.05;
+                const dot = addConstellationDot('centerPathDot' + i, x, z, 0.005 + Math.random() * 0.005);
+                dot.material = pathMat;
+            }
+        }
+
+        // Target-bank callout ("visible targets"): MISSION_TARGET_BANK had no signage of its own
+        // at all before this - just the 3 flags/header rail, easy to miss as a distinct shot
+        // against the busier bumper/orbit cluster next to it. Same text-label convention as
+        // L ORBIT/R ORBIT/SKILL SHOT above, placed just outside the bank's own nearest (lowest)
+        // target so it doesn't overlap the header rail or any flag.
+        {
+            const nearestTarget = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
+            createLabelPlane(scene, 'TARGETS', nearestTarget.x - 0.055, nearestTarget.z - 0.03, '#ff66cc');
+        }
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
         // Saturn's rings every frame, drive the power-up orb's spawn/despawn cycle, run the
