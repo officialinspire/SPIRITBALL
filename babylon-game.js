@@ -106,6 +106,10 @@ import {
     HEX_MISSION_ACTIVE, HEX_LANE_LAMP, HEX_OUTLANE_LAMP, HEX_ORBIT_LAMP, HEX_SKILL_SHOT_LAMP,
     HEX_BALL_SAVE_LAMP, HEX_KICKBACK_LAMP, HEX_BACKGROUND
 } from './js/config.js';
+// Decorative-skin manifest (visual-architecture pass, user-requested) - pure data, see its own
+// file header for why it stays BABYLON-free, and SKINS.md at the repo root for the full asset-
+// folder spec this powers. Imported the same bare-identifier way as js/config.js above.
+import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
 (function () {
     'use strict';
@@ -814,6 +818,76 @@ import {
     }
 
     // ===================================
+    // Decorative-skin texture loader (visual-architecture pass, user-requested - "prepare
+    // SPIRITBALL's visual architecture for custom generated artwork... WITHOUT adding the final
+    // artwork yet"). This is the ONLY place in the whole file that ever loads a skin image - see
+    // js/skins.js for the manifest (SKIN_MANIFEST/SKIN_ASSET_BASE) and SKINS.md at the repo root
+    // for the asset-folder spec. Every call site below (buildTable()/buildObstacles()) already
+    // builds its material with the existing procedural look FIRST, then calls this - so a slot
+    // with no path configured (every slot, until real artwork exists - see skins.js) is a true
+    // no-op, not a missing-texture glitch.
+    //
+    // Null-path slots return immediately below WITHOUT ever issuing a network request - not just
+    // an implementation detail. A real attempted load that 404s still gets logged by Chromium's
+    // own network stack as a "Failed to load resource: 404" console entry, regardless of any
+    // onError handler here - that's a browser-level diagnostic tied to the raw HTTP response, not
+    // something JS can suppress (confirmed via a headless Chromium run against a real 404 while
+    // building this). With multiple skin slots, attempting every one of them speculatively before
+    // any artwork exists would mean that many console entries on every single load - a real
+    // regression against this project's own zero-console-error bar. Skipping the request entirely
+    // for an unset slot (see skins.js's own comment on why paths default to null, not a guessed
+    // future filename) is what actually keeps an artwork-free build's console silent.
+    //
+    // Deliberately fire-and-forget: BABYLON.Texture's own onLoad/onError callbacks below are how
+    // this resolves once a path IS configured, not a Promise a caller could accidentally await
+    // and block scene/game startup on. onError is passed explicitly (required - without it, a
+    // failed load also calls BABYLON's own Tools.Error internally; with it, the failure path
+    // taken by THIS code is entirely this callback) so a genuine load failure on a configured
+    // slot (wrong filename, bad deploy, network hiccup) still never throws, never rejects
+    // unhandled, and never touches the material beyond disposing the failed attempt - startup and
+    // every other decorative surface are unaffected either way. The one thing it can't do (see
+    // above) is keep Chromium's own network-failure console line from appearing for that specific
+    // configured-but-broken slot; that's expected, standard browser diagnostic behavior for any
+    // failed HTTP request, not a bug in this function.
+    //
+    // entry: one SKIN_MANIFEST value, i.e. { path, kind } - kind picks which material property
+    // gets the loaded texture ('albedo' -> albedoTexture/diffuseTexture, 'emissive' ->
+    // emissiveTexture), matching whichever of those properties that material's own procedural
+    // look already relies on for its base color. Passing a falsy entry (e.g. an out-of-range
+    // missionTargetFace index) is a safe no-op, not an error - callers don't need to guard first.
+    function applySkinTexture(scene, material, entry) {
+        if (!entry || !entry.path || !material) return;
+        const property = entry.kind === 'emissive' ? 'emissiveTexture' : (material.albedoColor ? 'albedoTexture' : 'diffuseTexture');
+        try {
+            const url = SKIN_ASSET_BASE + entry.path;
+            const texture = new BABYLON.Texture(
+                url,
+                scene,
+                undefined,
+                undefined,
+                undefined,
+                () => {
+                    // onLoad - only reached once the file has genuinely been fetched and decoded
+                    // successfully, safe to swap in now.
+                    material[property] = texture;
+                },
+                () => {
+                    // onError - includes a plain 404, the expected/default case for every slot
+                    // right now. Dispose the failed attempt and leave the material exactly as
+                    // its caller already set it up; deliberately silent, since a missing
+                    // optional skin asset is normal, not a bug.
+                    texture.dispose();
+                }
+            );
+        } catch (err) {
+            // Defensive only - BABYLON.Texture's own async loader is what normally reports
+            // failures via onError above; this catches anything more fundamental (e.g. an
+            // already-disposed scene) without ever letting a skin-loading problem escape to
+            // main()'s own startup error handling.
+        }
+    }
+
+    // ===================================
     // Table geometry, ported from ../index.js GameScene.setupTable(). Boundary only (matches
     // this stage's scope) - the center divider post between the flippers is NOT included here;
     // it belongs conceptually with the flipper/obstacle work in later stages, not the outer
@@ -834,6 +908,10 @@ import {
         wallMat.metallic = 0.6;
         wallMat.roughness = 0.3;
         wallMat.emissiveColor = COLOR_WALL.scale(0.15);
+        // Cabinet/table artwork skin slot (visual-architecture pass, user-requested) - shared by
+        // every structural boundary wall below. No-op until assets/skins/cabinet/cabinet-rails.png
+        // actually exists (see SKINS.md) - the chrome look above stays exactly as-is either way.
+        applySkinTexture(scene, wallMat, SKIN_MANIFEST.cabinetRails);
 
         // [x2d, y2d, width2d, height2d, rotation2d] - lifted directly from setupTable() in
         // ../index.js so this stays a faithful port, not a redesign.
@@ -887,6 +965,10 @@ import {
         playfieldMat.albedoColor = COLOR_BACKGROUND.scale(0.5);
         playfieldMat.metallic = 0.3;
         playfieldMat.roughness = 0.35; // glossy-varnished, not mirror-flat, per the doc
+        // Playfield background/art skin slot (visual-architecture pass, user-requested) - the
+        // ball's own rolling surface. No-op until assets/skins/playfield/playfield-background.png
+        // actually exists (see SKINS.md); this flat cosmic tint stays the fallback either way.
+        applySkinTexture(scene, playfieldMat, SKIN_MANIFEST.playfieldBackground);
         const playfield = BABYLON.MeshBuilder.CreateBox('playfield', {
             width: TABLE_WIDTH_M,
             height: 0.02,
@@ -2052,6 +2134,11 @@ import {
         bumperCapMat.metallic = 0.1;
         bumperCapMat.roughness = 0.18;
         bumperCapMat.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.07);
+        // Bumper cap skin slot (visual-architecture pass, user-requested) - one shared texture
+        // for all 4 caps, matching this material's own existing shared-instance design above.
+        // No-op until assets/skins/bumpers/bumper-cap.png actually exists (see SKINS.md); the
+        // glossy off-white plastic look stays the fallback either way.
+        applySkinTexture(scene, bumperCapMat, SKIN_MANIFEST.bumperCap);
 
         // Pop-bumper silhouette (visual-upgrade pass, user-requested): the collider stays the
         // exact same sphere it always was (shape, size, position, physics aggregate, and the
@@ -2164,6 +2251,15 @@ import {
             }, scene);
             mesh.position.set(pos.x, TARGET_RAISED_Y_M, pos.z);
             mesh.material = targetMats[i % targetMats.length];
+            // Mission target face skin slot (visual-architecture pass, user-requested) - per-
+            // target-index, matching this flag's own already-per-index material above. No-op
+            // until assets/skins/targets/mission-target-<i>.png actually exists (see SKINS.md);
+            // this flag's existing chakra-color material stays the fallback either way. Sharing
+            // one material instance across multiple indices (targetMats wraps at 7 entries, this
+            // bank only has 3) would mean two targets fighting over the same texture slot if
+            // that ever happened - guarded for by only ever touching THIS target's own material
+            // instance, never a shared one, same as the rest of this loop already assumes.
+            applySkinTexture(scene, mesh.material, SKIN_MANIFEST.missionTargetFace[i]);
             mesh.metadata = { kind: 'missionTarget', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
             // Trigger, not physical - detect-only per the doc (mission targets don't block the
@@ -2307,6 +2403,10 @@ import {
         saturnCapMat.metallic = 0.15;
         saturnCapMat.roughness = 0.2;
         saturnCapMat.emissiveColor = COLOR_SATURN.scale(0.85);
+        // Obstacle decal skin slot (visual-architecture pass, user-requested). No-op until
+        // assets/skins/obstacles/obstacle-decal-saturn.png actually exists (see SKINS.md); this
+        // highlight cap's neutral-warm material stays the fallback either way.
+        applySkinTexture(scene, saturnCapMat, SKIN_MANIFEST.obstacleDecalSaturn);
         const saturnCap = BABYLON.MeshBuilder.CreateSphere('saturnCap', { diameter: SATURN_RADIUS_M * 0.7, segments: 12 }, scene);
         saturnCap.scaling.y = 0.4;
         saturnCap.position.set(SATURN_POS.x, SATURN_RADIUS_M * 1.85, SATURN_POS.z);
@@ -2332,6 +2432,12 @@ import {
         cometMat.metallic = 0.4;
         cometMat.roughness = 0.25;
         cometMat.emissiveColor = COLOR_COMET.scale(0.4);
+        // Obstacle decal skin slot (visual-architecture pass, user-requested) - applied to the
+        // comet's own material, not its collider: this only ever swaps a texture property on an
+        // existing PBRMaterial, the mesh/shape/physics/metadata below are entirely unaffected.
+        // No-op until assets/skins/obstacles/obstacle-decal-comet.png actually exists (see
+        // SKINS.md); the icy-cyan procedural material stays the fallback either way.
+        applySkinTexture(scene, cometMat, SKIN_MANIFEST.obstacleDecalComet);
         const cometMesh = BABYLON.MeshBuilder.CreateSphere('comet', { diameter: COMET_RADIUS_M * 2 }, scene);
         cometMesh.position.set(COMET_POS.x, COMET_RADIUS_M, COMET_POS.z);
         cometMesh.material = cometMat;
@@ -2444,6 +2550,13 @@ import {
             // above) so a future skin pass can recolor one slingshot's trim independently.
             const ridgeMat = slingshotMat.clone('slingshotRidgeMat' + i);
             ridgeMat.emissiveColor = new BABYLON.Color3(1, 0.35, 1);
+            // Obstacle decal skin slot (visual-architecture pass, user-requested) - the "future
+            // skin pass" this material's own per-instance-clone comment above already flagged.
+            // Both slingshots share the same manifest path (two independent Texture loads of the
+            // same URL - the browser caches the actual fetch) since they're mirror images of one
+            // fixture, not two distinct ones. No-op until
+            // assets/skins/obstacles/obstacle-decal-slingshot.png actually exists (see SKINS.md).
+            applySkinTexture(scene, ridgeMat, SKIN_MANIFEST.obstacleDecalSlingshot);
             const ridge = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Ridge', {
                 width: SLINGSHOT_SIZE_M * 0.9,
                 height: 0.004,
@@ -2615,6 +2728,13 @@ import {
                 lampMat.albedoColor = laneLampColor.scale(0.3);
                 lampMat.metallic = 0.2;
                 lampMat.roughness = 0.4;
+                // Lane insert skin slot (visual-architecture pass, user-requested) - shared per
+                // kind (inlane/outlane), both sides. Emissive, not albedo, matching the lamp
+                // system's own emissive-only on/off convention (registerLamp() in main()) - a
+                // loaded texture would only ever show up multiplied by however lit this lamp
+                // currently is, never override that state. No-op until the matching
+                // assets/skins/lanes/lane-insert-<kind>.png actually exists (see SKINS.md).
+                applySkinTexture(scene, lampMat, laneKind.kind === 'outlane' ? SKIN_MANIFEST.laneInsertOutlane : SKIN_MANIFEST.laneInsertInlane);
                 const lamp = BABYLON.MeshBuilder.CreateCylinder(laneKind.kind + 'Lamp' + laneDef.side, {
                     diameterTop: LANE_TRIGGER_WIDTH_M * 0.6,
                     diameterBottom: LANE_TRIGGER_WIDTH_M * 0.6,
@@ -2794,6 +2914,11 @@ import {
                 lampMat.albedoColor = COLOR_ORBIT_LAMP.scale(0.3);
                 lampMat.metallic = 0.2;
                 lampMat.roughness = 0.4;
+                // Lane insert skin slot (visual-architecture pass, user-requested) - shared by
+                // both orbit trigger kinds (entrance/completion) and both sides, same emissive-
+                // over-the-lamp-system reasoning as the inlane/outlane inserts above. No-op until
+                // assets/skins/lanes/lane-insert-orbit.png actually exists (see SKINS.md).
+                applySkinTexture(scene, lampMat, SKIN_MANIFEST.laneInsertOrbit);
                 const lamp = BABYLON.MeshBuilder.CreateCylinder(triggerDef.kind + 'Lamp' + orbitDef.side, {
                     diameterTop: ORBIT_TRIGGER_WIDTH_M * 0.6,
                     diameterBottom: ORBIT_TRIGGER_WIDTH_M * 0.6,
