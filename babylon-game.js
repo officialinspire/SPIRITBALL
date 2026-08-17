@@ -1085,7 +1085,29 @@ import {
     // backdrop, not a projection suited to wrapping around a 3D sphere - reusing it as-is would
     // look wrong, and re-authoring a proper equirectangular version wasn't worth doing sight-
     // unseen in a sandbox that can't render the result either way.
+    //
+    // Depth/variety pass (user-requested - "varied star sizes and brightness, sparse brighter
+    // stars, extremely subtle cosmic depth... no distracting fast animation"): still exactly one
+    // texture on the one existing skybox sphere - no second background layer, no extra meshes.
+    // Three drawing passes, in back-to-front order, all baked once into the DynamicTexture at
+    // startup (this whole function costs nothing per rendered frame - only its one-time canvas
+    // fill cost, same as before):
+    //   1. The original dark-purple-to-near-black gradient, unchanged.
+    //   2. A handful of large, extremely low-alpha (0.03-0.06) soft radial blobs in muted cosmic
+    //      hues - "depth" in the sense of faint nebula haze behind the stars, deliberately far too
+    //      dim to read as shapes or compete with any foreground geometry.
+    //   3. Two star tiers instead of one uniform scatter: many small dim stars (the bulk of the
+    //      field, alpha 0.12-0.55) plus a much smaller handful of larger, brighter stars (alpha
+    //      0.75-1.0, with a soft halo drawn under each) that read as the "sparse brighter stars"
+    //      the sky should have, and a light warm/cool tint on some of them for variety without
+    //      turning gaudy.
+    // Star/blob counts scale with highFidelity like every other decorative count in this file
+    // (particle systems, etc.) - detected locally rather than threaded in as a parameter, the same
+    // "cheap and stateless, re-read here" pattern buildObstacles() already uses for its own dev-
+    // mode flag, so this stays a self-contained drop-in and main()'s buildSkybox() call site needs
+    // no change.
     function createStarfieldTexture(scene) {
+        const highFidelity = detectHighFidelity();
         const size = 512;
         const texture = new BABYLON.DynamicTexture('starfieldTex', size, scene, false);
         const ctx = texture.getContext();
@@ -1096,11 +1118,49 @@ import {
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, size, size);
 
-        for (let i = 0; i < 300; i++) {
+        // Faint nebula haze - a few big, soft, near-invisible tinted blobs for cosmic depth. Kept
+        // to 3 regardless of tier (each is one cheap radial-gradient fill, not worth gating).
+        const nebulaHues = ['70,50,140', '30,90,100', '110,40,90'];
+        nebulaHues.forEach((rgb) => {
             const x = Math.random() * size;
             const y = Math.random() * size;
-            const r = Math.random() * 1.4 + 0.3;
-            ctx.fillStyle = 'rgba(255,255,255,' + Math.random().toFixed(2) + ')';
+            const r = size * (0.25 + Math.random() * 0.2);
+            const blob = ctx.createRadialGradient(x, y, 0, x, y, r);
+            blob.addColorStop(0, 'rgba(' + rgb + ',0.06)');
+            blob.addColorStop(1, 'rgba(' + rgb + ',0)');
+            ctx.fillStyle = blob;
+            ctx.fillRect(0, 0, size, size);
+        });
+
+        // Dim stars - the bulk of the field.
+        const dimCount = highFidelity ? 260 : 150;
+        for (let i = 0; i < dimCount; i++) {
+            const x = Math.random() * size;
+            const y = Math.random() * size;
+            const r = Math.random() * 0.9 + 0.2;
+            ctx.fillStyle = 'rgba(255,255,255,' + (0.12 + Math.random() * 0.43).toFixed(2) + ')';
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Sparse bright stars - noticeably fewer, bigger, and with a soft halo so they pop gently
+        // against the dim field instead of just being "bigger dots."
+        const brightCount = highFidelity ? 16 : 8;
+        for (let i = 0; i < brightCount; i++) {
+            const x = Math.random() * size;
+            const y = Math.random() * size;
+            const r = Math.random() * 1 + 1.3;
+            const roll = Math.random();
+            const tint = roll < 0.25 ? '190,225,255' : roll < 0.45 ? '255,240,215' : '255,255,255'; // mostly white, occasionally a soft cool or warm tint
+
+            const halo = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
+            halo.addColorStop(0, 'rgba(' + tint + ',0.18)');
+            halo.addColorStop(1, 'rgba(' + tint + ',0)');
+            ctx.fillStyle = halo;
+            ctx.fillRect(x - r * 4, y - r * 4, r * 8, r * 8);
+
+            ctx.fillStyle = 'rgba(' + tint + ',' + (0.75 + Math.random() * 0.25).toFixed(2) + ')';
             ctx.beginPath();
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.fill();
@@ -1119,8 +1179,26 @@ import {
 
         const skybox = BABYLON.MeshBuilder.CreateSphere('skybox', { diameter: 20, sideOrientation: BABYLON.Mesh.BACKSIDE }, scene);
         skybox.material = skyMat;
-        skybox.infiniteDistance = true;
+        skybox.infiniteDistance = true; // stays centered on the camera - translation never reveals an edge or creates parallax of its own
         return skybox;
+    }
+
+    // Gentle depth cue for the fixed gameplay camera (user-requested - "add gentle parallax/depth
+    // only if inexpensive and does not interfere with the fixed gameplay camera"): true multi-
+    // layer parallax needs camera movement or translation to read at all, and the gameplay camera
+    // is deliberately fixed (buildCamera()'s own comment - "must never be player-controllable
+    // during gameplay") - the only camera that ever moves is the pre-launch attract-mode orbit,
+    // which already reveals the skybox's texture from different angles for free, no extra code
+    // needed. What a fixed camera CAN show is the sky itself drifting - an extremely slow spin of
+    // the whole skybox sphere, independent of the camera, reads as ambient depth/vastness without
+    // ever being a distracting motion (one full rotation takes roughly 17 minutes - imperceptible
+    // frame to frame). Same "ambient decorative motion, reduced not stopped under reduced-motion"
+    // treatment as updateSaturnRotation() right above, not gameplay feedback so it stays running
+    // through pause/menu/game-over like that one does.
+    const SKYBOX_SPIN_RATE_RAD_MS = 0.000006;
+    function updateSkyboxRotation(skybox, deltaMs) {
+        const rate = window.SPIRITBALL_reducedMotion ? SKYBOX_SPIN_RATE_RAD_MS * 0.15 : SKYBOX_SPIN_RATE_RAD_MS;
+        skybox.rotation.y += rate * deltaMs;
     }
 
     // ===================================
@@ -2972,7 +3050,7 @@ import {
         statusHavok.className = 'ok';
 
         buildLighting(scene);
-        buildSkybox(scene);
+        const skybox = buildSkybox(scene);
 
         buildTable(scene);
         const camera = buildCamera(scene);
@@ -5960,6 +6038,7 @@ import {
             // duration" requirement. Camera effects and the dev-panel status readouts are left
             // running during pause - harmless either way, and simpler than guarding everything.
             updateSaturnRotation(obstacles.saturnRings, deltaMs);
+            updateSkyboxRotation(skybox, deltaMs);
 
             if (!isPaused) {
                 // Timer audit fix - accumulates only while unpaused, see gameplayClockMs' own
