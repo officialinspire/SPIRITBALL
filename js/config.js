@@ -248,7 +248,25 @@ export const FLIPPER_RIGHT_REST_RAD = (-65 * Math.PI) / 180;
 // 3D rewrite; the 2D version's velocity-injection formula has no equivalent here). These are
 // angle-per-second rates consumed directly by updateFlipperMotor()'s kinematic stepping (see
 // createFlipper()'s comment for why this isn't a physics-constraint motor).
-export const FLIPPER_ACTIVATE_SPEED_RAD_S = 26; // fast "punch" - clamped exactly at the sweep limit, like a real solenoid slamming into a mechanical stop
+//
+// Bug fix (user-reported - "when I fire the flippers they literally jump out of position" instead
+// of visibly swinging from the hinge): at the original 26 rad/s, the current 160-degree
+// FLIPPER_SWEEP_RAD (see its own comment) completes in ~107ms - only 2-3 rendered frames on a
+// real device at a typical 24-30fps, and a single frame in this sandbox's own much slower ~2fps
+// headless rendering (confirmed directly: a captured per-frame angle trace showed the entire
+// rest-to-active sweep landing in exactly one frame, a literal 160-degree jump with zero
+// intermediate samples - see this fix's own testing note in the PR). A kinematic body's rotation
+// is only as smooth as the frames sampling it - a real solenoid's near-instant physical snap
+// doesn't need to look continuous to the eye the way an ANIMATED (not physically simulated)
+// mesh's per-frame teleport does. Slowed to 10 rad/s so the same 160-degree sweep takes ~279ms -
+// still a fast, snappy flip (nowhere near sluggish), but now spans roughly 7-17 frames across the
+// realistic 24-60fps range instead of 2-3, enough to read as a hinge swing rather than a jump.
+// This sandbox's own ~2fps headless rendering still can't show it as multi-frame motion (a
+// pre-existing, documented environment limitation, not something this fix can address) - could
+// not be re-verified visually here, only reasoned about via frame-count math; needs confirming on
+// real hardware. FLIPPER_RETURN_SPEED_RAD_S was already slow enough (310ms for the same sweep) to
+// not exhibit this problem and is unchanged.
+export const FLIPPER_ACTIVATE_SPEED_RAD_S = 10; // fast "punch" (~279ms for the current 160-degree sweep), fast enough to still land in Havok's own next physics step like a real solenoid, slow enough to visibly swing across multiple frames instead of teleporting - see this constant's own bug-fix comment
 export const FLIPPER_RETURN_SPEED_RAD_S = 9; // slower, controlled return (magnitude only - direction is per-flipper, see createFlipper())
 
 // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
