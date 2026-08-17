@@ -341,13 +341,14 @@ export const REENTRY_LANES = [
 // Layout (left side; SIDE_LANES' mirror flips everything for the right):
 //   [leftWall -0.2267] -- OUTLANE (trigger @ -0.185) -- [divider rail @ -0.145] -- INLANE
 //   (trigger @ -0.095, bounded on its inner side by an angled guide tapering from -0.14 down
-//   to -0.06 - see INLANE_GUIDE_TOP_X_M/INLANE_GUIDE_BOTTOM_X_M) -- open onto the flipper's
+//   to -0.125 - see INLANE_GUIDE_TOP_X_M/INLANE_GUIDE_BOTTOM_X_M's own comment for why that's
+//   -0.125 and not the -0.06 this paragraph originally described) -- open onto the flipper's
 //   own approach beyond that.
 // Z runs from LANE_Z_TOP_M (just clear of the slingshot's own footprint) to LANE_Z_BOTTOM_M
-// (within the flipper's operating Z range, but the divider/guide both stay far enough out in
-// X at every point along their length - divider fixed at 0.145, guide tapering only as far in
-// as 0.06, vs the flipper's own -0.058..+0.02 sweep envelope - that neither can ever
-// physically overlap the flipper mechanism at any angle). Below LANE_Z_BOTTOM_M, both lanes
+// (within the flipper's operating Z range - the divider stays clear at a fixed 0.145 throughout,
+// but the guide's own clearance from the flipper's real swept footprint is a live geometric
+// constraint, not a fixed number here - see INLANE_GUIDE_BOTTOM_X_M's own comment for the actual
+// current clearance value and how it's verified). Below LANE_Z_BOTTOM_M, both lanes
 // are left open (no wall) - gravity/tilt alone carries an outlane ball into the existing
 // full-width drainZone trigger exactly the way any unguided ball past the flippers already
 // does today, and an inlane ball - already redirected inward by the guide by this point -
@@ -378,11 +379,33 @@ export const LANE_TRIGGER_DEPTH_M = 0.025;
 // "inlanes should naturally feed toward their corresponding flipper": it starts almost flush
 // with the divider (so the inlane's mouth, right where a ball exits the slingshot area, has no
 // gap a ball could fall through untouched) and tapers inward as Z decreases, ending near the
-// flipper's own resting reach (left flipper's extrapolated rest-tip sits around x=-0.058 - see
-// SIDE_LANES' block comment) - so a ball riding this rail down arrives close enough for the
+// flipper's own resting reach - so a ball riding this rail down arrives close enough for the
 // flipper to actually reach it, matching how a real inlane guide is shaped, not just labeled.
+//
+// Physics QA fix (flipper collision audit): INLANE_GUIDE_BOTTOM_X_M was 0.06, calibrated
+// against this file's now-superseded flipper geometry (see FLIPPER_LEFT_REST_RAD's own
+// comment for the full pivot/angle history) whose swept footprint stayed much closer to its
+// pivot. The current, corrected flipper geometry sweeps a genuinely real down-and-outward
+// REST to up-and-inward ACTIVE stroke, and its paddle's own outward reach (a box, not a point -
+// its long axis plus half its own thickness) extends out to roughly x=-0.12 at points along that
+// stroke - well past the old 0.06 guide endpoint (mirrored -0.06). Left unfixed, the guide rail
+// and the flipper paddle genuinely overlap in 3D space for most of the stroke (confirmed via
+// Babylon's own precise mesh-intersection test, swept in 1-degree steps across the full rest-
+// to-active range: 43 of 67 sampled angles intersected at the old 0.06) - two solid static
+// colliders occupying the same space, which produced a real, reproducible bug: a ball merely
+// resting on or gently dropped onto the flipper could get trapped in the unstable double-contact
+// where the two overlapping colliders meet, and be flung off the table at several m/s (confirmed
+// via real Havok collision events - the ball's first contact was with this guide, not the
+// flipper, exactly where their volumes overlap). Raised to 0.125 (0.115 is the exact geometric
+// clearance threshold from the same sweep test, swept in fine 0.002 steps: 0.113 still
+// intersects, 0.115 is clean - 0.125 keeps 10mm of headroom above that threshold rather than
+// sitting right on it) - re-verified with the same 1-degree sweep: zero intersecting angles
+// across the full stroke, both flippers (right is an exact mirror). This does shrink the guide's
+// taper (it now stays closer to flush with the divider than to the flipper) - an unavoidable
+// consequence of the corrected flipper's genuinely larger real-pinball-scale reach, not a design
+// preference.
 export const INLANE_GUIDE_TOP_X_M = 0.14; // mirrored - almost flush with LANE_DIVIDER_X_M (0.145)
-export const INLANE_GUIDE_BOTTOM_X_M = 0.06; // mirrored - tapers inward to near the flipper's reach
+export const INLANE_GUIDE_BOTTOM_X_M = 0.125; // mirrored - tapers toward the flipper, clearing its full swept footprint (see this constant's own comment)
 // mirror is a plain position-sign multiplier here (unlike SLINGSHOTS'/BUMPER_CLUSTER's own
 // `mirror`, which only flips rotation handedness - their X positions are hardcoded per-entry
 // instead) - left is negative X throughout this file (see FLIPPER_GAP_HALF_M's left pivot at
