@@ -1548,6 +1548,30 @@ import {
     // PhysicsBody doc comment for PhysicsMotionType.ANIMATED). The ball still bounces off flippers
     // correctly; the flipper itself just isn't simulated anymore, it's animated - exactly right
     // for a player-controlled mechanism whose motion is fully specified by input state anyway.
+    //
+    // PIVOT FIX (root-caused after the ANIMATED rewrite above still didn't behave like a real
+    // flipper - see FLIPPER_SWEEP_RAD's comment in config.js for the full numeric proof): the
+    // very first ANIMATED version kept the paddle as a plain CENTER-origin box and re-derived its
+    // world position every frame by hand - pivot + halfLength*(cos angle, sin angle) - to fake a
+    // hinge at one end. That hand-rolled position formula silently used the OPPOSITE Z sign from
+    // what BABYLON.Quaternion.RotationAxisToRef(Axis.Y, angle) actually rotates the mesh by, so
+    // the "pivot" end wasn't pinned at all - it drifted up to 68mm (most of the paddle's own
+    // 75mm length) away from the real pivot as the angle changed, which is what forced every
+    // earlier fix into guessing rest/active angles and a 160-degree sweep against a moving target
+    // instead of fixing the actual hinge.
+    //
+    // The fix removes the hand-rolled formula entirely rather than patching its sign: the paddle
+    // mesh is now a child of a small pivot TransformNode, offset by a CONSTANT local
+    // (FLIPPER_LENGTH_M / 2, 0, 0) that never changes. Only the pivot node's own
+    // rotationQuaternion is touched per frame (in setFlipperAngle()) - Babylon's ordinary parent/
+    // child transform math (not hand trig) turns that into the paddle's world transform, so the
+    // base end is mathematically guaranteed to sit at the pivot's world position for every angle,
+    // and there's no second formula left to disagree with the rotation. The physics shape stays
+    // on the paddle mesh itself (not the pivot), so it's always exactly the visible box - Havok's
+    // ANIMATED sync already resolves a parented mesh's ABSOLUTE (world) position/rotation each
+    // step (confirmed against the vendored engine's own havokPlugin _getTransformInfos(), which
+    // explicitly branches on `mesh.parent` and uses absolutePosition/absoluteRotationQuaternion),
+    // so no other change was needed for collision to keep tracking the paddle correctly.
     // ===================================
     function createFlipper(scene, name, pivotWorldPos, isLeft, mat) {
         // Clearance above the playfield: the playfield's top face sits at exactly Y=0 (see its
@@ -1555,7 +1579,14 @@ import {
         // bottom face flush against it. Kept from the constraint-based version even though a
         // kinematic body can't "fight" a LOCK constraint anymore - real flippers don't drag
         // directly on the playfield surface either, and it costs nothing.
-        const pivot = new BABYLON.Vector3(pivotWorldPos.x, pivotWorldPos.y + FLIPPER_PLAYFIELD_CLEARANCE_M, pivotWorldPos.z);
+        const pivotPos = new BABYLON.Vector3(pivotWorldPos.x, pivotWorldPos.y + FLIPPER_PLAYFIELD_CLEARANCE_M, pivotWorldPos.z);
+
+        // The pivot itself: a bare TransformNode with no geometry, positioned once at the true
+        // stationary hinge point and never moved again - only ever rotated (see
+        // setFlipperAngle()). Everything else (paddle mesh, physics shape) hangs off it.
+        const pivotNode = new BABYLON.TransformNode(name + 'Pivot', scene);
+        pivotNode.position.copyFrom(pivotPos);
+        pivotNode.rotationQuaternion = BABYLON.Quaternion.Identity();
 
         // Rest angle and mirroring: see FLIPPER_LEFT_REST_RAD/FLIPPER_RIGHT_REST_RAD's comment -
         // these are NOT simple negations of each other, because mirroring a rotating object
@@ -1571,6 +1602,16 @@ import {
         mesh.material = mat;
         mesh.metadata = { kind: 'flipper' }; // Stage 10's flipper-contact camera shake
 
+        // Paddle offset outward from the pivot by half its own length, in the PIVOT's local
+        // space, so the paddle's inner edge sits exactly on the pivot and its outer edge (the
+        // tip) sits a full FLIPPER_LENGTH_M away. This local offset and the mesh's own
+        // rotationQuaternion (identity - no rotation relative to the pivot) are set ONCE and
+        // never touched again; every angle change happens on pivotNode instead, which is what
+        // makes the pivot mathematically stationary regardless of angle.
+        mesh.parent = pivotNode;
+        mesh.position.set(halfLength, 0, 0);
+        mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+
         const aggregate = new BABYLON.PhysicsAggregate(
             mesh,
             BABYLON.PhysicsShapeType.BOX,
@@ -1584,7 +1625,8 @@ import {
         // disablePreStep defaults to true (Havok's own default, for performance, since most
         // bodies are STATIC or DYNAMIC and never need it) - an ANIMATED body needs it OFF so
         // Havok reads this mesh's transform every step instead of ignoring it. Confirmed real
-        // property against physicsBody.ts.
+        // property against physicsBody.ts. Works the same for a parented mesh - see this
+        // function's own header comment for the confirmed engine-source proof.
         aggregate.body.disablePreStep = false;
         // Only the ball should ever physically collide with a flipper - see
         // COLLISION_CATEGORY_BALL's comment. No longer needed for LOCK-vs-collision fighting
@@ -1593,36 +1635,27 @@ import {
         aggregate.shape.filterCollideMask = COLLISION_CATEGORY_BALL;
 
         // Real-pinball-mechanics baseline (see FLIPPER_LEFT_REST_RAD/FLIPPER_RIGHT_REST_RAD's own
-        // "attempt 4" comment): REST points down-and-outward, ACTIVE points up-and-inward, same
-        // as every real (and virtual) pinball machine. LEFT sweeps by INCREASING angle and RIGHT
-        // by DECREASING - this function's very first (pre-any-of-these-fixes) sign convention,
-        // unchanged by any of the later flipper-geometry fixes (only the REST angle values
-        // themselves moved, see their own comment history).
+        // comment): REST points down-and-outward, ACTIVE points up-and-inward, same as every real
+        // (and virtual) pinball machine. LEFT sweeps by INCREASING angle and RIGHT by DECREASING.
         const motorSign = isLeft ? 1 : -1;
         const minAngleRad = isLeft ? restAngleRad : restAngleRad - FLIPPER_SWEEP_RAD;
         const maxAngleRad = isLeft ? restAngleRad + FLIPPER_SWEEP_RAD : restAngleRad;
 
-        const flipper = { mesh, aggregate, active: false, motorSign, pivot, halfLength, restAngleRad, minAngleRad, maxAngleRad, currentAngleRad: restAngleRad };
+        const flipper = { mesh, pivotNode, aggregate, active: false, motorSign, restAngleRad, minAngleRad, maxAngleRad, currentAngleRad: restAngleRad };
         setFlipperAngle(flipper, restAngleRad);
         return flipper;
     }
 
-    // Positions and orients the flipper mesh for a given absolute angle, orbiting its center
-    // around the fixed pivot point exactly like the old constraint's pivotB offset did (a
-    // rotating box pinned at one end moves its center along an arc, not just spins in place).
-    // Havok picks this transform up next physics step via disablePreStep = false (see
+    // Rotates the flipper's pivot node to the given absolute angle. The paddle mesh's own local
+    // position/rotation relative to the pivot never change (set once in createFlipper()) - moving
+    // only the parent pivot is what keeps the hinge point mathematically fixed at every angle,
+    // instead of re-deriving a world position by hand each frame (see createFlipper()'s "PIVOT
+    // FIX" comment for why the old per-frame hand-rolled version didn't actually do that). Havok
+    // picks the resulting transform up next physics step via disablePreStep = false (see
     // createFlipper()) and uses it for collision response against the ball.
     function setFlipperAngle(flipper, angleRad) {
         flipper.currentAngleRad = angleRad;
-        flipper.mesh.position.set(
-            flipper.pivot.x + flipper.halfLength * Math.cos(angleRad),
-            flipper.pivot.y,
-            flipper.pivot.z + flipper.halfLength * Math.sin(angleRad)
-        );
-        if (!flipper.mesh.rotationQuaternion) {
-            flipper.mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
-        }
-        BABYLON.Quaternion.RotationAxisToRef(BABYLON.Axis.Y, angleRad, flipper.mesh.rotationQuaternion);
+        BABYLON.Quaternion.RotationAxisToRef(BABYLON.Axis.Y, angleRad, flipper.pivotNode.rotationQuaternion);
     }
 
     function activateFlipper(flipper) {
