@@ -217,20 +217,32 @@ export const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s com
 // Bug fix, attempt 3 (user-clarified explicitly, in plain language): "the tips point toward the
 // center and downwards, and when pressed lift up towards center" - i.e. REST = down-and-INWARD,
 // FIRED = up-and-INWARD, with the inward lean roughly unchanged between the two (only the
-// vertical component flips) rather than any outward lean at either extreme. This is achieved by
-// swapping which rest angle belongs to which side from the very first (pre-any-of-these-fixes)
-// values - LEFT_REST is now what RIGHT_REST used to be (-65 degrees) and vice versa (-115
-// degrees) - each still 25 degrees off vertical (same paddle silhouette magnitude as ever), just
-// aimed at the opposite (inward, not outward) horizontal side. FLIPPER_SWEEP_RAD widened to 130
-// degrees so firing carries the angle up through horizontal-inward and into "lifted, still
-// inward" territory (LEFT: -65 -> +65, RIGHT: -115 -> +115) rather than stopping short of it.
-// createFlipper()'s motorSign/minAngleRad/maxAngleRad reverted to their very first (pre-any-of-
-// these-fixes) direction convention to match - only the REST values swapped sides, not which way
-// each side sweeps. Verified numerically (tip position vs. pivot, both axes, both states) and
-// visually via Playwright screenshots.
-export const FLIPPER_SWEEP_RAD = (130 * Math.PI) / 180;
-export const FLIPPER_LEFT_REST_RAD = (-65 * Math.PI) / 180;
-export const FLIPPER_RIGHT_REST_RAD = (-115 * Math.PI) / 180;
+// vertical component flips) rather than any outward lean at either extreme. Superseded by
+// attempt 4 directly below - kept for history: this was achieved by swapping which rest angle
+// belongs to which side from the very first (pre-any-of-these-fixes) values (LEFT_REST -65,
+// RIGHT_REST -115) with FLIPPER_SWEEP_RAD widened to 130 degrees. The user then reported this was
+// STILL inverted from a real machine after a hard refresh (ruling out stale-cache confusion with
+// attempt 2's up-and-outward rest) and asked for flippers that "function and operate exactly like
+// a normal pinball machine" instead of continuing to interpret the original reference image.
+//
+// Bug fix, attempt 4 (real-pinball-mechanics baseline, per explicit user request - "exactly like
+// a normal pinball machine"): on every real (and virtual) pinball table, the flipper's spring-
+// loaded REST position points DOWN-and-OUTWARD (hanging toward the player/outlane, away from
+// center - this is what lets a ball that misses the flipper drain past it), and the solenoid-
+// fired ACTIVE position snaps UP-and-INWARD (toward the other flipper, to intercept and redirect
+// the ball back up the table) - this is the universally standard flipper motion, independent of
+// any particular reference image. This restores the REST angles to the very first (pre-any-of-
+// these-fixes) down-and-outward values (LEFT -115, RIGHT -65 - see the numerically-searched
+// derivation above for why these specific angles) and keeps FLIPPER_SWEEP_RAD at 160 degrees
+// (from the "flippers flip down instead of up" fix above) so ACTIVE lands up-and-inward (LEFT:
+// -115 -> 45, RIGHT: -65 -> -135/225) rather than still-downward. createFlipper()'s motorSign/
+// minAngleRad/maxAngleRad needs no further change - it's already back at its very first
+// direction convention from the previous fix, which is exactly what these REST values need.
+// Verified numerically (tip position vs. pivot, both axes, both states) and visually via
+// Playwright screenshots.
+export const FLIPPER_SWEEP_RAD = (160 * Math.PI) / 180;
+export const FLIPPER_LEFT_REST_RAD = (-115 * Math.PI) / 180;
+export const FLIPPER_RIGHT_REST_RAD = (-65 * Math.PI) / 180;
 
 // Motor tuning - NOT ported from anything (flippers are an entirely new mechanism in this
 // 3D rewrite; the 2D version's velocity-injection formula has no equivalent here). These are
