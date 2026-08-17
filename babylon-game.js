@@ -103,7 +103,7 @@ import {
     DRAIN_ZONE_CENTER_Y_PX, STARTING_LIVES, hexToColor3, HEX_BALL,
     HEX_EYEBALL, HEX_FLIPPER, HEX_WALL, HEX_BUMPERS,
     HEX_CHAKRA, HEX_SATURN, HEX_SATURN_RING, HEX_COMET,
-    HEX_MISSION_ACTIVE, HEX_LANE_LAMP, HEX_ORBIT_LAMP, HEX_SKILL_SHOT_LAMP,
+    HEX_MISSION_ACTIVE, HEX_LANE_LAMP, HEX_OUTLANE_LAMP, HEX_ORBIT_LAMP, HEX_SKILL_SHOT_LAMP,
     HEX_BALL_SAVE_LAMP, HEX_KICKBACK_LAMP, HEX_BACKGROUND
 } from './js/config.js';
 
@@ -790,7 +790,7 @@ import {
     // main(), after BABYLON is confirmed loaded - see the "Populate deferred COLOR_* constants"
     // block there.
     let COLOR_BALL, COLOR_EYEBALL, COLOR_FLIPPER, COLOR_WALL, COLOR_BUMPERS, COLOR_CHAKRA,
-        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_ORBIT_LAMP,
+        COLOR_SATURN, COLOR_SATURN_RING, COLOR_COMET, COLOR_MISSION_ACTIVE, COLOR_LANE_LAMP, COLOR_OUTLANE_LAMP, COLOR_ORBIT_LAMP,
         COLOR_SKILL_SHOT_LAMP, COLOR_BALL_SAVE_LAMP, COLOR_KICKBACK_LAMP, COLOR_VISION_GATE, COLOR_BACKGROUND;
 
     // Device-tier gate, ported from PerformanceManager.detectPerformance() in ../index.js -
@@ -1857,13 +1857,27 @@ import {
     // panel. One small texture per label (drawn once, never redrawn - this is static signage, not
     // a HUD), kept tiny (128x48) to stay cheap. DOUBLESIDE sidesteps ever having to get the exact
     // facing-normal convention right.
-    function createLabelPlane(scene, text, x, z, color) {
+    // opts (all optional - every existing call site keeps its exact prior look untouched):
+    //   transparent - skips the dark background chip entirely, leaving the rest of the canvas
+    //     genuinely transparent instead of opaque-ish, so only the glyph itself glows. Added for
+    //     the lane visual-polish pass' "subtle emissive arrows/markers" - a small floating symbol
+    //     reads as a lane-flow indicator, where the existing opaque-chip look (right for a named
+    //     callout like "L ORBIT") would look like a second competing label instead.
+    //   fontSize - defaults to 20 (the size every existing text label already uses); markers use
+    //     a bigger glyph since there's no chip/padding to fill.
+    //   planeSize - defaults to 0.05 (every existing label's size); markers use a smaller one to
+    //     stay subtle rather than reading as signage.
+    function createLabelPlane(scene, text, x, z, color, opts) {
+        opts = opts || {};
         const texW = 128, texH = 48;
         const texture = new BABYLON.DynamicTexture('label' + text.replace(/\s/g, ''), { width: texW, height: texH }, scene, false);
+        texture.hasAlpha = true;
         const ctx = texture.getContext();
-        ctx.fillStyle = 'rgba(5, 0, 15, 0.55)';
-        ctx.fillRect(0, 0, texW, texH);
-        ctx.font = 'bold 20px monospace';
+        if (!opts.transparent) {
+            ctx.fillStyle = 'rgba(5, 0, 15, 0.55)';
+            ctx.fillRect(0, 0, texW, texH);
+        }
+        ctx.font = 'bold ' + (opts.fontSize || 20) + 'px monospace';
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1874,6 +1888,7 @@ import {
         mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
         mat.disableLighting = true;
         mat.emissiveTexture = texture;
+        mat.opacityTexture = opts.transparent ? texture : null;
         mat.backFaceCulling = false;
 
         // Verified via Playwright screenshot (not assumed): a flat, playfield-level decal reads
@@ -1884,15 +1899,58 @@ import {
         // angled riser rather than flat playfield paint. Standing the plane upright and tilting it
         // back to roughly match the camera's own downward look angle - the same rotation.x=0.4
         // buildBackglass() already uses to face its panel toward this exact camera - fixes that.
+        const size = opts.planeSize || 0.05;
         const plane = BABYLON.MeshBuilder.CreatePlane('labelPlane' + text.replace(/\s/g, ''), {
-            width: 0.05,
-            height: 0.05 * (texH / texW),
+            width: size,
+            height: size * (texH / texW),
             sideOrientation: BABYLON.Mesh.DOUBLESIDE
         }, scene);
         plane.material = mat;
         plane.position.set(x, 0.03, z);
         plane.rotation.x = 0.4;
         return plane;
+    }
+
+    // Lane visual-polish pass (user-requested - "raised guide rails... small depth/bevel details
+    // rather than flat primitive shapes"): a thin second box stacked on top of an existing rail's
+    // own flat top face, narrower and shorter than the rail itself so the rail's own material
+    // still shows as a border all the way around it - a "stepped bevel," the cheapest possible
+    // way to read as a milled/chamfered metal trim strip instead of a bare rectangular slab,
+    // costing exactly one extra low-poly box per rail (never more, regardless of the rail's own
+    // length - a 6-vertex-face box either way). Purely decorative, no PhysicsAggregate - the
+    // rail underneath is already the real collider and keeps its exact existing shape/position;
+    // this only ever adds a thin non-colliding cap on top of it, so ball physics/collision
+    // boundaries are untouched by construction, not just by care. One shared material (see
+    // buildObstacles()'s railCapMat) is reused across every call, matching housingMat's own
+    // "one material instance for every rail" discipline.
+    function addRailBevel(scene, name, mat, length, thickness, x, topY, z, rotationY) {
+        const capHeight = 0.006;
+        const cap = BABYLON.MeshBuilder.CreateBox(name, {
+            width: Math.max(length - 0.006, 0.002),
+            height: capHeight,
+            depth: Math.max(thickness - 0.004, 0.0015)
+        }, scene);
+        cap.position.set(x, topY + capHeight / 2, z);
+        if (rotationY) cap.rotation.y = rotationY;
+        cap.material = mat;
+        return cap;
+    }
+
+    // Lane visual-polish pass (user-requested - "inset/grooved lane surfaces where appropriate...
+    // clear visual separation between inlanes/outlanes/orbits"): a paper-thin, low-alpha colored
+    // film laid directly on the playfield surface along a lane's actual path, reusing exactly the
+    // technique buildObstacles() already established for the reentry lanes' own "lit indicator"
+    // box (a translucent colored PBR box, no collider) - just thinner and dimmer, since this is
+    // meant to read as ambient corridor tinting across a whole lane, not a single bright mission-
+    // state indicator. Deliberately NOT a new PhysicsAggregate and deliberately NOT touching the
+    // real playfield mesh/material - the ball's actual rolling surface is entirely unchanged;
+    // this sits a fraction of a millimeter above it purely so the two don't z-fight.
+    function addLaneFloorTint(scene, name, mat, width, depth, x, z, rotationY) {
+        const strip = BABYLON.MeshBuilder.CreateBox(name, { width, height: 0.001, depth }, scene);
+        strip.position.set(x, 0.0012, z);
+        if (rotationY) strip.rotation.y = rotationY;
+        strip.material = mat;
+        return strip;
     }
 
     function buildObstacles(scene) {
@@ -1914,6 +1972,38 @@ import {
         housingMat.albedoColor = new BABYLON.Color3(0.12, 0.12, 0.15);
         housingMat.metallic = 0.8;
         housingMat.roughness = 0.35;
+
+        // Shared bevel-cap material for addRailBevel() above - a touch glossier than housingMat
+        // and lifted by a faint cool cyan glint, so every guide rail's raised cap reads as one
+        // consistent polished-trim language across the whole board (dividers, inlane guides,
+        // orbit rails, reentry-lane flanking rails), independent of whichever lane-specific lamp
+        // color happens to be nearby. One instance, reused by every addRailBevel() call below.
+        const railCapMat = new BABYLON.PBRMaterial('railCapMat', scene);
+        railCapMat.albedoColor = new BABYLON.Color3(0.18, 0.19, 0.22);
+        railCapMat.metallic = 0.85;
+        railCapMat.roughness = 0.22;
+        railCapMat.emissiveColor = new BABYLON.Color3(0.08, 0.2, 0.26);
+
+        // Shared floor-tint materials for addLaneFloorTint() above - one per lane family (inlane,
+        // outlane, orbit), each reused by both mirrored sides, matching the lamp identities those
+        // lanes already use elsewhere (COLOR_LANE_LAMP/COLOR_OUTLANE_LAMP/COLOR_ORBIT_LAMP) so the
+        // floor tint, the lamp, and (for inlane/outlane) the dev debug overlay all agree on what
+        // color means what. disableLighting + emissive-only (no albedo term) so the tint reads as
+        // a consistent backlit-insert glow rather than shifting with scene light like an ordinary
+        // painted surface would - the same unlit-emissive treatment this file's signage (labels,
+        // backglass) already uses, applied here to a floor film instead of a plane.
+        function makeLaneFloorMat(name, color, alpha) {
+            const mat = new BABYLON.PBRMaterial(name, scene);
+            mat.albedoColor = new BABYLON.Color3(0, 0, 0);
+            mat.disableLighting = true;
+            mat.emissiveColor = color.scale(0.55);
+            mat.alpha = alpha;
+            mat.backFaceCulling = false;
+            return mat;
+        }
+        const inlaneFloorMat = makeLaneFloorMat('inlaneFloorMat', COLOR_LANE_LAMP, 0.16);
+        const outlaneFloorMat = makeLaneFloorMat('outlaneFloorMat', COLOR_OUTLANE_LAMP, 0.16);
+        const orbitFloorMat = makeLaneFloorMat('orbitFloorMat', COLOR_ORBIT_LAMP, 0.14);
 
         // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
         // identity, not one shared color - each bumper is its own emissive-glass PBR material so
@@ -2211,13 +2301,19 @@ import {
             // Decorative only, chrome-like (shares housingMat), doesn't change color on hit like
             // the lit-indicator box above does.
             [-1, 1].forEach((side) => {
+                const railX = pos.x + side * REENTRY_LANE_RADIUS_M * 1.1;
                 const rail = BABYLON.MeshBuilder.CreateBox('reentryLane' + i + 'Rail' + side, {
                     width: 0.004,
                     height: 0.018,
                     depth: REENTRY_LANE_RADIUS_M * 2.4
                 }, scene);
-                rail.position.set(pos.x + side * REENTRY_LANE_RADIUS_M * 1.1, 0.014, pos.z);
+                rail.position.set(railX, 0.014, pos.z);
                 rail.material = housingMat;
+                // Raised bevel cap (see addRailBevel()'s own comment) - this rail's own long axis
+                // runs along Z (not the X-then-rotated convention every other rail below uses), so
+                // the cap is built the same "long along local X" way and then rotated 90 degrees
+                // to match, rather than swapping which of width/depth means "length" in the helper.
+                addRailBevel(scene, 'reentryLane' + i + 'RailCap' + side, railCapMat, REENTRY_LANE_RADIUS_M * 2.4, 0.004, railX, 0.023, pos.z, Math.PI / 2);
             });
         });
 
@@ -2243,6 +2339,10 @@ import {
             divider.material = housingMat;
             divider.metadata = { kind: 'wall' };
             new BABYLON.PhysicsAggregate(divider, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            // Same "long axis along Z, rotated 90 degrees to match the helper's along-X default"
+            // case as the reentry lane rails above - this divider isn't built with the rotation-
+            // formula convention the angled inlane guide just below uses.
+            addRailBevel(scene, 'laneDivider' + laneDef.side + 'Cap', railCapMat, Math.abs(LANE_Z_TOP_M - LANE_Z_BOTTOM_M), 0.006, dividerX, 0.022, dividerCenterZ, Math.PI / 2);
 
             // End posts, capping the divider top/bottom - real guide rails read as bounded by
             // round posts, not a bare floating box segment, and give the ball a rounder surface to
@@ -2287,7 +2387,24 @@ import {
                 guide.material = housingMat;
                 guide.metadata = { kind: 'wall' };
                 new BABYLON.PhysicsAggregate(guide, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+                // This guide already uses the "long axis along local X, then rotationY" convention
+                // addRailBevel() itself assumes, so its own guideRotationY passes straight through.
+                addRailBevel(scene, 'inlaneGuide' + laneDef.side + 'Cap', railCapMat, guideLength, 0.006, (guideTopX + guideBottomX) / 2, 0.022, dividerCenterZ, guideRotationY);
             }
+
+            // Lane floor tints (visual-polish pass, user-requested - "inset/grooved lane surfaces
+            // where appropriate... clear visual separation between inlanes/outlanes/orbits") - see
+            // addLaneFloorTint()'s own comment. The outlane's corridor is a simple, unrotated
+            // rectangle running the divider's own full Z span, safely inside both the divider
+            // (0.04m inward of the trigger) and the outer wall (~0.055m outward of it, well past
+            // this strip's own half-width) - see SIDE_LANES' own block comment for those measured
+            // boundary values. The inlane strip stays a modest patch centered on the trigger
+            // itself instead: its real channel narrows to a taper against the inlane guide (see
+            // INLANE_GUIDE_TOP_X_M/INLANE_GUIDE_BOTTOM_X_M's comment) and the trigger sits inboard
+            // of most of that taper, so a full-span strip there would visually claim floor space
+            // that was never actually a walled channel.
+            addLaneFloorTint(scene, 'outlaneFloorTint' + laneDef.side, outlaneFloorMat, 0.055, Math.abs(LANE_Z_TOP_M - LANE_Z_BOTTOM_M) - 0.012, mirror * OUTLANE_TRIGGER_X_M, dividerCenterZ);
+            addLaneFloorTint(scene, 'inlaneFloorTint' + laneDef.side, inlaneFloorMat, 0.05, 0.06, mirror * INLANE_TRIGGER_X_M, LANE_TRIGGER_Z_M);
 
             // Inlane/outlane rollover triggers, each with its own indicator lamp insert. The lamp
             // (a flat disc, like a real backlit playfield insert) is the lane's only always-visible
@@ -2298,8 +2415,13 @@ import {
                 { kind: 'inlane', x: mirror * INLANE_TRIGGER_X_M, debugColor: new BABYLON.Color3(0.2, 1, 0.4) },
                 { kind: 'outlane', x: mirror * OUTLANE_TRIGGER_X_M, debugColor: new BABYLON.Color3(1, 0.2, 0.3) }
             ].forEach((laneKind) => {
+                // Visual-polish pass (user-requested - "clear visual separation between inlanes/
+                // outlanes/orbits"): inlane and outlane used to share one identity color
+                // (COLOR_LANE_LAMP for both) - now each kind gets its own, matching the debugColor
+                // split just above that already existed for the dev-only trigger overlay.
+                const laneLampColor = laneKind.kind === 'outlane' ? COLOR_OUTLANE_LAMP : COLOR_LANE_LAMP;
                 const lampMat = new BABYLON.PBRMaterial(laneKind.kind + 'LampMat' + laneDef.side, scene);
-                lampMat.albedoColor = COLOR_LANE_LAMP.scale(0.3);
+                lampMat.albedoColor = laneLampColor.scale(0.3);
                 lampMat.metallic = 0.2;
                 lampMat.roughness = 0.4;
                 const lamp = BABYLON.MeshBuilder.CreateCylinder(laneKind.kind + 'Lamp' + laneDef.side, {
@@ -2437,6 +2559,19 @@ import {
             rail.material = housingMat;
             rail.metadata = { kind: 'wall' }; // reuses the existing generic wall camera-shake/sound feedback, same as the inlane/outlane rails
             new BABYLON.PhysicsAggregate(rail, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            // Already built with the "long axis along local X, then rotationY" convention
+            // addRailBevel() assumes, so railRotationY passes straight through unchanged.
+            addRailBevel(scene, 'orbitRail' + orbitDef.side + 'Cap', railCapMat, railLength, 0.015, railCenterX, 0.022, railCenterZ, railRotationY);
+
+            // Lane floor tint (visual-polish pass, user-requested) - see addLaneFloorTint()'s own
+            // comment. Offset a little toward the playfield center from the rail's own centerline
+            // (the ball's actual travel lane sits inboard of the rail, which marks only the
+            // corridor's outer/wall-side edge) rather than directly under the rail itself. The
+            // rail is only a few degrees off vertical here (dx is tiny next to dz - see ORBITS'
+            // own ~5cm-wide corridor sizing), so a fixed inward X offset reads correctly without
+            // needing the rail's exact perpendicular.
+            const orbitFloorInward = orbitDef.side === 'left' ? 1 : -1;
+            addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side, orbitFloorMat, 0.03, railLength - 0.05, railCenterX + orbitFloorInward * 0.018, railCenterZ, railRotationY);
 
             // Only the TOP end gets a capping post, not the bottom - verified via Playwright that
             // a post at the rail's bottom tip sits close enough to a realistic entry trajectory to
@@ -2753,6 +2888,19 @@ import {
         // each shot's own lamp/trigger geometry so nothing visually overlaps.
         createLabelPlane(scene, 'SKILL SHOT', SKILL_SHOT_LANES[1].x, SKILL_SHOT_Z_M + 0.05, '#ff3366');
         createLabelPlane(scene, 'KICKBACK', kickbackMirror * OUTLANE_TRIGGER_X_M, LANE_Z_BOTTOM_M - 0.03, '#ff5500');
+        // Subtle emissive lane-flow markers (visual-polish pass, user-requested) - unlike every
+        // label above, these use createLabelPlane()'s transparent option (no background chip) and
+        // a plain triangle glyph instead of a word, so they read as a small glowing flow cue next
+        // to each lamp rather than another named callout - inlane/outlane had no signage of their
+        // own at all before this (only the plain lamp disc). Up for inlane ("flows back into
+        // play"), down for outlane ("heads toward the drain") - the same safe/risky read a real
+        // machine's lane position already implies, just made explicit at a glance. Positioned a
+        // little toward LANE_Z_TOP_M from each lamp so the two don't overlap.
+        SIDE_LANES.forEach((laneDef) => {
+            const markerZ = LANE_TRIGGER_Z_M + 0.045;
+            createLabelPlane(scene, '▲', laneDef.mirror * INLANE_TRIGGER_X_M, markerZ, '#ffaa00', { transparent: true, fontSize: 26, planeSize: 0.03 });
+            createLabelPlane(scene, '▼', laneDef.mirror * OUTLANE_TRIGGER_X_M, markerZ, '#ff1a33', { transparent: true, fontSize: 26, planeSize: 0.03 });
+        });
         ORBITS.forEach((orbitDef) => {
             // Side-specific text (not a shared 'ORBIT' label for both) - doubles as telling the
             // two orbits apart at a glance and keeps each label's mesh/texture name unique.
@@ -2996,6 +3144,7 @@ import {
         COLOR_COMET = hexToColor3(HEX_COMET);
         COLOR_MISSION_ACTIVE = hexToColor3(HEX_MISSION_ACTIVE);
         COLOR_LANE_LAMP = hexToColor3(HEX_LANE_LAMP);
+        COLOR_OUTLANE_LAMP = hexToColor3(HEX_OUTLANE_LAMP);
         COLOR_ORBIT_LAMP = hexToColor3(HEX_ORBIT_LAMP);
         COLOR_SKILL_SHOT_LAMP = hexToColor3(HEX_SKILL_SHOT_LAMP);
         COLOR_BALL_SAVE_LAMP = hexToColor3(HEX_BALL_SAVE_LAMP);
@@ -3070,7 +3219,10 @@ import {
             lampSystem.registerLamp('reentryLane' + i, mesh, COLOR_MISSION_ACTIVE, LAMP_MODE.OFF);
         });
         obstacles.sideLaneLampMeshes.forEach((entry) => {
-            lampSystem.registerLamp(entry.id, entry.mesh, COLOR_LANE_LAMP, LAMP_MODE.OFF);
+            // entry.id is e.g. 'inlaneLeft'/'outlaneRight' - see its own construction in
+            // buildObstacles() - so the kind prefix alone is enough to pick the right identity.
+            const laneLampColor = entry.id.startsWith('outlane') ? COLOR_OUTLANE_LAMP : COLOR_LANE_LAMP;
+            lampSystem.registerLamp(entry.id, entry.mesh, laneLampColor, LAMP_MODE.OFF);
         });
         obstacles.orbitLampMeshes.forEach((entry) => {
             lampSystem.registerLamp(entry.id, entry.mesh, COLOR_ORBIT_LAMP, LAMP_MODE.OFF);
@@ -5201,7 +5353,7 @@ import {
                 addScore(points);
                 if (isOutlane) stats.outlaneHits++; else stats.inlaneHits++;
                 pulseMesh(mesh);
-                lampSystem.flashLamp(meta.lampId, 220, COLOR_LANE_LAMP);
+                lampSystem.flashLamp(meta.lampId, 220, isOutlane ? COLOR_OUTLANE_LAMP : COLOR_LANE_LAMP);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage((isOutlane ? 'OUTLANE! +' : 'INLANE! +') + points, 700);
                 triggerCameraShake(70, isOutlane ? 0.003 : 0.0025); // a modest rollover beat, not a collision - outlane a touch stronger, it's the more consequential of the two

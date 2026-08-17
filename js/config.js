@@ -840,10 +840,21 @@ export const HEX_SATURN_RING = 0xffd700;
 export const HEX_COMET = 0x66e0ff;
 export const HEX_MISSION_ACTIVE = 0x00ff00;
 // Classic amber/gold pinball insert-lamp color - deliberately distinct from HEX_MISSION_ACTIVE
-// (green), so the new inlane/outlane lamps read as their own thing, not a re-skin of the
-// reentry lanes' mission-tied "lit" state (a genuinely different mechanic, see SIDE_LANES'
-// block comment).
+// (green), so the inlane/outlane lamps read as their own thing, not a re-skin of the reentry
+// lanes' mission-tied "lit" state (a genuinely different mechanic, see SIDE_LANES' block
+// comment). Visual-polish pass (user-requested - "clear visual separation between inlanes/
+// outlanes/orbits"): this identity now belongs to the INLANE specifically - see
+// HEX_OUTLANE_LAMP directly below for why the outlane split off its own color instead of
+// continuing to share this one.
 export const HEX_LANE_LAMP = 0xffaa00;
+// Outlanes previously shared HEX_LANE_LAMP with inlanes - visually identical despite being the
+// "safe return" vs. "likely drain" halves of the same rollover pair, exactly the ambiguity a
+// player relies on lane color to resolve at a glance on a real machine. A saturated warning red,
+// picked to sit clearly apart from every other warm color already on the board (HEX_KICKBACK_LAMP
+// 0xff5500's orange, HEX_SKILL_SHOT_LAMP 0xff3366's pink-red) - important since the kickback lamp
+// physically sits on this same outlane, further down toward the drain, and the two must still
+// read as separate signals when both are visible together.
+export const HEX_OUTLANE_LAMP = 0xff1a33;
 // Electric cyan-white - the orbit lamps' own identity, distinct from HEX_LANE_LAMP's amber
 // (inlane/outlane) and HEX_MISSION_ACTIVE's green (reentry lanes), so the board's three
 // "lit insert" mechanics each read as visually distinct at a glance.
