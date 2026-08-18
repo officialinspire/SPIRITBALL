@@ -70,6 +70,7 @@ import {
     FLIPPER_LENGTH_M, FLIPPER_THICKNESS_M, FLIPPER_HEIGHT_M, FLIPPER_MASS_KG,
     FLIPPER_GAP_HALF_M, FLIPPER_Z_M, FLIPPER_PLAYFIELD_CLEARANCE_M, FLIPPER_SWEEP_RAD,
     FLIPPER_LEFT_REST_RAD, FLIPPER_RIGHT_REST_RAD, FLIPPER_ACTIVATE_SPEED_RAD_S, FLIPPER_RETURN_SPEED_RAD_S,
+    FLIPPER_RESTITUTION, FLIPPER_FRICTION, FLIPPER_CONTACT_VELOCITY_TRANSFER,
     BUMPER_RADIUS_M, BUMPER_CLUSTER, BUMPER_KICK_SPEED_MS, TARGET_RADIUS_M,
     MISSION_TARGET_BANK, TARGET_RAISED_Y_M, TARGET_DROPPED_Y_M, TARGET_DROP_ANIM_MS,
     SATURN_RADIUS_M, SATURN_POS, COMET_RADIUS_M, COMET_POS,
@@ -1879,7 +1880,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const aggregate = new BABYLON.PhysicsAggregate(
             mesh,
             BABYLON.PhysicsShapeType.BOX,
-            { mass: FLIPPER_MASS_KG, restitution: 0.3, friction: 0.4 },
+            { mass: FLIPPER_MASS_KG, restitution: FLIPPER_RESTITUTION, friction: FLIPPER_FRICTION },
             scene
         );
         // PhysicsAggregate only offers STATIC (mass 0) or DYNAMIC (mass > 0) directly - ANIMATED
@@ -1905,7 +1906,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const minAngleRad = isLeft ? restAngleRad : restAngleRad - FLIPPER_SWEEP_RAD;
         const maxAngleRad = isLeft ? restAngleRad + FLIPPER_SWEEP_RAD : restAngleRad;
 
-        const flipper = { mesh, pivotNode, aggregate, active: false, motorSign, restAngleRad, minAngleRad, maxAngleRad, currentAngleRad: restAngleRad };
+        const flipper = { mesh, pivotNode, aggregate, active: false, motorSign, restAngleRad, minAngleRad, maxAngleRad, currentAngleRad: restAngleRad, angularVelocityRad: 0 };
         setFlipperAngle(flipper, restAngleRad);
         return flipper;
     }
@@ -1966,6 +1967,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // jitter, the same guarantee the active-stop clamp gives the other direction.
     function updateFlipperMotor(flipper, deltaMs) {
         const dt = deltaMs / 1000;
+        const oldAngleRad = flipper.currentAngleRad;
         if (flipper.active) {
             const target = flipper.motorSign > 0 ? flipper.maxAngleRad : flipper.minAngleRad;
             const step = flipper.motorSign * FLIPPER_ACTIVATE_SPEED_RAD_S * dt;
@@ -1980,6 +1982,41 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 setFlipperAngle(flipper, flipper.currentAngleRad + Math.sign(diff) * maxStep);
             }
         }
+        syncFlipperPhysicsVelocity(flipper, oldAngleRad, dt);
+    }
+
+    // Ball<->flipper physics-tuning pass (user-requested): makes the paddle's Havok body carry its
+    // own real motion into contact response, instead of only ever moving its COLLISION SHAPE.
+    // disablePreStep=false (see createFlipper()'s comment) keeps Havok's contact GEOMETRY in sync
+    // with setFlipperAngle()'s transform each step. Also sets the body's own linearVelocity/
+    // angularVelocity to match that same motion (v = omega x r about the pivot, not a hand-picked
+    // vector) - correct rigid-body bookkeeping for a body that IS moving, and what
+    // flipper.angularVelocityRad below is read from. IMPORTANT caveat, confirmed by direct
+    // measurement, not assumed: setting these fields on an ANIMATED (kinematic) Havok body does
+    // NOT, on its own, make that velocity show up in the ball's post-contact velocity - a
+    // fine-grained manual-step playtest (bypassing this sandbox's slow render loop so a full
+    // ~115ms stroke could be sampled many times mid-swing, not completed within one throttled
+    // frame) showed the paddle's OWN linearVelocity.x reaching >0.8 m/s during an active swing
+    // while the ball's vx stayed exactly 0.00000 the entire time - i.e. Havok's kinematic contact
+    // response is purely positional (it pushes the ball out of the way of the paddle's new
+    // position each step) and never reads this body's velocity for the impulse math, contradicting
+    // what "they behave like dynamic bodies... but still push other bodies out of the way" (Babylon's
+    // own ANIMATED doc comment) would suggest. So the REAL, physically-derived momentum transfer
+    // this pass needs lives in applyFlipperContactVelocity() below, applied once per real contact
+    // (COLLISION_STARTED) using this exact same v = omega x r math evaluated at the actual contact
+    // point instead of the paddle's center of mass - this function's job is just keeping
+    // angularVelocityRad (and the body's own velocity fields, for correctness) current for that to
+    // read.
+    function syncFlipperPhysicsVelocity(flipper, oldAngleRad, dt) {
+        const omega = dt > 0 ? (flipper.currentAngleRad - oldAngleRad) / dt : 0;
+        flipper.angularVelocityRad = omega;
+        const omegaVec = new BABYLON.Vector3(0, omega, 0);
+        flipper.aggregate.body.setAngularVelocity(omegaVec);
+
+        const pivotPos = flipper.pivotNode.getAbsolutePosition();
+        const comPos = flipper.mesh.getAbsolutePosition();
+        const r = comPos.subtract(pivotPos);
+        flipper.aggregate.body.setLinearVelocity(BABYLON.Vector3.Cross(omegaVec, r));
     }
 
     function flipperAngleDegrees(flipper) {
@@ -5323,6 +5360,44 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             clampBodySpeed(body, MAX_BALL_SPEED_MS);
         }
 
+        // Ball<->flipper physics-tuning pass (user-requested). Havok's contact response for the
+        // flipper's kinematic (ANIMATED) body turned out to be purely positional - confirmed by
+        // direct playtest measurement, not assumed (see syncFlipperPhysicsVelocity()'s and
+        // FLIPPER_CONTACT_VELOCITY_TRANSFER's own comments for the measurement itself) - so unlike
+        // every other obstacle in this file, a flipper hit needs an explicit velocity contribution
+        // here to carry the paddle's own motion into the ball at all. Still "physically coherent
+        // velocity transfer from paddle motion/contact" (user-requested), not an arbitrary kick:
+        // the direction and magnitude both come from the SAME v = omega x r rigid-body math a
+        // native engine would use, evaluated at the REAL contact point Havok itself reported
+        // (contactPointWorld, from the collision event itself - not the paddle's center of mass),
+        // which is exactly what makes a tip hit (farther from the pivot, larger cross-product
+        // radius) carry more speed than a base hit without a single per-position special case.
+        // omega is naturally zero whenever the flipper isn't actually moving this frame (held at a
+        // stop, resting, or the tail of a return that's about to snap to rest) - so a resting/held
+        // contact adds nothing here and stays governed purely by FLIPPER_RESTITUTION/
+        // FLIPPER_FRICTION's passive bounce, which is what keeps a held flipper from continuously
+        // injecting energy into a ball it's cradling.
+        function applyFlipperContactVelocity(flipper, contactPointWorld) {
+            const body = mainBall.aggregate.body;
+            if (!body || flipper.angularVelocityRad === 0) return;
+
+            const pivotPos = flipper.pivotNode.getAbsolutePosition();
+            const r = contactPointWorld.subtract(pivotPos);
+            const paddleVelocityAtContact = BABYLON.Vector3.Cross(
+                new BABYLON.Vector3(0, flipper.angularVelocityRad, 0), r
+            );
+
+            const v = body.getLinearVelocity();
+            body.setLinearVelocity(v.add(paddleVelocityAtContact.scale(FLIPPER_CONTACT_VELOCITY_TRANSFER)));
+
+            // Same shared safety ceiling every other velocity source respects - see
+            // clampBodySpeed()'s comment. Bounds this regardless of how many times this fires
+            // during one swing - whether that's several genuinely separate touches (a ball
+            // bouncing against the paddle more than once before flying clear) or one sustained
+            // COLLISION_CONTINUED contact reporting on every physics step.
+            clampBodySpeed(body, MAX_BALL_SPEED_MS);
+        }
+
         // Fast "rubber snap" visual, layered on top of the shared pulseMesh() flash already used
         // for every obstacle kind's hit feedback (kept as-is below - see the "reuse existing VFX"
         // requirement). Distinct from pulseMesh() in two ways: it's a directional squash-and-
@@ -6095,8 +6170,26 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         mainBall.aggregate.body.setCollisionCallbackEnabled(true);
         mainBall.aggregate.body.getCollisionObservable().add((event) => {
+            const mesh = event.collidedAgainst.transformNode;
+            // Real momentum transfer for a flipper hit - see applyFlipperContactVelocity()'s own
+            // comment for why this can't just be Havok's native contact response the way every
+            // other obstacle in this file relies on. Listens to COLLISION_CONTINUED too, not just
+            // COLLISION_STARTED: a ball resting on the paddle when it fires stays in unbroken
+            // contact as the paddle accelerates under it (confirmed via playtest - Havok never
+            // reports a fresh COLLISION_STARTED for that whole stroke, only the original at-rest
+            // touch), so a STARTED-only hook would silently miss exactly the "cradled ball gets
+            // thrown" case real pinball relies on. Applied before handlePhysicalHit() purely so the
+            // velocity is already updated by the time any feedback/scoring logic might read it -
+            // handlePhysicalHit() itself is otherwise unchanged (no new branch there, and it's
+            // still called only on COLLISION_STARTED, matching every other obstacle's feedback/
+            // scoring cadence).
+            if ((event.type === 'COLLISION_STARTED' || event.type === 'COLLISION_CONTINUED') &&
+                mesh.metadata && mesh.metadata.kind === 'flipper') {
+                const flipper = mesh === leftFlipper.mesh ? leftFlipper : rightFlipper;
+                applyFlipperContactVelocity(flipper, event.point);
+            }
             if (event.type !== 'COLLISION_STARTED') return;
-            handlePhysicalHit(event.collidedAgainst.transformNode);
+            handlePhysicalHit(mesh);
         });
 
         hk.onTriggerCollisionObservable.add((event) => {
@@ -6559,6 +6652,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             window.__flipperDebug = {
                 leftFlipper, rightFlipper, FLIPPER_SWEEP_RAD, FLIPPER_LENGTH_M, mainBall, scene,
                 isBallInPlay() { return ballInPlay; },
+                // Exposes the SAME per-frame stepping function the real render loop calls every
+                // tick (see engine.runRenderLoop() below) - not a second/competing implementation.
+                // Lets a test drive many small, controlled-deltaMs steps back-to-back (e.g.
+                // alongside scene.getPhysicsEngine()._step()) independent of however fast this
+                // particular device/sandbox can actually render a frame, which matters for
+                // measuring a fast powered stroke: a slow/throttled render loop can complete the
+                // whole ~115ms stroke within a single real frame, leaving no intermediate sample
+                // where the ball can genuinely be caught mid-swing.
+                updateFlipperMotor,
                 pivotWorldPosition(flipper) {
                     return flipper.pivotNode.getAbsolutePosition().clone();
                 },

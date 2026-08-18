@@ -235,6 +235,50 @@ export const FLIPPER_RIGHT_REST_RAD = (25 * Math.PI) / 180;
 export const FLIPPER_ACTIVATE_SPEED_RAD_S = 9.9; // fast "punch" (~115ms for the current 65-degree sweep) - see this constant's own comment for why it's not picked independently of FLIPPER_SWEEP_RAD
 export const FLIPPER_RETURN_SPEED_RAD_S = 7.1; // spring-like, slightly slower return (~160ms - magnitude only, direction is per-flipper, see createFlipper())
 
+// Ball<->flipper contact material (physics-tuning pass, user-requested - "expose minimal tuning
+// constants and document them"). Previously inline literals in createFlipper()'s
+// PhysicsAggregate call; pulled out here so they're the one place to retune passive contact feel
+// without hunting through the aggregate constructor. Restitution 0.3 gives a believable,
+// non-explosive passive bounce off a stationary/held flipper; friction 0.4 is high enough that a
+// resting ball doesn't slide off a level paddle from initial contact "jitter" alone, matching
+// every other solid obstacle's friction in this file (0.4-0.8). These two alone are the WHOLE
+// story for a stationary/held flipper - see FLIPPER_CONTACT_VELOCITY_TRANSFER below for why an
+// ACTIVELY MOVING flipper needs something more.
+export const FLIPPER_RESTITUTION = 0.3;
+export const FLIPPER_FRICTION = 0.4;
+
+// How much of the paddle's OWN real motion at the actual contact point gets added to the ball's
+// velocity on a flipper hit (applyFlipperContactVelocity() in babylon-game.js). Exists because a
+// direct playtest measurement (Playwright, manually-stepped physics via scene.getPhysicsEngine().
+// _step() so a full ~115ms stroke could be sampled many times instead of completing within one
+// throttled render tick - see
+// syncFlipperPhysicsVelocity()'s comment) found Havok's own contact response for a kinematic
+// (ANIMATED) body is purely POSITIONAL: it pushes the ball out of the way of the paddle's new
+// position each step, but never incorporates the paddle's velocity into the ball's outgoing
+// velocity, even after correctly setting that velocity on the body. A stationary and a
+// full-speed mid-swing flipper produced identical post-contact ball motion before this constant's
+// call site existed. The DIRECTION and RELATIVE magnitude here are still fully physically derived,
+// never arbitrary: v = omega x r, the same real rigid-body math a native engine would use,
+// evaluated at the real contact point Havok itself reports (not a hand-picked kick direction) -
+// this alone is what makes a tip hit outrun a base hit, and what makes this exactly zero whenever
+// the flipper isn't actually moving (omega=0: held at a stop, at rest, or the tail of a return
+// about to snap home) - so a resting/held contact is untouched by this and still governed purely
+// by FLIPPER_RESTITUTION/FLIPPER_FRICTION's passive bounce, which is what keeps a held flipper
+// from injecting energy into a ball it's cradling. This constant is the one honestly-arbitrary
+// knob in the formula - a plain scalar gain on that physically-derived vector. 1.0 (add the
+// contact-point surface velocity exactly once) measured as too weak to reliably read as a real
+// "hit" in playtest: Havok's own COLLISION_STARTED/CONTINUED events (this fires on both - see the
+// call site's own comment) only land a handful of times over a ~115ms stroke, so a 1:1 transfer
+// left most strokes barely distinguishable from a passive bounce. 5.0 clearly and repeatably
+// produced a strong, correct up-table redirect in the same playtest. 3.0 is the middle ground kept
+// as the shipped default - re-tune from here (not from 1.0) if a future playtest shows it still
+// reads as too weak or too strong, and prefer changing this one scalar over changing the vector
+// math above it. Always subject to the same MAX_BALL_SPEED_MS ceiling every other velocity source
+// respects (clampBodySpeed() call at the end of applyFlipperContactVelocity()), so no value here
+// can ever produce an unbounded spike regardless of how many genuine separate contacts compound
+// during one swing.
+export const FLIPPER_CONTACT_VELOCITY_TRANSFER = 3.0;
+
 // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
 export const BUMPER_RADIUS_M = 0.02;
 export const BUMPER_CLUSTER = [
