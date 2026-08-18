@@ -6558,6 +6558,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // loop's own throttling under slow/headless rendering.
             window.__flipperDebug = {
                 leftFlipper, rightFlipper, FLIPPER_SWEEP_RAD, FLIPPER_LENGTH_M, mainBall, scene,
+                isBallInPlay() { return ballInPlay; },
                 pivotWorldPosition(flipper) {
                     return flipper.pivotNode.getAbsolutePosition().clone();
                 },
