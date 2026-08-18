@@ -6549,8 +6549,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // pivotWorldPosition() only ever read flipper.pivotNode's existing transform, the same
             // pivot-hierarchy math createFlipper()/setFlipperAngle() themselves use, never a
             // second/competing formula.
+            // mainBall/scene added for the ball<->flipper physics-tuning pass (user-requested) -
+            // same read-only-in-spirit exposure as leftFlipper/rightFlipper above (no new setter
+            // methods; a test harness can still reach into the exposed objects directly, same as
+            // it always could for the flippers, e.g. to stage a scenario's starting position/
+            // velocity before letting Havok's own step run). scene is exposed so a test can hook
+            // scene.onBeforeRenderObservable for per-physics-tick sampling, immune to the render
+            // loop's own throttling under slow/headless rendering.
             window.__flipperDebug = {
-                leftFlipper, rightFlipper, FLIPPER_SWEEP_RAD, FLIPPER_LENGTH_M,
+                leftFlipper, rightFlipper, FLIPPER_SWEEP_RAD, FLIPPER_LENGTH_M, mainBall, scene,
                 pivotWorldPosition(flipper) {
                     return flipper.pivotNode.getAbsolutePosition().clone();
                 },
