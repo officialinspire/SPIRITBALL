@@ -6538,6 +6538,33 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             triggerEnterLog = [];
             window.__triggerDebug = { log: triggerEnterLog };
 
+            // Flipper-geometry regression test instrumentation (qa/flipper-geometry.js) - same
+            // "?dev=1-only, read-only, zero impact on a real player" convention as
+            // window.__triggerDebug directly above. Deliberately narrow (just the two flipper
+            // objects plus the two constants needed to derive a tip position) rather than the
+            // broad window.__qaHook the older qa/stabilization-suite.js needs to be temporarily
+            // patched in by hand - this one is small enough to stay permanently in the shipped
+            // file, so the geometry test that reads it never requires a source edit to run. No
+            // setters, no way to mutate gameplay state through it - tipWorldPosition()/
+            // pivotWorldPosition() only ever read flipper.pivotNode's existing transform, the same
+            // pivot-hierarchy math createFlipper()/setFlipperAngle() themselves use, never a
+            // second/competing formula.
+            window.__flipperDebug = {
+                leftFlipper, rightFlipper, FLIPPER_SWEEP_RAD, FLIPPER_LENGTH_M,
+                pivotWorldPosition(flipper) {
+                    return flipper.pivotNode.getAbsolutePosition().clone();
+                },
+                tipWorldPosition(flipper) {
+                    // Tip, in the pivot's own local space: the inner edge sits at local (0,0,0)
+                    // (exactly on the pivot - see createFlipper()'s own comment), so the outer tip
+                    // sits one full FLIPPER_LENGTH_M further out along local +X.
+                    return BABYLON.Vector3.TransformCoordinates(
+                        new BABYLON.Vector3(FLIPPER_LENGTH_M, 0, 0),
+                        flipper.pivotNode.getWorldMatrix()
+                    );
+                }
+            };
+
             const statusFps = document.getElementById('status-fps');
             const statusFrameTime = document.getElementById('status-frame-time');
             const statusPhysicsBodies = document.getElementById('status-physics-bodies');
