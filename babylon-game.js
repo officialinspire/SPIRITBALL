@@ -6661,6 +6661,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // whole ~115ms stroke within a single real frame, leaving no intermediate sample
                 // where the ball can genuinely be caught mid-swing.
                 updateFlipperMotor,
+                // Ball-feel tuning pass (user-requested) - same "expose the real per-frame
+                // function, not a second implementation" rationale as updateFlipperMotor above.
+                // Lets a test exercise the actual MAX_BALL_SPEED_MS clamp / anti-stuck kick path
+                // (updateBallPhysics()) at manual-step speed, alongside scene.getPhysicsEngine().
+                // _step(), instead of only the raw Havok response - needed to confirm the existing
+                // safety systems still engage correctly during this pass's tuning experiments.
+                updateBallPhysics,
                 pivotWorldPosition(flipper) {
                     return flipper.pivotNode.getAbsolutePosition().clone();
                 },
