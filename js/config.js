@@ -98,6 +98,46 @@ export const GRAVITY_VECTOR_FN = () => new BABYLON.Vector3(
 export const BALL_DIAMETER_M = 0.027;
 export const BALL_MASS_KG = 0.08;
 
+// Ball-feel tuning pass (user-requested - "playtest and tune SPIRITBALL's general ball feel").
+// Previously inline literals (restitution: 0.65, friction: 0.35) in createBall()'s
+// PhysicsAggregate call; pulled out here, same "one place to retune" reasoning as the flipper
+// pass's FLIPPER_RESTITUTION/FLIPPER_FRICTION.
+//
+// BALL_FRICTION addresses a demonstrated, reproducible problem: a ball given ordinary rolling
+// velocity in open, level playfield decayed to a fraction of its speed far faster than a real
+// low-friction ball-on-lacquered-wood table would (measured: a 0.6 m/s lateral roll fell to ~15%
+// of that speed within 800ms at the old 0.35; 0.08 retains ~29% over the same window) - a real,
+// direct win for "retain momentum through lanes". On a surface tilted at TABLE_TILT_DEGREES
+// (6.5 deg), 0.08 also sits below tan(6.5 deg) ~= 0.114, so static friction alone can no longer
+// explain a ball refusing to start rolling downhill from rest. Confirmed via Havok's own vendored
+// source (PhysicsShape.setMaterial()'s default frictionCombine = MINIMUM) that the ball's own
+// friction value alone governs every ball<->surface pairing where it's the lower of the two (true
+// for every surface in this file except the flipper's own passive FLIPPER_FRICTION, which is
+// lower still) - so this one constant was the actual lever, not PLAYFIELD_FRICTION.
+//
+// IMPORTANT caveat, found by the anti-stuck audit pass right after this one: lowering this alone
+// does NOT eliminate every case of a ball freezing at exactly zero velocity from a dead stop -
+// a SEPARATE, still-unexplained resting-contact behavior (confirmed to survive this friction
+// value unchanged, and to survive explicitly disabling Havok body sleep via
+// PhysicsActivationControl.ALWAYS_ACTIVE too - neither changed the measured freeze at all) can
+// still hold a ball motionless long enough to trip STUCK_TIME_THRESHOLD_MS from a genuine dead
+// start. That specific edge case never reproduced in any more realistic scenario tested (a moving
+// roll, a corner shot, a wall rebound), and the existing anti-stuck kick already recovers it
+// correctly, so it's left as a known, mitigated characteristic - see updateBallPhysics()'s own
+// comment (STUCK_KICK_CENTERWARD_MS etc.) for the anti-stuck pass this caveat belongs to.
+//
+// BALL_RESTITUTION: Havok's default restitutionCombine is MAXIMUM (same vendored-source check),
+// meaning the ball's OWN restitution was the effective FLOOR for every surface it touches,
+// including the flat playfield (playfield's own 0.2 was being overridden up to the ball's 0.65
+// on every contact) - part of why a resting/settling ball could still be seen doing several
+// bounce-and-correct cycles before friction let it lie still. Lowered from 0.65 to 0.35 - still a
+// genuinely bouncy ball off walls/rails (whose own restitution, 0.3-0.5, mostly governs those
+// contacts once the floor isn't artificially raising the baseline), but no longer forces every
+// softer surface (playfield 0.2, bumpers/comet/saturn already have their OWN much higher values
+// and are unaffected either way) up to a superball-like bounce it never asked for.
+export const BALL_RESTITUTION = 0.35;
+export const BALL_FRICTION = 0.08;
+
 // Converted from CONFIG.ballMaxVelocity: 1800 (px/s) in ../index.js, using the same PX_TO_M
 // scale as everything else - the primary defense against tunneling/instability, same spirit
 // as the old Arcade Physics safety net. See archive/release-prompts/13-*.md for the original
@@ -130,11 +170,53 @@ export const WORLD_MAX_LINEAR_SPEED_MS = MAX_BALL_SPEED_MS * 3;
 // bottom of the screen).
 export const STUCK_SPEED_THRESHOLD_MS = 40 * PX_TO_M; // ~0.038 m/s
 export const STUCK_TIME_THRESHOLD_MS = 450;
-export const STUCK_KICK_X_RANGE_MS = 400 * PX_TO_M; // ~0.378 m/s, randomized +/-
-export const STUCK_KICK_DOWNHILL_MS = 380 * PX_TO_M; // ~0.359 m/s toward -Z
-export const STUCK_KICK_UP_MS = 0.15; // small vertical hop to help clear resting contact - new in
-                                // 3D, no 2D equivalent needed since 2D had no "resting on a
-                                // surface via normal contact" concept the same way
+
+// Anti-stuck audit (user-requested - "safety net, not visible gameplay mechanic... small
+// deterministic escape... downhill bias... minimal vertical component... avoid obvious random
+// teleport/kick behavior"). The escape used to be Math.random()*STUCK_KICK_X_RANGE_MS (a
+// randomized +/- sideways component) plus a 0.15 m/s vertical hop - both read as an obvious,
+// non-physical "reset" the instant they fired (0.15 m/s straight up is a large, visibly floaty
+// pop for a 0.027m ball, and a random sideways component means the same stuck position could
+// escape in a different direction every time, which is the opposite of a believable physical
+// nudge).
+//
+// A first attempt replaced the random component with a fixed, deterministic push toward table
+// center (X=0) alone - reproducible, but a real playtest (a synthetic box-canyon trap: the ball
+// centered exactly between two close walls, boxed in on the downhill side too, so it could only
+// escape sideways) found a genuine flaw: a trap that happens to be roughly SYMMETRIC around the
+// ball's stuck position makes "always push toward center" walk the ball back toward the middle
+// after every kick, never accumulating the net progress needed to actually clear either wall -
+// it can oscillate indefinitely instead of escaping. The old random version didn't have this
+// specific failure mode (a lucky streak of same-direction random kicks would eventually clear
+// it), so simply removing the randomness without addressing this would have been a real
+// regression in the one thing this system exists to guarantee: an eventual escape.
+//
+// The fix keeps the direction deterministic (still toward center - correct for the much more
+// common asymmetric case, where it makes real one-directional progress) but makes the MAGNITUDE
+// escalate on each consecutive kick that fails to produce a real recovery (ball.stuckKickStreak
+// in updateBallPhysics() below, reset the moment the ball demonstrates real, sustained motion on
+// its own - not just right after a kick). The first kick for any given stuck episode stays small
+// (this preference's #1 priority); magnitude only grows if that wasn't enough, capped at
+// STUCK_KICK_ESCALATION_MAX so even a pathological trap can't produce a runaway velocity (also
+// still bounded by the same MAX_BALL_SPEED_MS clamp everything else respects).
+//
+// Verified against a REALISTIC synthetic box canyon (closed on both sides and uphill, open
+// downhill - a ball settling into a pocket while rolling downhill necessarily has this shape,
+// since an opening on the downhill side would mean it just kept rolling through instead of
+// stopping there): escalation clears it in a handful of kicks where a flat magnitude alone
+// oscillated the ball around center forever. A deliberately backwards/adversarial version of the
+// same test (closed downhill instead, open uphill - the opposite of how a real trap forms) does
+// NOT clear even at full escalation, because only Z-axis movement can clear that particular
+// trap's walls and this kick's Z is locked downhill by design (the "downhill bias" preference
+// itself). Not fixed, and not expected to be: no real table geometry should ever produce a
+// pocket that's open specifically on the uphill side only, so this isn't a case the system needs
+// to solve, just one worth naming so a future reader doesn't assume escalation makes any and
+// every trap shape solvable.
+export const STUCK_KICK_CENTERWARD_MS = 400 * PX_TO_M; // ~0.378 m/s, toward table center (X=0) at streak 0 - same magnitude as the old random range's peak, now a fixed, deterministic push instead of a coin-flip direction
+export const STUCK_KICK_DOWNHILL_MS = 380 * PX_TO_M; // ~0.359 m/s toward -Z at streak 0 - unchanged, already deterministic and already the correct "downhill" direction this preference asks for
+export const STUCK_KICK_UP_MS = 0.02; // was 0.15 - just enough to break exact resting Y-contact for one step, not a visible hop (see this block's own comment). Deliberately NOT escalated with the horizontal kicks below - more height never helps clear a horizontal pinch, it would only make repeated attempts look more like a visible "hop"
+export const STUCK_KICK_ESCALATION_STEP = 0.5; // +50% magnitude (X and Z only) per consecutive failed kick
+export const STUCK_KICK_ESCALATION_MAX = 3; // caps escalation at 3x the base magnitude (~1.1 m/s X, ~1.1 m/s Z - still comfortably inside MAX_BALL_SPEED_MS's own ceiling even before that clamp catches it next frame)
 
 // ===================================
 // Flippers + obstacle layout: an authentic, Space-Cadet-inspired arrangement, NOT a raw
@@ -235,6 +317,50 @@ export const FLIPPER_RIGHT_REST_RAD = (25 * Math.PI) / 180;
 export const FLIPPER_ACTIVATE_SPEED_RAD_S = 9.9; // fast "punch" (~115ms for the current 65-degree sweep) - see this constant's own comment for why it's not picked independently of FLIPPER_SWEEP_RAD
 export const FLIPPER_RETURN_SPEED_RAD_S = 7.1; // spring-like, slightly slower return (~160ms - magnitude only, direction is per-flipper, see createFlipper())
 
+// Ball<->flipper contact material (physics-tuning pass, user-requested - "expose minimal tuning
+// constants and document them"). Previously inline literals in createFlipper()'s
+// PhysicsAggregate call; pulled out here so they're the one place to retune passive contact feel
+// without hunting through the aggregate constructor. Restitution 0.3 gives a believable,
+// non-explosive passive bounce off a stationary/held flipper; friction 0.4 is high enough that a
+// resting ball doesn't slide off a level paddle from initial contact "jitter" alone, matching
+// every other solid obstacle's friction in this file (0.4-0.8). These two alone are the WHOLE
+// story for a stationary/held flipper - see FLIPPER_CONTACT_VELOCITY_TRANSFER below for why an
+// ACTIVELY MOVING flipper needs something more.
+export const FLIPPER_RESTITUTION = 0.3;
+export const FLIPPER_FRICTION = 0.4;
+
+// How much of the paddle's OWN real motion at the actual contact point gets added to the ball's
+// velocity on a flipper hit (applyFlipperContactVelocity() in babylon-game.js). Exists because a
+// direct playtest measurement (Playwright, manually-stepped physics via scene.getPhysicsEngine().
+// _step() so a full ~115ms stroke could be sampled many times instead of completing within one
+// throttled render tick - see
+// syncFlipperPhysicsVelocity()'s comment) found Havok's own contact response for a kinematic
+// (ANIMATED) body is purely POSITIONAL: it pushes the ball out of the way of the paddle's new
+// position each step, but never incorporates the paddle's velocity into the ball's outgoing
+// velocity, even after correctly setting that velocity on the body. A stationary and a
+// full-speed mid-swing flipper produced identical post-contact ball motion before this constant's
+// call site existed. The DIRECTION and RELATIVE magnitude here are still fully physically derived,
+// never arbitrary: v = omega x r, the same real rigid-body math a native engine would use,
+// evaluated at the real contact point Havok itself reports (not a hand-picked kick direction) -
+// this alone is what makes a tip hit outrun a base hit, and what makes this exactly zero whenever
+// the flipper isn't actually moving (omega=0: held at a stop, at rest, or the tail of a return
+// about to snap home) - so a resting/held contact is untouched by this and still governed purely
+// by FLIPPER_RESTITUTION/FLIPPER_FRICTION's passive bounce, which is what keeps a held flipper
+// from injecting energy into a ball it's cradling. This constant is the one honestly-arbitrary
+// knob in the formula - a plain scalar gain on that physically-derived vector. 1.0 (add the
+// contact-point surface velocity exactly once) measured as too weak to reliably read as a real
+// "hit" in playtest: Havok's own COLLISION_STARTED/CONTINUED events (this fires on both - see the
+// call site's own comment) only land a handful of times over a ~115ms stroke, so a 1:1 transfer
+// left most strokes barely distinguishable from a passive bounce. 5.0 clearly and repeatably
+// produced a strong, correct up-table redirect in the same playtest. 3.0 is the middle ground kept
+// as the shipped default - re-tune from here (not from 1.0) if a future playtest shows it still
+// reads as too weak or too strong, and prefer changing this one scalar over changing the vector
+// math above it. Always subject to the same MAX_BALL_SPEED_MS ceiling every other velocity source
+// respects (clampBodySpeed() call at the end of applyFlipperContactVelocity()), so no value here
+// can ever produce an unbounded spike regardless of how many genuine separate contacts compound
+// during one swing.
+export const FLIPPER_CONTACT_VELOCITY_TRANSFER = 3.0;
+
 // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
 export const BUMPER_RADIUS_M = 0.02;
 export const BUMPER_CLUSTER = [
@@ -246,11 +372,43 @@ export const BUMPER_CLUSTER = [
 
 // Active pop-bumper kick: bumpers previously only ever bounced the ball via Havok's own
 // restitution (set in buildObstacles()) - a real pop bumper actively fires the ball away on
-// contact instead of just passively reflecting it. applyBumperKick() (in main(), used only by
-// handlePhysicalHit()'s 'bumper' branch) adds a horizontal velocity kick of this magnitude on
-// top of that existing restitution bounce. One tunable constant, not a magic number buried in
-// the hit handler.
-export const BUMPER_KICK_SPEED_MS = 480 * PX_TO_M; // ~0.453 m/s added away from the bumper center
+// contact instead of just passively reflecting it. applyRadialKick() (in main(), used by
+// handlePhysicalHit()'s 'bumper' AND 'saturn' branches - see that function's own comment) adds a
+// horizontal velocity kick of this magnitude on top of that existing restitution bounce. One
+// tunable constant, not a magic number buried in the hit handler.
+export const BUMPER_KICK_SPEED_MS = 480 * PX_TO_M; // ~0.453 m/s added away from the bumper center - the "normal pop bumper" tier
+
+// Active-obstacle power-hierarchy normalization (user-requested - "clear power hierarchy without
+// arbitrary/explosive differences... wall < passive flipper < sling < normal pop bumper < strong
+// flipper strike < boss/special event"). Shared by the boss bumper (BUMPER_CLUSTER[0]) and
+// Saturn - both are narratively the same "boss/special event" tier (see their own comments:
+// the boss bumper "is worth more and gets its own message/pitch", Saturn is "the single biggest
+// non-mission scoring hit on the board... a standalone 'boss' bonus, same spirit as the bumper
+// cluster's own boss bumper"), so they share one tunable magnitude via applyRadialKick() rather
+// than two near-duplicate constants that could quietly drift apart.
+//
+// Before this pass, the boss bumper used the exact same BUMPER_KICK_SPEED_MS as every regular
+// bumper (physics identical, only the score differed) and Saturn had NO active kick at all -
+// purely Havok's own restitution bounce (0.85), so its resulting speed scaled with whatever the
+// ball's incoming speed happened to be instead of guaranteeing a "big hit" feel the way a real
+// boss feature should.
+//
+// Measured directly (Playwright, driving real Havok steps alongside the actual updateBallPhysics/
+// updateHitCooldowns/handlePhysicalHit code paths via the ?dev=1 __flipperDebug hook, a
+// standardized 0.5 m/s approach shot at each obstacle, peak speed measured in a short window
+// anchored to the real contact frame - i.e. the frame a mesh first appears in the game's own
+// hitCooldowns map, not a guessed frame): a normal bumper consistently measured ~0.47 m/s across
+// repeated trials. Before this constant existed, the boss bumper and Saturn (restitution-only)
+// would have measured the same ballpark - not distinctly the top of the hierarchy. With
+// SPECIAL_EVENT_KICK_SPEED_MS applied, both the boss bumper and Saturn measured ~0.55-0.88 m/s
+// across repeated trials - consistently at or above the normal bumper's ~0.47 and never below it,
+// though this sandbox's own run-to-run Havok/swiftshader noise (observed and documented
+// throughout this pass's testing) means the exact number varies trial to trial; what's reliable is
+// the direction, not a precise single figure. Comfortably inside MAX_BALL_SPEED_MS for a typical
+// approach either way - a very fast incoming ball combined with this kick can still reach the
+// ceiling, which is expected and safe (still passes through the same clampBodySpeed() every other
+// kick does).
+export const SPECIAL_EVENT_KICK_SPEED_MS = 900 * PX_TO_M; // ~0.850 m/s - boss bumper + Saturn's shared "boss/special event" tier
 
 export const TARGET_RADIUS_M = 0.014;
 export const MISSION_TARGET_BANK = [
@@ -301,7 +459,7 @@ export const SLINGSHOTS = [
     { x: 0.13, z: -0.30, mirror: -1 }
 ]; // directly above/outside each flipper, like real slingshot kickers
 
-// Active slingshot kick: like the bumpers' applyBumperKick(), a real slingshot kicker
+// Active slingshot kick: like the bumpers' applyRadialKick(), a real slingshot kicker
 // actively punches the ball away rather than just bouncing it off restitution. Two separate
 // tunable components (see applySlingshotKick() in main()): a lateral "away from the face"
 // push using the same ball-relative direction math as the bumpers (naturally mirrors
@@ -312,8 +470,46 @@ export const SLINGSHOTS = [
 // a ball coming off a flipper shot approaches a slingshot from below (more negative Z), where
 // the away-from-face component alone would often point further down-table, not the "feed the
 // ball back into play" behavior a real slingshot has.
-export const SLINGSHOT_KICK_SPEED_MS = 520 * PX_TO_M; // ~0.491 m/s, away-from-face lateral push
-export const SLINGSHOT_KICK_UPTABLE_BIAS_MS = 600 * PX_TO_M; // ~0.567 m/s, unconditional +Z addition - larger than SLINGSHOT_KICK_SPEED_MS by design, see comment above
+//
+// Active-obstacle power-hierarchy normalization (user-requested - "sling < normal pop bumper").
+// Both values lowered from the original 520/600, in two rounds:
+//
+// Round 1 (kick only, to ~54% of original): a standardized-approach playtest found the original
+// magnitudes put the slingshot's resulting speed measurably ABOVE a normal bumper's, backwards
+// from the intended hierarchy. Barely moved the result on its own, though (see
+// SLINGSHOT_RESTITUTION's own comment for why - restitution, not the kick, turned out to be the
+// dominant contributor).
+//
+// Round 2 (kick reduced further, restitution also lowered - see SLINGSHOT_RESTITUTION): even
+// after round 1, repeated measurement kept showing the slingshot's resulting speed at or above a
+// normal bumper's, which turned out to be a measurement-harness bug, not a real physics
+// discrepancy - the "peak speed" window was anchored to launch time rather than to the actual
+// contact frame, so for a bumper reached after some travel distance the reading was dominated by
+// the ball's own pre-contact gravity/tilt acceleration on the way in, not the post-hit response.
+// Anchoring the window to the real contact frame (the frame a mesh first appears in the game's
+// own hitCooldowns map - handlePhysicalHit()'s own signal, not a guessed one) fixed this: with
+// the corrected methodology the slingshot measured clearly below the normal bumper across repeated
+// trials (median ~0.33-0.36 m/s vs. the bumper's consistent ~0.47), matching the ordering both
+// constants already guaranteed on paper (0.170 kick vs. 0.453, 0.45 restitution vs. 0.85). Both
+// values are left at their round-2, comfortably-below-bumper magnitudes rather than walked back up
+// closer to the original - this sandbox's Havok/swiftshader run-to-run noise (still present even
+// with the corrected window) means a wide margin is worth more than a value tuned to sit just
+// barely under the bumper's. The BIAS > KICK ratio (~1.17x) from the comment above is preserved so
+// the "never feeds toward the drain" guarantee still holds.
+export const SLINGSHOT_KICK_SPEED_MS = 180 * PX_TO_M; // ~0.170 m/s, away-from-face lateral push - clearly below BUMPER_KICK_SPEED_MS (0.453) on its own
+export const SLINGSHOT_KICK_UPTABLE_BIAS_MS = 210 * PX_TO_M; // ~0.198 m/s, unconditional +Z addition - larger than SLINGSHOT_KICK_SPEED_MS by design, see comment above
+
+// Also part of the same power-hierarchy normalization as the two kick constants directly above.
+// Root cause of why round 1 (kick-only) barely moved the result: the slingshot previously shared
+// the bumper's own restitution (0.85), and Havok's own passive bounce - not the added kick -
+// turned out to be the dominant contributor to the slingshot's total resulting speed (its flat
+// angled face apparently transfers a more direct, fuller restitution bounce than a bumper's
+// curved sphere does at a comparable approach). Lowered separately from bumpers' own restitution
+// (bumpers don't have their own named constant yet - see buildObstacles()'s own literal, 0.85) so
+// the slingshot's passive bounce alone is clearly below a bumper's, not just competitive with it,
+// while staying well above a plain wall's (0.3) - a slingshot should still read as genuinely
+// springy, just the tier below a bumper, not tier-for-tier identical to one.
+export const SLINGSHOT_RESTITUTION = 0.45;
 
 export const REENTRY_LANE_RADIUS_M = 0.016;
 export const REENTRY_LANES = [

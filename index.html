@@ -52,44 +52,142 @@
            button's own footprint (its right offset + 44px width + an 8px gap) so the two can
            never collide, and picks up safe-area-inset-top for parity with every other fixed
            corner element on this page (it was the one exception still using a bare pixel value). */
+        /* Readability pass (user-requested - "stronger arcade scoreboard", score must be
+           immediately readable during fast gameplay): rebuilt as a label-over-value scoreboard
+           instead of the old inline "Score123"/"Lives3" pairs, which put an unstyled label
+           directly beside a same-size value with nothing to separate them at a glance. Score
+           and lives are now two distinct blocks (a vertical divider between them) so the eye
+           reads "one big number, one small number" instantly rather than parsing four short
+           label/value pairs of similar visual weight.
+           Contrast against a bright, moving playfield behind it needed a darker, more opaque
+           panel than before (0.55 -> 0.82 alpha) plus a grounding drop shadow - relying on the
+           border glow alone to separate the panel from a lit-up table wasn't enough.
+           Glow policy: the panel border/label keep this page's existing cosmic-neon glow
+           (text-shadow blur unchanged in kind), but the digits themselves (#hud-score/#hud-lives)
+           use a much tighter 1-2px shadow, not the old 6px bloom - legible crisp digits at speed
+           matter more here than the neon look, and a heavy blur on the one thing that has to be
+           read fast (the score) was working against that. */
         #player-hud {
             position: fixed;
             top: max(12px, env(safe-area-inset-top));
             right: calc(max(16px, env(safe-area-inset-right)) + 44px + 8px);
             z-index: 10;
             display: flex;
-            gap: 16px;
-            background: rgba(10, 0, 25, 0.55);
-            border: 1px solid rgba(0, 255, 255, 0.4);
-            border-radius: 8px;
-            padding: 6px 14px;
+            align-items: stretch;
+            gap: 12px;
+            background: rgba(8, 0, 20, 0.82);
+            border: 1px solid rgba(0, 255, 255, 0.55);
+            border-radius: 10px;
+            padding: 6px 14px 7px;
+            box-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
             color: #00ffff;
-            font-size: 14px;
-            line-height: 1.4;
-            text-shadow: 0 0 6px rgba(0, 255, 255, 0.6);
+            /* Fixed max-width room for an 8-digit score at the largest step below, so the panel's
+               footprint (and therefore its distance from #pause-btn/#effects-hud) doesn't shift
+               as the score grows more digits mid-game. */
+        }
+
+        #player-hud .hud-block {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 0;
+        }
+
+        #player-hud .hud-divider {
+            align-self: stretch;
+            width: 1px;
+            background: rgba(0, 255, 255, 0.3);
         }
 
         #player-hud .hud-label {
-            color: #888;
-            font-size: 10px;
+            color: rgba(150, 245, 255, 0.75);
             display: block;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.1em;
+            text-shadow: none;
         }
 
         #player-hud .hud-value {
-            font-weight: bold;
+            display: block;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: 'tnum' 1;
+            letter-spacing: 0.02em;
+            line-height: 1.05;
+        }
+
+        #player-hud #hud-score-block .hud-label { font-size: 10px; margin-bottom: 1px; }
+        #player-hud #hud-score {
+            font-size: 30px;
+            color: #eafeff;
+            text-shadow: 0 0 2px rgba(0, 255, 255, 0.7);
+        }
+
+        #player-hud #hud-lives-block { align-items: flex-start; }
+        #player-hud #hud-lives-block .hud-label { font-size: 9px; margin-bottom: 1px; }
+        #player-hud #hud-lives {
+            font-size: 18px;
+            color: #7dfff0;
+            text-shadow: 0 0 2px rgba(0, 255, 204, 0.7);
         }
 
         @media (max-width: 480px) {
             #player-hud {
                 top: max(8px, env(safe-area-inset-top));
                 right: calc(max(16px, env(safe-area-inset-right)) + 40px + 6px);
-                padding: 5px 10px;
-                font-size: 12px;
-                gap: 10px;
+                padding: 5px 10px 6px;
+                gap: 9px;
             }
+            #player-hud #hud-score-block .hud-label { font-size: 9px; }
+            #player-hud #hud-score { font-size: 23px; }
+            #player-hud #hud-lives-block .hud-label { font-size: 8px; }
+            #player-hud #hud-lives { font-size: 15px; }
         }
+
+        /* Narrowest phones (iPhone SE/320px and similar) - one more step down so an 8-digit
+           score still fits without wrapping or crowding the divider/lives block. */
+        @media (max-width: 340px) {
+            #player-hud { gap: 7px; padding: 5px 8px 6px; }
+            #player-hud #hud-score { font-size: 19px; }
+            #player-hud #hud-lives { font-size: 13px; }
+        }
+
+        /* Restrained score/lives HUD feedback (user-requested - "brief subtle brightness/scale
+           punch... no long animation... large scoring events may have slightly stronger
+           feedback" for score; "subtle pulse when lost, no distracting continuous animation" for
+           lives). See pulseScoreHud()/pulseLivesHud() in babylon-game.js for exactly when these
+           classes get toggled (score: every real addScore(), coalesced so a rapid burst like the
+           end-of-ball bonus count can't restart/stack into a flicker; lives: only on an actual
+           life lost, never on the startup/new-game resets that also call setLives()). transform/
+           filter only, deliberately never a layout-affecting property (width/height/margin/
+           padding) - a pulse can never shift #player-hud's own footprint or push a neighboring
+           element, and it never touches the text content itself, so the true score/lives value is
+           always already on screen the instant these start playing, not delayed by them. Score's
+           "strong" tier (bigger board events) scales up further AND runs a touch longer than the
+           routine tier - both still short. Lives pulses inward/dims instead of growing, so a loss
+           reads as visually distinct from a score gain rather than reusing the same "up" motion. */
+        @keyframes hud-score-pulse {
+            0% { transform: scale(1); filter: brightness(1); }
+            30% { transform: scale(1.08); filter: brightness(1.4); }
+            100% { transform: scale(1); filter: brightness(1); }
+        }
+
+        @keyframes hud-score-pulse-strong {
+            0% { transform: scale(1); filter: brightness(1); }
+            28% { transform: scale(1.16); filter: brightness(1.7); }
+            100% { transform: scale(1); filter: brightness(1); }
+        }
+
+        #player-hud #hud-score.hud-pulse { animation: hud-score-pulse 180ms ease-out; }
+        #player-hud #hud-score.hud-pulse-strong { animation: hud-score-pulse-strong 240ms ease-out; }
+
+        @keyframes hud-lives-lost-pulse {
+            0% { transform: scale(1); filter: brightness(1); }
+            35% { transform: scale(0.88); filter: brightness(0.65) saturate(1.5); }
+            100% { transform: scale(1); filter: brightness(1); }
+        }
+
+        #player-hud #hud-lives.hud-lives-lost { animation: hud-lives-lost-pulse 320ms ease-out; }
 
         /* HUD hierarchy audit (UX polish, no new mechanic) - which of this game's existing
            systems (mission/rank/temp score multiplier/bonus multiplier/ball save/kickback/skill
@@ -370,7 +468,15 @@
         }
 
         .flipper-zone {
-            transition: opacity 0.12s ease-out;
+            /* Control-feedback polish (user-requested - "immediate subtle pressed-state
+               reaction... release visual immediately on release"): shortened from 0.12s. This only
+               governs the dimmed<->full-opacity fade (see #mobile-controls.dimmed above) - the
+               class toggle itself (leftZone.classList.add/remove('pressed'), in babylon-game.js)
+               is already synchronous with touchstart/touchend, so this duration was always purely
+               how long the CSS took to visually catch up, never real input lag. Still eased, not
+               0ms, so a mid-ball dimmed->pressed jump doesn't pop instantaneously, but short enough
+               to read as immediate rather than a fade. */
+            transition: opacity 0.06s ease-out;
             position: absolute;
             top: 0;
             bottom: 0;
@@ -425,7 +531,13 @@
                 0 0 25px rgba(0, 255, 255, 0.5),
                 0 4px 15px rgba(0, 0, 0, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.2);
-            transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
+            /* Same "immediate...reaction" polish as .flipper-zone's own opacity transition above -
+               shortened from 0.1s. This is the visible icon's press/release snap (scale + glow);
+               the actual flipper motor activates synchronously on touchstart regardless of this
+               value (see activateFlipper()/deactivateFlipper() in babylon-game.js) - shortening it
+               only makes the on-screen cue catch up to that real state change faster, it can't make
+               the real activation any faster or slower. */
+            transition: transform 0.06s ease-out, box-shadow 0.06s ease-out;
         }
 
         .flipper-zone.pressed .flipper-zone-icon {
@@ -464,7 +576,12 @@
                 0 0 30px rgba(255, 165, 0, 0.5),
                 0 4px 15px rgba(0, 0, 0, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.3);
-            transition: transform 0.1s ease-out, box-shadow 0.1s ease-out, background 0.1s ease-out, opacity 0.12s ease-out;
+            /* Control-feedback polish (user-requested) - same "immediate...reaction" tightening as
+               the flipper zones' own transitions above (0.1s/0.12s -> 0.06s); the actual plunger
+               charge itself is driven every frame by real chargePercent regardless of this value
+               (see this rule's own --charge-pct comment below), so shortening it only makes the
+               PRESS/RELEASE edges (not the continuous charging glow) read as more instant. */
+            transition: transform 0.06s ease-out, box-shadow 0.06s ease-out, background 0.06s ease-out, opacity 0.06s ease-out;
             /* Read by .launch-btn.pressed's box-shadow below - kept updated every frame while
                charging (see updatePlungerVisual()'s call site in babylon-game.js), reusing
                plunger.chargePercent, which already exists for the in-scene plunger piston
@@ -477,13 +594,61 @@
         .launch-btn-icon { font-size: clamp(22px, 6vw, 32px); line-height: 1; }
         .launch-btn-label { font-size: clamp(10px, 2.6vw, 13px); font-weight: 900; letter-spacing: 2px; }
 
+        /* Control-feedback polish (user-requested - "distinguish READY/CHARGING/FIRED" and
+           "reduced-motion mode should keep state indication while removing motion"): .ready used
+           to define NOTHING but the animation itself, so under prefers-reduced-motion (which
+           strips it to `animation: none` a few rules below, same as every other looping animation
+           in this file) a ready button fell back to the exact same box-shadow/border as a plain,
+           not-yet-ready one - the ONLY thing distinguishing "you can launch right now" from "wait"
+           was motion, which is precisely what a reduced-motion player has turned off. Ready now
+           has its own real, static, brighter border/glow baseline (matching the pulse's own 0%/
+           100% keyframe values, so a motion-enabled player sees no jump when the animation is
+           removed/added) - the animation becomes a pulse ON TOP of a real static difference, not
+           the only signal of it. */
         .launch-btn.ready {
+            border-color: rgba(255, 200, 0, 1);
+            box-shadow:
+                0 0 38px rgba(255, 190, 0, 0.75),
+                0 4px 15px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3);
             animation: launch-ready-pulse 1.4s ease-in-out infinite;
         }
 
         @keyframes launch-ready-pulse {
-            0%, 100% { box-shadow: 0 0 30px rgba(255, 165, 0, 0.5), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
-            50% { box-shadow: 0 0 48px rgba(255, 200, 0, 0.85), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+            0%, 100% { box-shadow: 0 0 38px rgba(255, 190, 0, 0.75), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+            50% { box-shadow: 0 0 52px rgba(255, 210, 0, 0.95), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+        }
+
+        /* FIRED - the one launch-button state this panel never actually had before (user-requested
+           - "distinguish READY/CHARGING/FIRED"). Previously, the instant after a real launch,
+           .ready was removed and .pressed was removed right behind it, leaving the button with
+           NO visual difference from "idle, nothing to do" (e.g. mid-ball with nothing pending) -
+           a player got camera shake/sound/haptic for the launch itself, but the button they just
+           held gave no acknowledgement of its own. This is a brief, one-shot flash (not a loop),
+           triggered directly by the real fire transition (see triggerLaunchFiredFlash()'s call
+           site in handleLaunchRelease(), babylon-game.js - exactly the moment ballInPlay flips
+           true, never a decorative timer of its own) and removed again via the real 'animationend'
+           event once it plays out - the class's own presence IS the state, not a fixed-length
+           setTimeout racing the animation. */
+        @keyframes launch-fired-flash {
+            0% {
+                border-color: #ffffff;
+                box-shadow:
+                    0 0 60px rgba(255, 255, 255, 0.95),
+                    0 0 95px rgba(255, 180, 0, 0.75),
+                    inset 0 0 30px rgba(255, 255, 255, 0.5);
+            }
+            100% {
+                border-color: rgba(255, 165, 0, 0.8);
+                box-shadow:
+                    0 0 30px rgba(255, 165, 0, 0.5),
+                    0 4px 15px rgba(0, 0, 0, 0.3),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            }
+        }
+
+        .launch-btn.fired {
+            animation: launch-fired-flash 260ms ease-out;
         }
 
         /* CHARGING, not just "pressed" - the glow's own spread/blur/alpha scale continuously with
@@ -905,6 +1070,30 @@
             .launch-btn.ready { animation: none; }
             .rotate-icon { animation: none; }
             .screen-overlay .pulse-text, #loading-panel h1 { animation: none; }
+            /* Belt-and-suspenders alongside pulseScoreHud()/pulseLivesHud()'s own
+               window.SPIRITBALL_reducedMotion check (babylon-game.js) - those already skip adding
+               the class at all, but this guarantees the same outcome even if a class somehow ends
+               up applied (e.g. mid-transition when the setting changes), consistent with every
+               other animation in this block. */
+            #player-hud #hud-score.hud-pulse,
+            #player-hud #hud-score.hud-pulse-strong,
+            #player-hud #hud-lives.hud-lives-lost { animation: none; }
+            /* FIRED flash (user-requested - "keep state indication while removing motion"): the
+               animation is dropped like everything else in this block, but unlike those, .fired
+               needs a static replacement, not just a bare `animation: none` - it's a one-shot
+               transient acknowledgement, not a persistent state with its own resting look
+               elsewhere in this file. triggerLaunchFiredFlash() (babylon-game.js) checks this same
+               reduced-motion flag and holds the class for a fixed duration via setTimeout instead
+               of waiting for 'animationend' (which never fires with animation:none), so the class
+               being present for that window is what carries the signal here. */
+            .launch-btn.fired {
+                animation: none;
+                border-color: #ffffff;
+                box-shadow:
+                    0 0 45px rgba(255, 255, 255, 0.85),
+                    0 4px 15px rgba(0, 0, 0, 0.3),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            }
         }
     </style>
 
@@ -934,8 +1123,9 @@
          the user is doing; aria-atomic="true" so the whole "Score 1500" line reads together
          instead of just a bare, contextless number when only the value span's text changes. -->
     <div id="player-hud">
-        <div role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Score</span><span class="hud-value" id="hud-score">0</span></div>
-        <div role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Lives</span><span class="hud-value" id="hud-lives">3</span></div>
+        <div class="hud-block" id="hud-score-block" role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Score</span><span class="hud-value" id="hud-score">0</span></div>
+        <div class="hud-divider" aria-hidden="true"></div>
+        <div class="hud-block" id="hud-lives-block" role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Balls</span><span class="hud-value" id="hud-lives">3</span></div>
     </div>
 
     <!-- HUD hierarchy audit - see #mission-hud/#effects-hud's own CSS comment above for the full

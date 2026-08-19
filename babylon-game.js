@@ -65,17 +65,19 @@ import {
     PX_TO_M, TABLE_WIDTH_M, TABLE_LENGTH_M, WALL_HEIGHT_M,
     COLLISION_CATEGORY_BALL, toWorldX, toWorldZ, toWorldRotationY,
     TABLE_TILT_DEGREES, TILT_RAD, GRAVITY_VECTOR_FN, BALL_DIAMETER_M,
-    BALL_MASS_KG, MAX_BALL_SPEED_MS, WORLD_MAX_LINEAR_SPEED_MS, STUCK_SPEED_THRESHOLD_MS,
-    STUCK_TIME_THRESHOLD_MS, STUCK_KICK_X_RANGE_MS, STUCK_KICK_DOWNHILL_MS, STUCK_KICK_UP_MS,
+    BALL_MASS_KG, BALL_RESTITUTION, BALL_FRICTION, MAX_BALL_SPEED_MS, WORLD_MAX_LINEAR_SPEED_MS, STUCK_SPEED_THRESHOLD_MS,
+    STUCK_TIME_THRESHOLD_MS, STUCK_KICK_CENTERWARD_MS, STUCK_KICK_DOWNHILL_MS, STUCK_KICK_UP_MS,
+    STUCK_KICK_ESCALATION_STEP, STUCK_KICK_ESCALATION_MAX,
     FLIPPER_LENGTH_M, FLIPPER_THICKNESS_M, FLIPPER_HEIGHT_M, FLIPPER_MASS_KG,
     FLIPPER_GAP_HALF_M, FLIPPER_Z_M, FLIPPER_PLAYFIELD_CLEARANCE_M, FLIPPER_SWEEP_RAD,
     FLIPPER_LEFT_REST_RAD, FLIPPER_RIGHT_REST_RAD, FLIPPER_ACTIVATE_SPEED_RAD_S, FLIPPER_RETURN_SPEED_RAD_S,
-    BUMPER_RADIUS_M, BUMPER_CLUSTER, BUMPER_KICK_SPEED_MS, TARGET_RADIUS_M,
+    FLIPPER_RESTITUTION, FLIPPER_FRICTION, FLIPPER_CONTACT_VELOCITY_TRANSFER,
+    BUMPER_RADIUS_M, BUMPER_CLUSTER, BUMPER_KICK_SPEED_MS, SPECIAL_EVENT_KICK_SPEED_MS, TARGET_RADIUS_M,
     MISSION_TARGET_BANK, TARGET_RAISED_Y_M, TARGET_DROPPED_Y_M, TARGET_DROP_ANIM_MS,
     SATURN_RADIUS_M, SATURN_POS, COMET_RADIUS_M, COMET_POS,
     POWERUP_RADIUS_M, POWERUP_POS, POWERUP_SPAWN_INTERVAL_MS, POWERUP_ACTIVE_DURATION_MS,
     POWERUP_MULTIPLIER, POWERUP_MULTIPLIER_DURATION_MS, SLINGSHOT_SIZE_M, SLINGSHOTS,
-    SLINGSHOT_KICK_SPEED_MS, SLINGSHOT_KICK_UPTABLE_BIAS_MS, REENTRY_LANE_RADIUS_M, REENTRY_LANES,
+    SLINGSHOT_KICK_SPEED_MS, SLINGSHOT_KICK_UPTABLE_BIAS_MS, SLINGSHOT_RESTITUTION, REENTRY_LANE_RADIUS_M, REENTRY_LANES,
     LANE_Z_TOP_M, LANE_Z_BOTTOM_M, LANE_DIVIDER_X_M, LANE_TRIGGER_Z_M,
     INLANE_TRIGGER_X_M, OUTLANE_TRIGGER_X_M, LANE_TRIGGER_WIDTH_M, LANE_TRIGGER_DEPTH_M,
     INLANE_GUIDE_TOP_X_M, INLANE_GUIDE_BOTTOM_X_M, SIDE_LANES, ORBIT_RAIL_BOTTOM_Z_M,
@@ -1371,9 +1373,34 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // into this same panel once Stage 12 gives them real values to show.
     // ===================================
     function buildBackglass(scene) {
-        const width = 512;
-        const height = 256;
-        const texture = new BABYLON.DynamicTexture('backglassTex', { width, height }, scene, false);
+        // Readability pass (user-requested - "evaluate readability from the ACTUAL gameplay
+        // camera, not texture pixels"): the fixed gameplay camera (buildCamera()) sits roughly
+        // 1.3m from this panel, and at that distance/FOV the 0.32x0.15m plane only ever covers a
+        // small slice of screen - on the smallest phone viewport tested (320px wide) it's well
+        // under 100 screen pixels tall regardless of texture resolution. Two consequences drove
+        // every change below: (1) texture resolution alone was never the bottleneck - the old
+        // 512x256 canvas was already being downsampled well below 1:1 on screen, so the real fix
+        // is bigger font-to-panel ratios and fewer/clearer blocks, not just more source pixels;
+        // (2) resolution is still bumped 2x (to 1024x480, and corrected to exactly match the
+        // panel's own 0.32:0.15 aspect ratio, fixing a pre-existing slight stretch the old
+        // 512:256 - 2:1 vs. 2.133:1 - mismatch caused) so the now-much-larger glyphs stay crisp
+        // instead of visibly blocky when the GPU downsamples them for a small on-screen area.
+        const width = 1024;
+        const height = 480;
+        // Mipmaps ON (was `false`, the DynamicTexture constructor's generateMipMaps arg) - found
+        // via the same real-camera screenshot testing this whole pass is built around: with
+        // mipmaps off, the GPU has no choice but to point/bilinear-sample the full-res texture
+        // directly at this panel's real, heavily-minified on-screen size, and thin text strokes
+        // either vanish between sample points or blur unevenly depending on exactly where they
+        // land - confirmed via a zoomed-in crop of a 320px-viewport screenshot showing the
+        // smaller-tier text (RANK, mission label/progress, badges) as a barely-legible smear while
+        // the larger tiers (message, mission name) stayed readable purely because their strokes
+        // were wide enough to survive it anyway. Mipmapping gives the GPU a properly pre-filtered,
+        // evenly-downsampled version to sample from instead, which is what small text actually
+        // needs at this viewing distance - the DynamicTexture regenerates its mip chain
+        // automatically on every texture.update() call below, so this stays correct across
+        // redraws, not just the first paint.
+        const texture = new BABYLON.DynamicTexture('backglassTex', { width, height }, scene, true);
         const ctx = texture.getContext();
 
         const mat = new BABYLON.StandardMaterial('backglassMat', scene);
@@ -1414,53 +1441,154 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             bonusMultiplierX: 1
         };
 
+        // Manual rounded-rect path (not ctx.roundRect - not universally supported on every
+        // engine/browser this build might run on) used by the two "backing plate" helpers below.
+        function roundRectPath(x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.arcTo(x + w, y, x + w, y + r, r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+            ctx.lineTo(x + r, y + h);
+            ctx.arcTo(x, y + h, x, y + h - r, r);
+            ctx.lineTo(x, y + r);
+            ctx.arcTo(x, y, x + r, y, r);
+            ctx.closePath();
+        }
+
+        // Dark backing plate (user-requested - "dark backing opacity") behind a text block: a
+        // filled rounded rect well darker/more opaque than the panel's own base fill, plus a
+        // colored border, so the block reads as its own distinct, high-contrast callout instead
+        // of text floating directly on the busy dot-grid background. Used for the two
+        // priority-1/2 elements (message, mission) that most need to stand out at a glance.
+        function drawPanel(x, y, w, h, borderColor, fillColor) {
+            roundRectPath(x, y, w, h, 14);
+            ctx.fillStyle = fillColor;
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = borderColor;
+            ctx.stroke();
+        }
+
+        // Small pill-shaped badge for the supporting multiplier/bonus indicators - same visual
+        // language as the DOM #effects-hud badges (index.html), so a player who's already learned
+        // to recognize those reads these the same way. Returns the x just past its right edge so
+        // callers can lay badges out left-to-right without hardcoding widths.
+        function drawBadge(x, y, text, color) {
+            ctx.font = 'bold 30px monospace';
+            const paddingX = 20;
+            const textWidth = ctx.measureText(text).width;
+            const w = textWidth + paddingX * 2;
+            const h = 50;
+            roundRectPath(x, y, w, h, h / 2);
+            ctx.fillStyle = 'rgba(8, 0, 18, 0.7)';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = color;
+            ctx.stroke();
+            ctx.fillStyle = color;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x + paddingX, y + h / 2 + 1);
+            ctx.textBaseline = 'top';
+            return x + w;
+        }
+
+        // Font hierarchy (user-requested priority order - "temporary message easiest to notice,
+        // followed by mission/rank"): three explicit tiers, biggest/most-backed to
+        // smallest/plainest, rather than the old flat "everything ~18-32px, no backing" layout
+        // that gave every line roughly equal visual weight regardless of how often/urgently a
+        // player actually needs to read it.
+        //   Tier 1 (message):        84px start (shrink-to-fit), full backing plate, bottom zone.
+        //   Tier 2 (mission):        48px name / 30px progress, own backing plate.
+        //   Tier 3 (high score/rank/badges): 46px/30px, no backing - supporting info, still much
+        //     larger than the old 28px/18px so it stays legible at the real on-screen size, just
+        //     visually quieter than tiers 1-2.
         function redraw() {
             ctx.fillStyle = '#05000f';
             ctx.fillRect(0, 0, width, height);
 
+            // Dot-matrix grid, scaled 2x alongside the resolution bump (16px pitch/4px dot vs.
+            // the old 8px/2px) - same visual density as before, not a new pattern.
             ctx.fillStyle = 'rgba(0, 255, 255, 0.05)';
-            for (let y = 6; y < height; y += 8) {
-                for (let x = 6; x < width; x += 8) {
-                    ctx.fillRect(x, y, 2, 2);
+            for (let y = 12; y < height; y += 16) {
+                for (let x = 12; x < width; x += 16) {
+                    ctx.fillRect(x, y, 4, 4);
                 }
             }
 
             ctx.textBaseline = 'top';
+
+            // --- Tier 3: HIGH SCORE / RANK, stacked (not side-by-side) ---
+            // Deliberately NOT a same-row "HIGH SCORE ... RANK" layout with RANK right-aligned:
+            // an earlier version of this pass did exactly that, and at narrow phone viewports the
+            // backglass panel's own on-screen projection places its right edge directly behind
+            // the DOM #player-hud score/lives card (a fixed top-right screen overlay, unrelated
+            // to this panel's 3D position) - confirmed via Playwright at 320px, where "RANK:
+            // Cadet" rendered but was fully hidden underneath that DOM card. Both lines left-
+            // aligned keeps everything on the panel's left/near side, matching where the DOM HUD
+            // never reaches regardless of viewport, at the cost of one extra line of height.
+            ctx.font = 'bold 46px monospace';
             ctx.textAlign = 'left';
-            // HIGH SCORE is now the headline number here (score itself lives on #player-hud) -
-            // the one score-related fact worth featuring on the cabinet is the target to beat.
-            ctx.font = 'bold 28px monospace';
             ctx.fillStyle = '#ffd700';
-            ctx.fillText('HIGH SCORE ' + state.highScore, 16, 16);
+            ctx.fillText('HIGH SCORE ' + state.highScore, 28, 16);
 
-            ctx.font = 'bold 18px monospace';
+            ctx.font = 'bold 30px monospace';
             ctx.fillStyle = '#00ff99';
-            ctx.fillText('RANK: ' + state.rank, 16, 58);
+            ctx.fillText('RANK: ' + state.rank, 28, 75);
 
+            // Thin divider - separates the quieter status block above from the mission/message
+            // zone below, a cheap spacing cue that costs almost no vertical room.
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.25)';
+            ctx.fillRect(28, 118, width - 56, 2);
+
+            // --- Tier 2: MISSION - its own backed callout, second-most prominent element ---
+            let nextY = 130;
             if (state.missionName) {
+                const boxY = nextY;
+                const boxH = 122;
+                drawPanel(28, boxY, width - 56, boxH, 'rgba(255, 170, 0, 0.7)', 'rgba(10, 0, 20, 0.6)');
+                ctx.font = 'bold 24px monospace';
+                ctx.fillStyle = 'rgba(255, 210, 140, 0.9)';
+                ctx.fillText('ACTIVE MISSION', 48, boxY + 10);
+                ctx.font = 'bold 48px monospace';
                 ctx.fillStyle = '#ffaa00';
-                ctx.fillText(
-                    'MISSION: ' + state.missionName + ' ' + state.missionProgress + '/' + state.missionRequired,
-                    16, 84
-                );
+                ctx.fillText(state.missionName, 48, boxY + 40);
+                ctx.font = 'bold 30px monospace';
+                ctx.fillStyle = '#ffd27a';
+                ctx.fillText(state.missionProgress + ' / ' + state.missionRequired, 48, boxY + 82);
+                nextY = boxY + boxH + 12;
             }
 
+            // --- Tier 3: MULTIPLIER / BONUS - small pill badges, supporting info ---
+            let badgeX = 28;
             if (state.multiplierActive) {
-                ctx.fillStyle = '#ff00ff';
-                ctx.fillText('★ ' + POWERUP_MULTIPLIER + 'X SCORE ACTIVE ★', 16, 110);
+                badgeX = drawBadge(badgeX, nextY, '★ ' + POWERUP_MULTIPLIER + 'X SCORE', '#ff00ff') + 16;
             }
-
             if (state.bonusMultiplierX > 1) {
-                ctx.fillStyle = '#ffaa00';
-                ctx.fillText('BONUS MULT: ' + state.bonusMultiplierX + 'X', 16, 136);
+                badgeX = drawBadge(badgeX, nextY, 'BONUS ' + state.bonusMultiplierX + 'X', '#ffaa00') + 16;
             }
 
+            // --- Tier 1: MESSAGE - the single most prominent element on the whole panel ---
             if (state.message) {
-                ctx.font = 'bold 32px monospace';
+                const boxH = 130;
+                const boxY = height - boxH - 18;
+                drawPanel(28, boxY, width - 56, boxH, 'rgba(255, 255, 255, 0.85)', 'rgba(0, 0, 0, 0.8)');
+                // Shrink-to-fit so a longer message (e.g. "BONUS x3: 12,500") never overflows the
+                // plate instead of just clipping or spilling past its border.
+                let fontSize = 84;
+                ctx.font = 'bold ' + fontSize + 'px monospace';
+                while (ctx.measureText(state.message).width > width - 112 && fontSize > 34) {
+                    fontSize -= 4;
+                    ctx.font = 'bold ' + fontSize + 'px monospace';
+                }
                 ctx.fillStyle = '#ffffff';
                 ctx.textAlign = 'center';
-                ctx.fillText(state.message, width / 2, height - 76);
+                ctx.textBaseline = 'middle';
+                ctx.fillText(state.message, width / 2, boxY + boxH / 2 + 2);
                 ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
             }
 
             texture.update();
@@ -1719,7 +1847,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const aggregate = new BABYLON.PhysicsAggregate(
             mesh,
             BABYLON.PhysicsShapeType.SPHERE,
-            { mass: BALL_MASS_KG, restitution: 0.65, friction: 0.35 },
+            { mass: BALL_MASS_KG, restitution: BALL_RESTITUTION, friction: BALL_FRICTION },
             scene
         );
         aggregate.shape.filterMembershipMask = COLLISION_CATEGORY_BALL;
@@ -1742,7 +1870,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // every reset/dev-button code path already assumed it was getting.
         aggregate.body.disablePreStep = false;
 
-        return { mesh, aggregate, stuckTimeMs: 0 };
+        return { mesh, aggregate, stuckTimeMs: 0, stuckKickStreak: 0, stuckRecoveryMs: 0, stuckKickDirX: 1 };
     }
 
     // Shared speed ceiling enforcement - uniformly rescales a body's velocity down to maxSpeed if
@@ -1766,6 +1894,36 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // that function's "accumulate, then one decisive kick" design rather than the per-frame
     // nudge it replaced - see the STUCK_* constants' comment for why that matters. `ball` is one
     // of the {mesh, aggregate, stuckTimeMs} objects created by createBall().
+    //
+    // Anti-stuck audit (user-requested - "safety net, not visible gameplay mechanic... small
+    // deterministic escape... downhill bias... minimal vertical component... avoid obvious random
+    // teleport/kick"). The escape direction is fully deterministic, not random: X is a push back
+    // toward table center (X=0), signed by whichever side of center the ball is CURRENTLY on -
+    // the same physical intuition as "nudge it off whatever wall is probably pinning it" the old
+    // random version was going for, but reproducible (the same stuck position always escapes the
+    // same way) instead of a coin flip. Z keeps the same fixed downhill (-Z) bias it already had.
+    // Y is a much smaller nudge than before (STUCK_KICK_UP_MS) and does NOT escalate - see that
+    // constant's own comment for why.
+    //
+    // The X/Z magnitude escalates on consecutive failed attempts (ball.stuckKickStreak, reset the
+    // moment the ball shows real sustained motion on its own) rather than staying flat - see
+    // STUCK_KICK_ESCALATION_STEP's own comment for why a flat deterministic magnitude alone turned
+    // out to be a real regression against a symmetric trap (a synthetic box-canyon playtest found
+    // it could oscillate the ball back toward center forever instead of ever clearing a wall).
+    // Escalating keeps the common case small (this preference's #1 priority - most real stuck
+    // episodes clear on the first, smallest kick) while still guaranteeing eventual escape for a
+    // harder trap, which the old random version got "for free" from luck alone.
+    //
+    // Audited against genuine trapped corners, a ball cradled on a raised/held flipper, brief
+    // low-speed moments in open play (e.g. cresting a slow uphill shot), the plunger's resting
+    // state, and Vision Gate capture - the WHEN this fires was already correctly guarded for the
+    // last two (see this file's own "Skipped while the Vision Gate holds the ball"/"Anti-stuck
+    // audit fix - same reasoning extends to !ballInPlay" comment at the real call site), and
+    // direct playtest measurement found the other three don't actually produce a sustained
+    // near-zero-speed state in this table's current geometry (a raised flipper has no adjacent
+    // wall close enough to trap the ball - it rolls off well within STUCK_TIME_THRESHOLD_MS every
+    // time tested, single or double flipper) - so no additional firing-condition guard was needed
+    // this pass; only the escape's OWN character (this comment) changed.
     function updateBallPhysics(ball, deltaMs) {
         if (!ball.aggregate.body) return;
 
@@ -1773,13 +1931,44 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         if (speed < STUCK_SPEED_THRESHOLD_MS) {
             ball.stuckTimeMs += deltaMs;
+            // Any dip back below the speed threshold cancels recovery progress - a kick that only
+            // produces a brief high-speed instant before the ball settles right back into the same
+            // trap must NOT look like a "real" recovery, or every failed kick would immediately
+            // erase the escalation it just earned.
+            ball.stuckRecoveryMs = 0;
             if (ball.stuckTimeMs >= STUCK_TIME_THRESHOLD_MS) {
-                const kickX = (Math.random() - 0.5) * STUCK_KICK_X_RANGE_MS;
-                ball.aggregate.body.setLinearVelocity(new BABYLON.Vector3(kickX, STUCK_KICK_UP_MS, -STUCK_KICK_DOWNHILL_MS));
+                if (ball.stuckKickStreak === 0) {
+                    // Lock in the escape direction on the FIRST kick of a new streak - whichever
+                    // side of center the ball is on right now (defaulting rightward in the
+                    // vanishingly unlikely exact-center case). Every escalating follow-up kick in
+                    // this SAME streak (below) reuses this stored direction instead of
+                    // recomputing it from the ball's position each time - recomputing from
+                    // current position was the actual bug a synthetic symmetric-trap playtest
+                    // found: once an escape attempt overshoots back across center, "always push
+                    // toward instantaneous center" reverses direction on the very next kick,
+                    // so magnitude escalation alone still zigzagged forever instead of ever
+                    // clearing a wall. A locked direction plus escalating magnitude makes
+                    // consistent, one-way progress instead.
+                    ball.stuckKickDirX = -Math.sign(ball.mesh.position.x) || 1;
+                }
+                const escalation = Math.min(1 + ball.stuckKickStreak * STUCK_KICK_ESCALATION_STEP, STUCK_KICK_ESCALATION_MAX);
+                const kickX = ball.stuckKickDirX * STUCK_KICK_CENTERWARD_MS * escalation;
+                const kickZ = -STUCK_KICK_DOWNHILL_MS * escalation;
+                ball.aggregate.body.setLinearVelocity(new BABYLON.Vector3(kickX, STUCK_KICK_UP_MS, kickZ));
                 ball.stuckTimeMs = 0;
+                ball.stuckKickStreak++;
             }
         } else {
             ball.stuckTimeMs = 0;
+            // The streak only resets once the ball has stayed above the speed threshold
+            // CONTINUOUSLY for as long as the stuck-detection window itself, not just for the one
+            // frame right after a kick (which is always fast) - see this branch's own guard
+            // above. That's what makes escalation actually escalate for a genuinely hard trap
+            // instead of getting wiped back to the base magnitude by the kick's own velocity.
+            ball.stuckRecoveryMs += deltaMs;
+            if (ball.stuckRecoveryMs >= STUCK_TIME_THRESHOLD_MS) {
+                ball.stuckKickStreak = 0;
+            }
         }
     }
 
@@ -1879,7 +2068,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const aggregate = new BABYLON.PhysicsAggregate(
             mesh,
             BABYLON.PhysicsShapeType.BOX,
-            { mass: FLIPPER_MASS_KG, restitution: 0.3, friction: 0.4 },
+            { mass: FLIPPER_MASS_KG, restitution: FLIPPER_RESTITUTION, friction: FLIPPER_FRICTION },
             scene
         );
         // PhysicsAggregate only offers STATIC (mass 0) or DYNAMIC (mass > 0) directly - ANIMATED
@@ -1905,7 +2094,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const minAngleRad = isLeft ? restAngleRad : restAngleRad - FLIPPER_SWEEP_RAD;
         const maxAngleRad = isLeft ? restAngleRad + FLIPPER_SWEEP_RAD : restAngleRad;
 
-        const flipper = { mesh, pivotNode, aggregate, active: false, motorSign, restAngleRad, minAngleRad, maxAngleRad, currentAngleRad: restAngleRad };
+        const flipper = { mesh, pivotNode, aggregate, active: false, motorSign, restAngleRad, minAngleRad, maxAngleRad, currentAngleRad: restAngleRad, angularVelocityRad: 0 };
         setFlipperAngle(flipper, restAngleRad);
         return flipper;
     }
@@ -1966,6 +2155,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // jitter, the same guarantee the active-stop clamp gives the other direction.
     function updateFlipperMotor(flipper, deltaMs) {
         const dt = deltaMs / 1000;
+        const oldAngleRad = flipper.currentAngleRad;
         if (flipper.active) {
             const target = flipper.motorSign > 0 ? flipper.maxAngleRad : flipper.minAngleRad;
             const step = flipper.motorSign * FLIPPER_ACTIVATE_SPEED_RAD_S * dt;
@@ -1980,6 +2170,41 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 setFlipperAngle(flipper, flipper.currentAngleRad + Math.sign(diff) * maxStep);
             }
         }
+        syncFlipperPhysicsVelocity(flipper, oldAngleRad, dt);
+    }
+
+    // Ball<->flipper physics-tuning pass (user-requested): makes the paddle's Havok body carry its
+    // own real motion into contact response, instead of only ever moving its COLLISION SHAPE.
+    // disablePreStep=false (see createFlipper()'s comment) keeps Havok's contact GEOMETRY in sync
+    // with setFlipperAngle()'s transform each step. Also sets the body's own linearVelocity/
+    // angularVelocity to match that same motion (v = omega x r about the pivot, not a hand-picked
+    // vector) - correct rigid-body bookkeeping for a body that IS moving, and what
+    // flipper.angularVelocityRad below is read from. IMPORTANT caveat, confirmed by direct
+    // measurement, not assumed: setting these fields on an ANIMATED (kinematic) Havok body does
+    // NOT, on its own, make that velocity show up in the ball's post-contact velocity - a
+    // fine-grained manual-step playtest (bypassing this sandbox's slow render loop so a full
+    // ~115ms stroke could be sampled many times mid-swing, not completed within one throttled
+    // frame) showed the paddle's OWN linearVelocity.x reaching >0.8 m/s during an active swing
+    // while the ball's vx stayed exactly 0.00000 the entire time - i.e. Havok's kinematic contact
+    // response is purely positional (it pushes the ball out of the way of the paddle's new
+    // position each step) and never reads this body's velocity for the impulse math, contradicting
+    // what "they behave like dynamic bodies... but still push other bodies out of the way" (Babylon's
+    // own ANIMATED doc comment) would suggest. So the REAL, physically-derived momentum transfer
+    // this pass needs lives in applyFlipperContactVelocity() below, applied once per real contact
+    // (COLLISION_STARTED) using this exact same v = omega x r math evaluated at the actual contact
+    // point instead of the paddle's center of mass - this function's job is just keeping
+    // angularVelocityRad (and the body's own velocity fields, for correctness) current for that to
+    // read.
+    function syncFlipperPhysicsVelocity(flipper, oldAngleRad, dt) {
+        const omega = dt > 0 ? (flipper.currentAngleRad - oldAngleRad) / dt : 0;
+        flipper.angularVelocityRad = omega;
+        const omegaVec = new BABYLON.Vector3(0, omega, 0);
+        flipper.aggregate.body.setAngularVelocity(omegaVec);
+
+        const pivotPos = flipper.pivotNode.getAbsolutePosition();
+        const comPos = flipper.mesh.getAbsolutePosition();
+        const r = comPos.subtract(pivotPos);
+        flipper.aggregate.body.setLinearVelocity(BABYLON.Vector3.Cross(omegaVec, r));
     }
 
     function flipperAngleDegrees(flipper) {
@@ -2583,7 +2808,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mesh.position.set(def.x, 0.015, def.z);
             mesh.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20); // angled inward, like a real slingshot kicker
             mesh.material = slingshotMat;
-            new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
+            new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: SLINGSHOT_RESTITUTION, friction: 0.3 }, scene);
 
             // Kicker housing: a triangular-prism wedge (a cylinder with 3-sided tessellation is a
             // cheap way to get a real prism from MeshBuilder) behind the rubber face above,
@@ -3795,6 +4020,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // brightness in createStarfieldTexture() and losing the "sparse bright stars" contrast
         // that texture is deliberately built around.
         glowLayer.addExcludedMesh(skybox);
+        // Backglass readability pass (user-requested - "keep text crisp and avoid excessive
+        // bloom"): same reasoning as the skybox exclusion directly above, applied to the
+        // backglass panel's own DynamicTexture instead. GlowLayer's soft outward blur is tuned
+        // for the game's neon playfield elements (bumpers/lamps/rails), not for small, distant
+        // text that already loses definition from the panel's own tiny on-screen footprint at
+        // real gameplay camera distance (see buildBackglass()'s own comment) - stacking GlowLayer
+        // on top turned already-small glyphs into a soft blur instead of a crisp readout. The
+        // panel is still bright/emissive and still reads as part of the same lit cabinet (its own
+        // colors/contrast do that job now, see buildBackglass()), it just no longer gets the
+        // additional per-mesh glow treatment.
+        glowLayer.addExcludedMesh(backglass.mesh);
 
         // Hoisted to a `let` (not a const declared only inside the if-block) so the dev HUD's
         // "post-processing" checkbox (below, once devMode is confirmed) can toggle
@@ -4110,6 +4346,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         let plungerChargeElapsedMs = 0;
         let plungerPower = PLUNGER_MIN_POWER_MS;
         const statusPlungerCharge = document.getElementById('status-plunger-charge');
+        // Guards triggerLaunchFiredFlash() below against re-entry - not a real-world concern (a
+        // second real fire can't happen until ballInPlay cycles back through resetBallToPlunger(),
+        // which is well past this flash's own short lifetime either way) but cheap to have.
+        let launchFiredFlashActive = false;
 
         // Ported from InputManager.setLaunchReady() in ../index.js - toggles the launch button's
         // idle-pulse affordance (see .launch-btn.ready in index.html) so it only visibly invites
@@ -4129,6 +4369,37 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function setControlsDimmed(dimmed) {
             const controls = document.getElementById('mobile-controls');
             if (controls) controls.classList.toggle('dimmed', dimmed);
+        }
+
+        // Control-feedback polish (user-requested - "distinguish READY/CHARGING/FIRED"): the one
+        // launch-button state that had no visual of its own before this - READY is .ready (see its
+        // own CSS comment) and CHARGING is .pressed with the real chargePercent-scaled glow (see
+        // that rule's own comment), but the instant AFTER a real launch both of those get removed
+        // and nothing replaced them, so a just-fired button looked identical to an idle one with
+        // nothing pending. Same "look the button up fresh" pattern as setLaunchReady()/
+        // setControlsDimmed() above. Called only from handleLaunchRelease() at the exact real
+        // ballInPlay=false->true transition (see its own call site) - never a decorative timer of
+        // its own, so this can't drift out of sync with whether a launch actually happened.
+        function triggerLaunchFiredFlash() {
+            const btn = document.getElementById('launch-btn');
+            if (!btn || launchFiredFlashActive) return;
+            launchFiredFlashActive = true;
+            btn.classList.add('fired');
+            if (window.SPIRITBALL_reducedMotion) {
+                // No 'animationend' will ever fire (index.html's reduced-motion block sets
+                // animation: none on .fired) - hold the static flash look this same CSS rule
+                // defines for a fixed duration instead, so reduced-motion players still get a
+                // clear, if motion-free, "that fired" acknowledgement rather than none at all.
+                setTimeout(() => {
+                    btn.classList.remove('fired');
+                    launchFiredFlashActive = false;
+                }, 260); // matches launch-fired-flash's own animation-duration in index.html
+            } else {
+                btn.addEventListener('animationend', function onLaunchFiredFlashEnd() {
+                    btn.classList.remove('fired');
+                    launchFiredFlashActive = false;
+                }, { once: true });
+            }
         }
 
         function resetBallToPlunger() {
@@ -4207,7 +4478,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Space mid-pause produced backglass.state.message === 'LAUNCH!' while the pause overlay
         // was still showing.
         function handleLaunchRelease() {
-            if (ballInPlay || isPaused) return;
+            // Gameplay-QA regression fix: drainTimeoutHandle !== null means a real drain just
+            // happened but resetBallToPlunger() hasn't run yet (see handleDrain()'s own two
+            // setTimeout branches) - the ball is still wherever it physically landed (mid-fall,
+            // well below the table), not at the plunger. Without this guard, a launch input
+            // landing in that window fired a full "launch" (message/shake/sound/haptic, armed
+            // skill shot/ball save) from that stale sub-table position, which the pending reset
+            // then silently overwrote a few hundred ms later - the player got launch feedback for
+            // a shot that never happened and had to press Launch again. Reproduced deterministically
+            // by qa/regression-suite.js's "CONCRETE BUG" test. Doesn't affect the deliberately
+            // supported "held Space through a drain, released after" case (archive/release-
+            // prompts/13-*.md, see the comment above handleLaunchPress()) - by the time a real
+            // release happens after the reset has actually completed, drainTimeoutHandle is
+            // already back to null.
+            if (ballInPlay || isPaused || drainTimeoutHandle !== null) return;
             if (!plungerCharging) {
                 plungerPower = PLUNGER_MIN_POWER_MS;
             }
@@ -4219,6 +4503,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mainBall.aggregate.body.setLinearVelocity(new BABYLON.Vector3(velocityX, 0, velocityZ));
             mainBall.stuckTimeMs = 0;
             ballInPlay = true;
+            triggerLaunchFiredFlash(); // FIRED state - see its own comment; right at the real fire transition, not before (the guard above can still return early with no fire at all)
             plungerCharging = false;
             plunger.chargePercent = 0;
             launchBtn.style.setProperty('--charge-pct', 0);
@@ -4714,6 +4999,55 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         setScore(0);
         setLives(lives);
 
+        // Restrained score/lives HUD feedback (user-requested - "brief subtle brightness/scale
+        // punch... no long animation... no counting animation delaying true value"). Purely
+        // visual: setScore()/setLives() above already update the real text synchronously - this
+        // only layers a short CSS animation (transform/filter, compositor-only - never a layout
+        // property) on top via a class toggle, so it can never delay or shift the real number.
+        // Coalesced rather than restarted on every call: while a pulse is already playing, a
+        // fresh addScore() (e.g. the rapid end-of-ball bonus count, ticking every
+        // BONUS_COUNT_TICK_MS - far shorter than one pulse's own duration) doesn't restart the
+        // animation from scratch, it can only upgrade an in-flight pulse to the "strong" tier if a
+        // big-enough delta lands mid-pulse. Without this, a 16-tick bonus count would fire 16
+        // back-to-back restarts and read as one continuous flicker/vibration - exactly what "no
+        // distracting continuous animation" (the lives half of this same request) rules out for
+        // the score side too.
+        const HUD_SCORE_PULSE_STRONG_THRESHOLD = 1500; // roughly the line between routine hits (bumpers/targets/combos, 100-1200) and the board's bigger events (Saturn, lane/target-bank clears, Vision Gate, mission bonus, 1500+)
+        let scorePulseActive = false;
+        function pulseScoreHud(delta) {
+            if (window.SPIRITBALL_reducedMotion) return;
+            const strong = delta >= HUD_SCORE_PULSE_STRONG_THRESHOLD;
+            if (scorePulseActive) {
+                if (strong) hudScore.classList.add('hud-pulse-strong');
+                return;
+            }
+            scorePulseActive = true;
+            hudScore.classList.toggle('hud-pulse-strong', strong);
+            hudScore.classList.add('hud-pulse');
+            hudScore.addEventListener('animationend', function onScorePulseEnd() {
+                hudScore.classList.remove('hud-pulse', 'hud-pulse-strong');
+                scorePulseActive = false;
+            }, { once: true });
+        }
+
+        // Lives: single subtle "dip" pulse on loss only (never on the initial setLives(lives) at
+        // startup or startNewGame()'s full reset, both of which call setLives() directly without
+        // going through this) - see its own call site in handleDrain() for why. One-shot and
+        // non-overlapping (a second loss can't happen before this animation's own short duration
+        // elapses anyway, given the drain/reset flow in between), so there's no coalescing logic
+        // to mirror from pulseScoreHud() above.
+        let livesPulseActive = false;
+        function pulseLivesHud() {
+            if (window.SPIRITBALL_reducedMotion) return;
+            if (livesPulseActive) return;
+            livesPulseActive = true;
+            hudLives.classList.add('hud-lives-lost');
+            hudLives.addEventListener('animationend', function onLivesPulseEnd() {
+                hudLives.classList.remove('hud-lives-lost');
+                livesPulseActive = false;
+            }, { once: true });
+        }
+
         // HUD hierarchy audit (UX polish, no new mechanic) - see index.html's #mission-hud/
         // #effects-hud CSS comment for the full design reasoning behind which of this game's
         // existing systems get a persistent-while-relevant spot here. Every value read below
@@ -4769,6 +5103,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             lastScoreDelta = delta;
             lastScoreTotal = score;
             setScore(score);
+            if (delta > 0) pulseScoreHud(delta);
             if (score > backglass.state.highScore) {
                 backglass.state.highScore = score;
                 writeHighScoreToStorage(score); // high-score audit fix - see its own comment; a throwing/unavailable browser keeps the in-memory record for this session without crashing
@@ -5247,21 +5582,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // hitSlingshot() did. That manual angle-based bounce was a workaround for Arcade Physics
         // circles not imparting real force on overlap; real rigid-body contact response in Havok
         // makes it unnecessary, not just redundant - see 04-*.md's flipper implementation note for
-        // the same reasoning applied to flippers. Bumpers are the one deliberate exception: real
-        // pop bumpers actively fire the ball away rather than just reflecting it, so the 'bumper'
-        // branch below adds a real, controlled velocity kick on top of the restitution bounce via
-        // applyBumperKick() - see its comment for how that kick is kept bounded.
-        function applyBumperKick(mesh) {
+        // the same reasoning applied to flippers. Bumpers (and, since the active-obstacle power-
+        // hierarchy pass, Saturn) are the deliberate exception: a real pop bumper actively fires
+        // the ball away rather than just reflecting it, and Saturn is narratively the board's other
+        // "boss" hit, so both the 'bumper' and 'saturn' branches below add a real, controlled
+        // velocity kick on top of the restitution bounce via applyRadialKick() - see its comment
+        // for how that kick is kept bounded, and SPECIAL_EVENT_KICK_SPEED_MS's own comment for why
+        // Saturn didn't have one before this pass.
+        //
+        // Shared by both callers (not two near-duplicate functions) because the underlying math is
+        // identical - only the magnitude differs (BUMPER_KICK_SPEED_MS for a regular bumper,
+        // SPECIAL_EVENT_KICK_SPEED_MS for the boss bumper and Saturn, both passed in by the caller
+        // rather than hardcoded here).
+        function applyRadialKick(mesh, kickSpeed) {
             const body = mainBall.aggregate.body;
             if (!body) return;
 
-            // Horizontal (X/Z) direction from the bumper's center to the ball's current position -
+            // Horizontal (X/Z) direction from the obstacle's center to the ball's current position -
             // "horizontal" deliberately excludes Y so the kick can't launch the ball vertically off
             // the table, just push it away across the playfield the way a real pop bumper does.
             const dx = mainBall.mesh.position.x - mesh.position.x;
             const dz = mainBall.mesh.position.z - mesh.position.z;
             const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-            // Degenerate case (ball reported dead-center over the bumper, horizontally) - no
+            // Degenerate case (ball reported dead-center over the obstacle, horizontally) - no
             // well-defined push direction, so skip the kick rather than divide by ~0. The
             // restitution bounce and normal scoring/feedback still happen either way.
             if (horizontalDist < 1e-4) return;
@@ -5274,16 +5617,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // gentler net result than a square hit at speed, matching how a real pop bumper feels).
             const v = body.getLinearVelocity();
             body.setLinearVelocity(new BABYLON.Vector3(
-                v.x + dirX * BUMPER_KICK_SPEED_MS,
+                v.x + dirX * kickSpeed,
                 v.y,
-                v.z + dirZ * BUMPER_KICK_SPEED_MS
+                v.z + dirZ * kickSpeed
             ));
 
             // Re-clamped through the same ceiling updateBallPhysics() enforces every frame (see
             // clampBodySpeed()'s comment), applied immediately rather than waiting for next frame -
             // this is what actually bounds the kick: no incoming speed, kick magnitude, or run of
-            // repeated bumper hits (each individual bumper is still separately rate-limited by its
-            // own COOLDOWN_BUMPER_MS below) can ever push the ball past MAX_BALL_SPEED_MS.
+            // repeated hits (each individual obstacle is still separately rate-limited by its own
+            // per-kind cooldown below) can ever push the ball past MAX_BALL_SPEED_MS.
             clampBodySpeed(body, MAX_BALL_SPEED_MS);
         }
 
@@ -5320,6 +5663,44 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // Havok's own per-frame contact response isn't touched here, and this kick only fires
             // on the discrete COLLISION_STARTED event through the cooldown gate, not every frame
             // of continued contact.
+            clampBodySpeed(body, MAX_BALL_SPEED_MS);
+        }
+
+        // Ball<->flipper physics-tuning pass (user-requested). Havok's contact response for the
+        // flipper's kinematic (ANIMATED) body turned out to be purely positional - confirmed by
+        // direct playtest measurement, not assumed (see syncFlipperPhysicsVelocity()'s and
+        // FLIPPER_CONTACT_VELOCITY_TRANSFER's own comments for the measurement itself) - so unlike
+        // every other obstacle in this file, a flipper hit needs an explicit velocity contribution
+        // here to carry the paddle's own motion into the ball at all. Still "physically coherent
+        // velocity transfer from paddle motion/contact" (user-requested), not an arbitrary kick:
+        // the direction and magnitude both come from the SAME v = omega x r rigid-body math a
+        // native engine would use, evaluated at the REAL contact point Havok itself reported
+        // (contactPointWorld, from the collision event itself - not the paddle's center of mass),
+        // which is exactly what makes a tip hit (farther from the pivot, larger cross-product
+        // radius) carry more speed than a base hit without a single per-position special case.
+        // omega is naturally zero whenever the flipper isn't actually moving this frame (held at a
+        // stop, resting, or the tail of a return that's about to snap to rest) - so a resting/held
+        // contact adds nothing here and stays governed purely by FLIPPER_RESTITUTION/
+        // FLIPPER_FRICTION's passive bounce, which is what keeps a held flipper from continuously
+        // injecting energy into a ball it's cradling.
+        function applyFlipperContactVelocity(flipper, contactPointWorld) {
+            const body = mainBall.aggregate.body;
+            if (!body || flipper.angularVelocityRad === 0) return;
+
+            const pivotPos = flipper.pivotNode.getAbsolutePosition();
+            const r = contactPointWorld.subtract(pivotPos);
+            const paddleVelocityAtContact = BABYLON.Vector3.Cross(
+                new BABYLON.Vector3(0, flipper.angularVelocityRad, 0), r
+            );
+
+            const v = body.getLinearVelocity();
+            body.setLinearVelocity(v.add(paddleVelocityAtContact.scale(FLIPPER_CONTACT_VELOCITY_TRANSFER)));
+
+            // Same shared safety ceiling every other velocity source respects - see
+            // clampBodySpeed()'s comment. Bounds this regardless of how many times this fires
+            // during one swing - whether that's several genuinely separate touches (a ball
+            // bouncing against the paddle more than once before flying clear) or one sustained
+            // COLLISION_CONTINUED contact reporting on every physics step.
             clampBodySpeed(body, MAX_BALL_SPEED_MS);
         }
 
@@ -5649,7 +6030,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 addScore(points);
                 stats.bumperHits++;
                 recordComboShot('bumper'); // combo scoring (user-requested) - feeds 'TRIPLE BUMPER'
-                applyBumperKick(mesh);
+                applyRadialKick(mesh, meta.boss ? SPECIAL_EVENT_KICK_SPEED_MS : BUMPER_KICK_SPEED_MS);
                 // Feedback bumped slightly (pulse scale, shake, sound volume) above the shared
                 // defaults now that bumpers actively kick the ball - the hit should read as a
                 // touch punchier than a passive bounce, without changing scoring or any other
@@ -5678,10 +6059,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // scoring hit on the board (SCORE_SATURN), with a correspondingly bigger camera
                 // beat than any regular obstacle. Not mission-tied (there's no 4th mission-target
                 // object for it to belong to) - a standalone "boss" bonus, same spirit as the
-                // bumper cluster's own boss bumper above.
+                // bumper cluster's own boss bumper above - including, since the active-obstacle
+                // power-hierarchy pass, the same real velocity kick that boss bumper gets
+                // (applyRadialKick() with SPECIAL_EVENT_KICK_SPEED_MS - see its own comment).
+                // Previously Saturn relied purely on Havok's own restitution bounce, so its
+                // resulting speed scaled with whatever the ball happened to be carrying instead of
+                // reliably reading as the board's biggest hit.
                 setCooldown(mesh, COOLDOWN_SATURN_MS);
                 addScore(SCORE_SATURN);
                 stats.saturnHits++;
+                applyRadialKick(mesh, SPECIAL_EVENT_KICK_SPEED_MS);
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('SATURN! +' + SCORE_SATURN, 1100);
@@ -6040,6 +6427,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
             lives--;
             setLives(lives);
+            pulseLivesHud();
             // BALL SAVE reset (fairness mechanics) - this life is genuinely over now, so the next
             // one gets its own fresh save opportunity (see armBallSave()'s "usedThisLife" gate).
             ballSave.usedThisLife = false;
@@ -6095,8 +6483,26 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         mainBall.aggregate.body.setCollisionCallbackEnabled(true);
         mainBall.aggregate.body.getCollisionObservable().add((event) => {
+            const mesh = event.collidedAgainst.transformNode;
+            // Real momentum transfer for a flipper hit - see applyFlipperContactVelocity()'s own
+            // comment for why this can't just be Havok's native contact response the way every
+            // other obstacle in this file relies on. Listens to COLLISION_CONTINUED too, not just
+            // COLLISION_STARTED: a ball resting on the paddle when it fires stays in unbroken
+            // contact as the paddle accelerates under it (confirmed via playtest - Havok never
+            // reports a fresh COLLISION_STARTED for that whole stroke, only the original at-rest
+            // touch), so a STARTED-only hook would silently miss exactly the "cradled ball gets
+            // thrown" case real pinball relies on. Applied before handlePhysicalHit() purely so the
+            // velocity is already updated by the time any feedback/scoring logic might read it -
+            // handlePhysicalHit() itself is otherwise unchanged (no new branch there, and it's
+            // still called only on COLLISION_STARTED, matching every other obstacle's feedback/
+            // scoring cadence).
+            if ((event.type === 'COLLISION_STARTED' || event.type === 'COLLISION_CONTINUED') &&
+                mesh.metadata && mesh.metadata.kind === 'flipper') {
+                const flipper = mesh === leftFlipper.mesh ? leftFlipper : rightFlipper;
+                applyFlipperContactVelocity(flipper, event.point);
+            }
             if (event.type !== 'COLLISION_STARTED') return;
-            handlePhysicalHit(event.collidedAgainst.transformNode);
+            handlePhysicalHit(mesh);
         });
 
         hk.onTriggerCollisionObservable.add((event) => {
@@ -6537,6 +6943,76 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // adding any visible UI.
             triggerEnterLog = [];
             window.__triggerDebug = { log: triggerEnterLog };
+
+            // Flipper-geometry regression test instrumentation (qa/flipper-geometry.js) - same
+            // "?dev=1-only, read-only, zero impact on a real player" convention as
+            // window.__triggerDebug directly above. Deliberately narrow (just the two flipper
+            // objects plus the two constants needed to derive a tip position) rather than the
+            // broad window.__qaHook the older qa/stabilization-suite.js needs to be temporarily
+            // patched in by hand - this one is small enough to stay permanently in the shipped
+            // file, so the geometry test that reads it never requires a source edit to run. No
+            // setters, no way to mutate gameplay state through it - tipWorldPosition()/
+            // pivotWorldPosition() only ever read flipper.pivotNode's existing transform, the same
+            // pivot-hierarchy math createFlipper()/setFlipperAngle() themselves use, never a
+            // second/competing formula.
+            // mainBall/scene added for the ball<->flipper physics-tuning pass (user-requested) -
+            // same read-only-in-spirit exposure as leftFlipper/rightFlipper above (no new setter
+            // methods; a test harness can still reach into the exposed objects directly, same as
+            // it always could for the flippers, e.g. to stage a scenario's starting position/
+            // velocity before letting Havok's own step run). scene is exposed so a test can hook
+            // scene.onBeforeRenderObservable for per-physics-tick sampling, immune to the render
+            // loop's own throttling under slow/headless rendering.
+            window.__flipperDebug = {
+                leftFlipper, rightFlipper, FLIPPER_SWEEP_RAD, FLIPPER_LENGTH_M, mainBall, scene,
+                isBallInPlay() { return ballInPlay; },
+                // Exposes the SAME per-frame stepping function the real render loop calls every
+                // tick (see engine.runRenderLoop() below) - not a second/competing implementation.
+                // Lets a test drive many small, controlled-deltaMs steps back-to-back (e.g.
+                // alongside scene.getPhysicsEngine()._step()) independent of however fast this
+                // particular device/sandbox can actually render a frame, which matters for
+                // measuring a fast powered stroke: a slow/throttled render loop can complete the
+                // whole ~115ms stroke within a single real frame, leaving no intermediate sample
+                // where the ball can genuinely be caught mid-swing.
+                updateFlipperMotor,
+                // Ball-feel tuning pass (user-requested) - same "expose the real per-frame
+                // function, not a second implementation" rationale as updateFlipperMotor above.
+                // Lets a test exercise the actual MAX_BALL_SPEED_MS clamp / anti-stuck kick path
+                // (updateBallPhysics()) at manual-step speed, alongside scene.getPhysicsEngine().
+                // _step(), instead of only the raw Havok response - needed to confirm the existing
+                // safety systems still engage correctly during this pass's tuning experiments.
+                updateBallPhysics,
+                // Active-obstacle-physics normalization pass (user-requested) - same "expose the
+                // real per-frame function" rationale as the two above. Lets a test drive
+                // hitCooldowns' own real decay (updateHitCooldowns()) at manual-step speed
+                // alongside scene.getPhysicsEngine()._step(), so a controlled comparison of
+                // bumper/slingshot/Saturn/comet kick magnitudes can wait out real per-object
+                // cooldowns between measurements (and deliberately hit within cooldown to confirm
+                // stacking is actually prevented) without needing real wall-clock time to pass in
+                // this sandbox's slow render loop. hitCooldowns itself is exposed read-only
+                // (inspecting Map contents only, no mutation) purely so a test can assert whether
+                // a given mesh is currently gated, the same thing isOnCooldown() itself checks.
+                updateHitCooldowns, hitCooldowns,
+                // Backglass readability pass (user-requested) - same "expose the real object, not
+                // a second implementation" rationale as everything above. Lets a test drive
+                // backglass.state directly (mission/multiplier/bonus/message) and call its own
+                // real redraw()/showMessage() to inspect the actual rendered DynamicTexture output
+                // for every tier/combination without needing to play through the real, much
+                // slower mission-select/powerup/lane-bank flows that would otherwise be required
+                // to reach each state at least once.
+                backglass,
+                pivotWorldPosition(flipper) {
+                    return flipper.pivotNode.getAbsolutePosition().clone();
+                },
+                tipWorldPosition(flipper) {
+                    // Tip, in the pivot's own local space: the inner edge sits at local (0,0,0)
+                    // (exactly on the pivot - see createFlipper()'s own comment), so the outer tip
+                    // sits one full FLIPPER_LENGTH_M further out along local +X.
+                    return BABYLON.Vector3.TransformCoordinates(
+                        new BABYLON.Vector3(FLIPPER_LENGTH_M, 0, 0),
+                        flipper.pivotNode.getWorldMatrix()
+                    );
+                }
+            };
 
             const statusFps = document.getElementById('status-fps');
             const statusFrameTime = document.getElementById('status-frame-time');
