@@ -98,6 +98,43 @@ export const GRAVITY_VECTOR_FN = () => new BABYLON.Vector3(
 export const BALL_DIAMETER_M = 0.027;
 export const BALL_MASS_KG = 0.08;
 
+// Ball-feel tuning pass (user-requested - "playtest and tune SPIRITBALL's general ball feel").
+// Previously inline literals (restitution: 0.65, friction: 0.35) in createBall()'s
+// PhysicsAggregate call; pulled out here, same "one place to retune" reasoning as the flipper
+// pass's FLIPPER_RESTITUTION/FLIPPER_FRICTION.
+//
+// BALL_FRICTION was the single root cause behind a demonstrated, reproducible bug: a ball at
+// rest in open, level playfield (away from any obstacle) would accelerate downhill correctly for
+// a moment, then STOP DEAD and stay frozen indefinitely (confirmed via direct Playwright physics-
+// step measurement - zero velocity for 400+ ms straight, well past this table's own
+// STUCK_TIME_THRESHOLD_MS, meaning it would only ever move again via the anti-stuck kick, not
+// real gameplay physics). Root cause, not a guess: on a level surface tilted at
+// TABLE_TILT_DEGREES (6.5 deg, see its own comment), a ball held by static friction stays put
+// whenever friction exceeds tan(tilt) ~= 0.114 - gravity's own tiny tangential pull (~0.089N for
+// this ball's mass) simply can't overcome max static friction (~0.35 * that same normal force)
+// once mu is that high. The old 0.35 was nearly 3x over that threshold. Confirmed via Havok's own
+// vendored source (PhysicsShape.setMaterial()'s default frictionCombine = MINIMUM) that the ball's
+// own friction value alone governs every ball<->surface pairing where it's the lower of the two
+// (true for every surface in this file except the flipper's own passive FLIPPER_FRICTION, which
+// is lower still) - so this one constant was the actual lever, not PLAYFIELD_FRICTION.
+// 0.08 sits comfortably below tan(6.5 deg) with margin for floating-point settling, low enough
+// that gravity always wins on open playfield (matching a real polished-steel-ball-on-waxed-wood
+// pinball table, whose real kinetic friction is much lower than either old value), while still
+// high enough to develop real rolling-without-slipping (not an ice rink) and to let the ball
+// settle normally in an actual pocket/corner where geometry, not friction alone, holds it.
+//
+// BALL_RESTITUTION: Havok's default restitutionCombine is MAXIMUM (same vendored-source check),
+// meaning the ball's OWN restitution was the effective FLOOR for every surface it touches,
+// including the flat playfield (playfield's own 0.2 was being overridden up to the ball's 0.65
+// on every contact) - part of why a resting/settling ball could still be seen doing several
+// bounce-and-correct cycles before friction let it lie still. Lowered from 0.65 to 0.35 - still a
+// genuinely bouncy ball off walls/rails (whose own restitution, 0.3-0.5, mostly governs those
+// contacts once the floor isn't artificially raising the baseline), but no longer forces every
+// softer surface (playfield 0.2, bumpers/comet/saturn already have their OWN much higher values
+// and are unaffected either way) up to a superball-like bounce it never asked for.
+export const BALL_RESTITUTION = 0.35;
+export const BALL_FRICTION = 0.08;
+
 // Converted from CONFIG.ballMaxVelocity: 1800 (px/s) in ../index.js, using the same PX_TO_M
 // scale as everything else - the primary defense against tunneling/instability, same spirit
 // as the old Arcade Physics safety net. See archive/release-prompts/13-*.md for the original
