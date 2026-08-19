@@ -4478,7 +4478,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Space mid-pause produced backglass.state.message === 'LAUNCH!' while the pause overlay
         // was still showing.
         function handleLaunchRelease() {
-            if (ballInPlay || isPaused) return;
+            // Gameplay-QA regression fix: drainTimeoutHandle !== null means a real drain just
+            // happened but resetBallToPlunger() hasn't run yet (see handleDrain()'s own two
+            // setTimeout branches) - the ball is still wherever it physically landed (mid-fall,
+            // well below the table), not at the plunger. Without this guard, a launch input
+            // landing in that window fired a full "launch" (message/shake/sound/haptic, armed
+            // skill shot/ball save) from that stale sub-table position, which the pending reset
+            // then silently overwrote a few hundred ms later - the player got launch feedback for
+            // a shot that never happened and had to press Launch again. Reproduced deterministically
+            // by qa/regression-suite.js's "CONCRETE BUG" test. Doesn't affect the deliberately
+            // supported "held Space through a drain, released after" case (archive/release-
+            // prompts/13-*.md, see the comment above handleLaunchPress()) - by the time a real
+            // release happens after the reset has actually completed, drainTimeoutHandle is
+            // already back to null.
+            if (ballInPlay || isPaused || drainTimeoutHandle !== null) return;
             if (!plungerCharging) {
                 plungerPower = PLUNGER_MIN_POWER_MS;
             }
