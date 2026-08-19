@@ -3544,7 +3544,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // game's fixed camera angle (confirmed via screenshot). Flipped to the far side of the
         // gate instead (+ offset, away from the crowded bumper cluster) and lifted, so it reads
         // clearly against open playfield the way visionGateBeacon already does against open sky.
-        const visionGateLabel = createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x, VISION_GATE_POS.z + 0.035, '#cc66ff');
+        //
+        // Game-feel review follow-up: that fix's own +Z offset (toward Saturn's own end of the
+        // table) landed the label well inside Saturn's ring radius (SATURN_RADIUS_M*3.5/2 =
+        // 0.079m, vs. the ~0.05m this put between them) - confirmed via screenshot, the leading
+        // "V" was occluded by the ring the same way the bumper cap used to occlude it. Both
+        // Saturn and the bumper cluster sit near the table's own centerline (x~=0); pushing the
+        // label sideways (+X, away from centerline) instead of fore/aft clears both without
+        // reopening the original bumper-cap problem this same line already solved once.
+        const visionGateLabel = createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x + 0.05, VISION_GATE_POS.z, '#cc66ff');
         visionGateLabel.position.y = 0.045;
 
         // 8. Physical backing around the backglass - a frame border plus a receding cabinet
