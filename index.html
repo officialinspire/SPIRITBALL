@@ -52,43 +52,104 @@
            button's own footprint (its right offset + 44px width + an 8px gap) so the two can
            never collide, and picks up safe-area-inset-top for parity with every other fixed
            corner element on this page (it was the one exception still using a bare pixel value). */
+        /* Readability pass (user-requested - "stronger arcade scoreboard", score must be
+           immediately readable during fast gameplay): rebuilt as a label-over-value scoreboard
+           instead of the old inline "Score123"/"Lives3" pairs, which put an unstyled label
+           directly beside a same-size value with nothing to separate them at a glance. Score
+           and lives are now two distinct blocks (a vertical divider between them) so the eye
+           reads "one big number, one small number" instantly rather than parsing four short
+           label/value pairs of similar visual weight.
+           Contrast against a bright, moving playfield behind it needed a darker, more opaque
+           panel than before (0.55 -> 0.82 alpha) plus a grounding drop shadow - relying on the
+           border glow alone to separate the panel from a lit-up table wasn't enough.
+           Glow policy: the panel border/label keep this page's existing cosmic-neon glow
+           (text-shadow blur unchanged in kind), but the digits themselves (#hud-score/#hud-lives)
+           use a much tighter 1-2px shadow, not the old 6px bloom - legible crisp digits at speed
+           matter more here than the neon look, and a heavy blur on the one thing that has to be
+           read fast (the score) was working against that. */
         #player-hud {
             position: fixed;
             top: max(12px, env(safe-area-inset-top));
             right: calc(max(16px, env(safe-area-inset-right)) + 44px + 8px);
             z-index: 10;
             display: flex;
-            gap: 16px;
-            background: rgba(10, 0, 25, 0.55);
-            border: 1px solid rgba(0, 255, 255, 0.4);
-            border-radius: 8px;
-            padding: 6px 14px;
+            align-items: stretch;
+            gap: 12px;
+            background: rgba(8, 0, 20, 0.82);
+            border: 1px solid rgba(0, 255, 255, 0.55);
+            border-radius: 10px;
+            padding: 6px 14px 7px;
+            box-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
             color: #00ffff;
-            font-size: 14px;
-            line-height: 1.4;
-            text-shadow: 0 0 6px rgba(0, 255, 255, 0.6);
+            /* Fixed max-width room for an 8-digit score at the largest step below, so the panel's
+               footprint (and therefore its distance from #pause-btn/#effects-hud) doesn't shift
+               as the score grows more digits mid-game. */
+        }
+
+        #player-hud .hud-block {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 0;
+        }
+
+        #player-hud .hud-divider {
+            align-self: stretch;
+            width: 1px;
+            background: rgba(0, 255, 255, 0.3);
         }
 
         #player-hud .hud-label {
-            color: #888;
-            font-size: 10px;
+            color: rgba(150, 245, 255, 0.75);
             display: block;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.1em;
+            text-shadow: none;
         }
 
         #player-hud .hud-value {
-            font-weight: bold;
+            display: block;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: 'tnum' 1;
+            letter-spacing: 0.02em;
+            line-height: 1.05;
+        }
+
+        #player-hud #hud-score-block .hud-label { font-size: 10px; margin-bottom: 1px; }
+        #player-hud #hud-score {
+            font-size: 30px;
+            color: #eafeff;
+            text-shadow: 0 0 2px rgba(0, 255, 255, 0.7);
+        }
+
+        #player-hud #hud-lives-block { align-items: flex-start; }
+        #player-hud #hud-lives-block .hud-label { font-size: 9px; margin-bottom: 1px; }
+        #player-hud #hud-lives {
+            font-size: 18px;
+            color: #7dfff0;
+            text-shadow: 0 0 2px rgba(0, 255, 204, 0.7);
         }
 
         @media (max-width: 480px) {
             #player-hud {
                 top: max(8px, env(safe-area-inset-top));
                 right: calc(max(16px, env(safe-area-inset-right)) + 40px + 6px);
-                padding: 5px 10px;
-                font-size: 12px;
-                gap: 10px;
+                padding: 5px 10px 6px;
+                gap: 9px;
             }
+            #player-hud #hud-score-block .hud-label { font-size: 9px; }
+            #player-hud #hud-score { font-size: 23px; }
+            #player-hud #hud-lives-block .hud-label { font-size: 8px; }
+            #player-hud #hud-lives { font-size: 15px; }
+        }
+
+        /* Narrowest phones (iPhone SE/320px and similar) - one more step down so an 8-digit
+           score still fits without wrapping or crowding the divider/lives block. */
+        @media (max-width: 340px) {
+            #player-hud { gap: 7px; padding: 5px 8px 6px; }
+            #player-hud #hud-score { font-size: 19px; }
+            #player-hud #hud-lives { font-size: 13px; }
         }
 
         /* HUD hierarchy audit (UX polish, no new mechanic) - which of this game's existing
@@ -934,8 +995,9 @@
          the user is doing; aria-atomic="true" so the whole "Score 1500" line reads together
          instead of just a bare, contextless number when only the value span's text changes. -->
     <div id="player-hud">
-        <div role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Score</span><span class="hud-value" id="hud-score">0</span></div>
-        <div role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Lives</span><span class="hud-value" id="hud-lives">3</span></div>
+        <div class="hud-block" id="hud-score-block" role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Score</span><span class="hud-value" id="hud-score">0</span></div>
+        <div class="hud-divider" aria-hidden="true"></div>
+        <div class="hud-block" id="hud-lives-block" role="status" aria-live="polite" aria-atomic="true"><span class="hud-label">Balls</span><span class="hud-value" id="hud-lives">3</span></div>
     </div>
 
     <!-- HUD hierarchy audit - see #mission-hud/#effects-hud's own CSS comment above for the full
