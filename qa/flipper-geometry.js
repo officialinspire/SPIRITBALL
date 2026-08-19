@@ -188,14 +188,17 @@ async function readGeometry(page) {
     Math.abs(leftFired.left.tip.y - rightFired.right.tip.y) < EPS_M && Math.abs(leftFired.left.tip.z - rightFired.right.tip.z) < EPS_M,
     { leftTip: leftFired.left.tip, rightTip: rightFired.right.tip });
 
-  // --- rest tips are down/outward. "Down" here means toward the camera/drain end of the table
+  // --- rest tips are down/inward. "Down" here means toward the camera/drain end of the table
   // (smaller world Z - see FLIPPER_Z_M's own comment: negative Z is the near-camera end), NOT
   // world-vertical Y (a flipper's Y never changes at all - see the pivot-displacement check
-  // above - rotation is purely about the Y axis). "Outward" means further from the table's own
-  // centerline (X=0) than the pivot, on the same side as that flipper's own half. ---
-  check('rest: LEFT tip is outward of its own pivot (more negative X)', rest.left.tip.x < rest.left.pivot.x - EPS_M,
+  // above - rotation is purely about the Y axis). "Inward" means past the table's own centerline
+  // (X=0) from the pivot, toward the OTHER flipper's half - the side-swap pass (user-requested:
+  // "left flipper at rest pointing down and to the right/inner... right flipper... down and to
+  // the left/inner") deliberately made this the new correct rest pose, opposite the previous
+  // down/outward convention this check used to assert. ---
+  check('rest: LEFT tip is inward of its own pivot (more positive X, past centerline)', rest.left.tip.x > rest.left.pivot.x + EPS_M,
     { tipX: rest.left.tip.x, pivotX: rest.left.pivot.x });
-  check('rest: RIGHT tip is outward of its own pivot (more positive X)', rest.right.tip.x > rest.right.pivot.x + EPS_M,
+  check('rest: RIGHT tip is inward of its own pivot (more negative X, past centerline)', rest.right.tip.x < rest.right.pivot.x - EPS_M,
     { tipX: rest.right.tip.x, pivotX: rest.right.pivot.x });
   check('rest: LEFT tip is toward the camera/drain end (smaller Z than its pivot)', rest.left.tip.z < rest.left.pivot.z - EPS_M,
     { tipZ: rest.left.tip.z, pivotZ: rest.left.pivot.z });

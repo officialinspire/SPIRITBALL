@@ -4179,15 +4179,30 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         flipperMat.roughness = 0.4;
         flipperMat.emissiveColor = COLOR_FLIPPER.scale(0.5);
 
+        // Side-swap (user-requested, confirmed via explicit rest/fired geometry description):
+        // the two mirrored motion implementations (isLeft true/false - see createFlipper()'s own
+        // "Rest angle and mirroring" comment for what that flag actually controls: restAngleRad/
+        // motorSign/min-max angle, nothing about position) are now assigned to the OPPOSITE pivot
+        // from before, while the pivot positions themselves (and which JS variable/input controls
+        // which one) are untouched. Concretely: the paddle whose pivot sits at -FLIPPER_GAP_HALF_M
+        // (screen-left, still bound to ArrowLeft/touch-left below) now rests pointing down-and-
+        // inward (toward center) and fires up-and-inward, instead of the previous down-and-
+        // outward/up-and-inward - confirmed via Playwright screenshot against the requested rest/
+        // left-fired/right-fired/both-fired sequence. FLIPPER_LEFT_REST_RAD/FLIPPER_RIGHT_REST_RAD
+        // keep their exact existing values (not touched/redesigned) - only which pivot each one is
+        // assigned to changed. Every other parameter createFlipper() reads (FLIPPER_SWEEP_RAD via
+        // min/maxAngleRad, FLIPPER_ACTIVATE_SPEED_RAD_S/FLIPPER_RETURN_SPEED_RAD_S in
+        // updateFlipperMotor(), the physics aggregate/restitution/friction, syncFlipperPhysicsVelocity)
+        // is completely unaffected by this flag.
         const leftFlipper = createFlipper(
             scene, 'leftFlipper',
             new BABYLON.Vector3(-FLIPPER_GAP_HALF_M, FLIPPER_HEIGHT_M / 2, FLIPPER_Z_M),
-            true, flipperMat
+            false, flipperMat
         );
         const rightFlipper = createFlipper(
             scene, 'rightFlipper',
             new BABYLON.Vector3(FLIPPER_GAP_HALF_M, FLIPPER_HEIGHT_M / 2, FLIPPER_Z_M),
-            false, flipperMat
+            true, flipperMat
         );
         // Desktop controls: LEFT/RIGHT arrows, matching the existing 2D game's control scheme
         // (archive/release-prompts/14-*.md documents the equivalent touch controls for mobile, which get
