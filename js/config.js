@@ -233,11 +233,28 @@ export const STUCK_KICK_ESCALATION_MAX = 3; // caps escalation at 3x the base ma
 // --- Flippers ---
 // Real-world pinball flipper proportions, used directly since this table is already built
 // at real-world scale (no pixel conversion needed for genuinely new elements like this).
-export const FLIPPER_LENGTH_M = 0.075;
+//
+// MOUNTING LAYOUT (final, real-machine convention - the root cause of every "flippers feel
+// backwards" report, diagnosed and fixed for good): a real machine hinges each flipper at the
+// OUTER end - at the base of its inlane guide - with the bat extending INWARD toward the
+// centerline, the two tips leaving a ball-sized drain gap in the middle. This table originally
+// had that mirrored: hinges near the centerline (x = +/-0.045) with bats extending OUTWARD
+// toward the walls. All the motion logic was internally consistent, which is why every earlier
+// angle/sweep-focused fix "passed its tests" yet still looked wrong - the bats were mounted
+// backwards, not moving wrongly. The fix is the mounting, not the motion:
+//   - FLIPPER_PIVOT_X_M places each hinge just inboard of its inlane guide's delivery end
+//     (INLANE_GUIDE_BOTTOM_X_M = 0.125, same 0.008m clearance the old outward tip kept), so a
+//     ball rolling out of the inlane lands on the bat exactly like a real machine.
+//   - FLIPPER_LENGTH_M is sized so the bat spans from that outer hinge toward center: rest
+//     reach is L*cos(25 deg) ~= 0.0997m, putting the rest tips at x ~= +/-0.017 - a 0.035m
+//     center drain gap, ~1.3 ball diameters (BALL_DIAMETER_M = 0.027), the classic "ball can
+//     drain between idle flippers, flip to stop it" geometry.
+export const FLIPPER_LENGTH_M = 0.11;
 export const FLIPPER_THICKNESS_M = 0.014;
 export const FLIPPER_HEIGHT_M = 0.012;
 export const FLIPPER_MASS_KG = 0.03;
-export const FLIPPER_GAP_HALF_M = 0.045; // each pivot sits this far from table center X=0
+export const FLIPPER_PIVOT_X_M = 0.117; // each hinge sits this far from table center X=0 - see MOUNTING LAYOUT above
+export const FLIPPER_GAP_HALF_M = 0.045; // legacy layout datum - no longer the pivot X (see FLIPPER_PIVOT_X_M); still positions the decorative outer guide fins in babylon-game.js
 export const FLIPPER_Z_M = -0.36; // near the flipper/near-camera end of the table
 export const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s comment - avoids flipper/playfield contact fighting the LOCKED constraint
 
@@ -257,8 +274,8 @@ export const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s com
 // the (cos angle, +sin angle) the position code assumed. Verified directly against the
 // vendored engine (BABYLON.Vector3.TransformNormal through the real rotation matrix), and by
 // replaying the exact old position formula: at this file's own rest angles the paddle's
-// "pivot" end actually drifted up to 68mm from the real fixed pivot (FLIPPER_LENGTH_M is only
-// 75mm) - i.e. the flipper wasn't hinging at all, it was sliding through an arc that only
+// "pivot" end actually drifted up to 68mm from the real fixed pivot (the flipper was only
+// 75mm long at the time) - i.e. the flipper wasn't hinging at all, it was sliding through an arc that only
 // coincidentally passed through the intended pivot at angle=0. Every earlier fix (rest-angle
 // sign flips, mirroring swaps, and above all the 160-degree sweep - nearly 2.5x a real
 // flipper's throw) was blind trial-and-error against that drift, not a fix for it.
@@ -284,12 +301,17 @@ export const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s com
 // tilted 40 degrees above that same line, 65 degrees apart - keeps both ends genuinely diagonal
 // (rest: outward-dominant with a real downward lean; active: still net-outward but visibly
 // LESS outward than rest, and strongly upward) while landing squarely in a real 50-70 degree
-// mechanical stroke. Confirmed numerically against the actual pivot-hierarchy transform (not by
-// eye): LEFT rest tip sits 68mm outward/32mm down from its pivot; LEFT active tip sits 58mm
-// outward/48mm up - clearly up, clearly closer to center than rest, clearly still a diagonal
-// paddle silhouette at both ends. RIGHT is the exact mirror (RIGHT_REST = 180 - LEFT_REST, same
-// relationship this file used before) - verified as an exact x-sign-flip of every LEFT number,
-// same z values.
+// mechanical stroke. The original numeric verification (68mm/58mm tip reach) was measured at
+// the then-current 75mm bat length; the reach scales directly with FLIPPER_LENGTH_M and the
+// angles themselves are unchanged.
+//
+// SIDE-SWAP NOTE (see the MOUNTING LAYOUT comment at the top of this section for the full
+// story): these two profiles keep their exact original values, but which PIVOT each one is
+// assigned to was deliberately swapped at the createFlipper() call sites in babylon-game.js -
+// the 25-degree profile (tip extending toward +X) is what a LEFT-hinged, inward-pointing bat
+// needs, and the 155-degree profile (tip toward -X) is what the RIGHT hinge needs. The names
+// below are kept for their git history; read them as "the profile originally authored for that
+// side's outward-pointing bat", not "the profile the left/right pivot currently uses".
 export const FLIPPER_SWEEP_RAD = (65 * Math.PI) / 180;
 export const FLIPPER_LEFT_REST_RAD = (155 * Math.PI) / 180;
 export const FLIPPER_RIGHT_REST_RAD = (25 * Math.PI) / 180;

@@ -69,7 +69,7 @@ import {
     STUCK_TIME_THRESHOLD_MS, STUCK_KICK_CENTERWARD_MS, STUCK_KICK_DOWNHILL_MS, STUCK_KICK_UP_MS,
     STUCK_KICK_ESCALATION_STEP, STUCK_KICK_ESCALATION_MAX,
     FLIPPER_LENGTH_M, FLIPPER_THICKNESS_M, FLIPPER_HEIGHT_M, FLIPPER_MASS_KG,
-    FLIPPER_GAP_HALF_M, FLIPPER_Z_M, FLIPPER_PLAYFIELD_CLEARANCE_M, FLIPPER_SWEEP_RAD,
+    FLIPPER_GAP_HALF_M, FLIPPER_PIVOT_X_M, FLIPPER_Z_M, FLIPPER_PLAYFIELD_CLEARANCE_M, FLIPPER_SWEEP_RAD,
     FLIPPER_LEFT_REST_RAD, FLIPPER_RIGHT_REST_RAD, FLIPPER_ACTIVATE_SPEED_RAD_S, FLIPPER_RETURN_SPEED_RAD_S,
     FLIPPER_RESTITUTION, FLIPPER_FRICTION, FLIPPER_CONTACT_VELOCITY_TRANSFER,
     BUMPER_RADIUS_M, BUMPER_CLUSTER, BUMPER_KICK_SPEED_MS, SPECIAL_EVENT_KICK_SPEED_MS, TARGET_RADIUS_M,
@@ -3499,7 +3499,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 height: 0.002,
                 tessellation: 10
             }, scene);
-            insert.position.set(mirror * FLIPPER_GAP_HALF_M, 0.002, FLIPPER_Z_M + 0.02);
+            // Tracks the real hinge (FLIPPER_PIVOT_X_M), not the legacy FLIPPER_GAP_HALF_M datum -
+            // this rule's own comment says "at each flipper's base", and the base moved outboard
+            // with the real-machine mounting fix; left at the old value these two lamps would sit
+            // stranded in the middle of the center drain gap instead.
+            insert.position.set(mirror * FLIPPER_PIVOT_X_M, 0.002, FLIPPER_Z_M + 0.02);
             insert.material = insertMat;
         });
 
@@ -4179,29 +4183,30 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         flipperMat.roughness = 0.4;
         flipperMat.emissiveColor = COLOR_FLIPPER.scale(0.5);
 
-        // Side-swap (user-requested, confirmed via explicit rest/fired geometry description):
-        // the two mirrored motion implementations (isLeft true/false - see createFlipper()'s own
-        // "Rest angle and mirroring" comment for what that flag actually controls: restAngleRad/
-        // motorSign/min-max angle, nothing about position) are now assigned to the OPPOSITE pivot
-        // from before, while the pivot positions themselves (and which JS variable/input controls
-        // which one) are untouched. Concretely: the paddle whose pivot sits at -FLIPPER_GAP_HALF_M
-        // (screen-left, still bound to ArrowLeft/touch-left below) now rests pointing down-and-
-        // inward (toward center) and fires up-and-inward, instead of the previous down-and-
-        // outward/up-and-inward - confirmed via Playwright screenshot against the requested rest/
-        // left-fired/right-fired/both-fired sequence. FLIPPER_LEFT_REST_RAD/FLIPPER_RIGHT_REST_RAD
-        // keep their exact existing values (not touched/redesigned) - only which pivot each one is
-        // assigned to changed. Every other parameter createFlipper() reads (FLIPPER_SWEEP_RAD via
-        // min/maxAngleRad, FLIPPER_ACTIVATE_SPEED_RAD_S/FLIPPER_RETURN_SPEED_RAD_S in
-        // updateFlipperMotor(), the physics aggregate/restitution/friction, syncFlipperPhysicsVelocity)
-        // is completely unaffected by this flag.
+        // REAL-MACHINE FLIPPER MOUNTING - see FLIPPER_PIVOT_X_M's "MOUNTING LAYOUT" comment in
+        // config.js for the full root-cause story of why the flippers kept "feeling backwards"
+        // no matter how the angles were adjusted. Summary: each hinge now sits at the OUTER end
+        // (x = +/-FLIPPER_PIVOT_X_M, just inboard of its inlane guide's delivery point) with the
+        // bat extending INWARD toward the centerline, tips leaving a ~1.3-ball drain gap at
+        // center - the standard layout of every real machine. Previously the hinges sat near the
+        // centerline with the bats extending outward (a mirror image), which is why every
+        // motion-logic fix "passed" yet still looked wrong.
+        //
+        // The isLeft flag controls ONLY the angle/motor-sign profile (see createFlipper()'s
+        // "Rest angle and mirroring" comment), and the assignment is deliberately crossed: the
+        // 25-degree profile (isLeft=false, tip extending toward +X, sweeping up as the angle
+        // DECREASES) is exactly what a LEFT-hinged inward-pointing bat needs, and vice versa -
+        // see FLIPPER_LEFT_REST_RAD's own SIDE-SWAP NOTE in config.js. Control mapping is
+        // unchanged and verified: ArrowLeft/touch-left drives leftFlipper (the physical paddle
+        // on the player's left), ArrowRight/touch-right the one on the right.
         const leftFlipper = createFlipper(
             scene, 'leftFlipper',
-            new BABYLON.Vector3(-FLIPPER_GAP_HALF_M, FLIPPER_HEIGHT_M / 2, FLIPPER_Z_M),
+            new BABYLON.Vector3(-FLIPPER_PIVOT_X_M, FLIPPER_HEIGHT_M / 2, FLIPPER_Z_M),
             false, flipperMat
         );
         const rightFlipper = createFlipper(
             scene, 'rightFlipper',
-            new BABYLON.Vector3(FLIPPER_GAP_HALF_M, FLIPPER_HEIGHT_M / 2, FLIPPER_Z_M),
+            new BABYLON.Vector3(FLIPPER_PIVOT_X_M, FLIPPER_HEIGHT_M / 2, FLIPPER_Z_M),
             true, flipperMat
         );
         // Desktop controls: LEFT/RIGHT arrows, matching the existing 2D game's control scheme
@@ -4352,7 +4357,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // rests on the paddle plausibly, and (combined with holding LEFT arrow) that activating
         // sends it somewhere sensible.
         flipperDropBtn.addEventListener('click', () => {
-            mainBall.mesh.position.set(-FLIPPER_GAP_HALF_M, 0.08, FLIPPER_Z_M + 0.03);
+            // Mid-bat, not the hinge: with the real-machine mounting (hinge outboard at
+            // FLIPPER_PIVOT_X_M, bat extending inward - see its own comment in config.js) a drop
+            // at the hinge itself lands on the pivot end where a flip barely moves the ball.
+            // 0.6 of the way out is the sweet spot a player actually aims for.
+            mainBall.mesh.position.set(-FLIPPER_PIVOT_X_M * 0.4, 0.08, FLIPPER_Z_M - 0.02);
             mainBall.aggregate.body.setLinearVelocity(BABYLON.Vector3.Zero());
             mainBall.stuckTimeMs = 0;
         });
