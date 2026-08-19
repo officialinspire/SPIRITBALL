@@ -152,6 +152,43 @@
             #player-hud #hud-lives { font-size: 13px; }
         }
 
+        /* Restrained score/lives HUD feedback (user-requested - "brief subtle brightness/scale
+           punch... no long animation... large scoring events may have slightly stronger
+           feedback" for score; "subtle pulse when lost, no distracting continuous animation" for
+           lives). See pulseScoreHud()/pulseLivesHud() in babylon-game.js for exactly when these
+           classes get toggled (score: every real addScore(), coalesced so a rapid burst like the
+           end-of-ball bonus count can't restart/stack into a flicker; lives: only on an actual
+           life lost, never on the startup/new-game resets that also call setLives()). transform/
+           filter only, deliberately never a layout-affecting property (width/height/margin/
+           padding) - a pulse can never shift #player-hud's own footprint or push a neighboring
+           element, and it never touches the text content itself, so the true score/lives value is
+           always already on screen the instant these start playing, not delayed by them. Score's
+           "strong" tier (bigger board events) scales up further AND runs a touch longer than the
+           routine tier - both still short. Lives pulses inward/dims instead of growing, so a loss
+           reads as visually distinct from a score gain rather than reusing the same "up" motion. */
+        @keyframes hud-score-pulse {
+            0% { transform: scale(1); filter: brightness(1); }
+            30% { transform: scale(1.08); filter: brightness(1.4); }
+            100% { transform: scale(1); filter: brightness(1); }
+        }
+
+        @keyframes hud-score-pulse-strong {
+            0% { transform: scale(1); filter: brightness(1); }
+            28% { transform: scale(1.16); filter: brightness(1.7); }
+            100% { transform: scale(1); filter: brightness(1); }
+        }
+
+        #player-hud #hud-score.hud-pulse { animation: hud-score-pulse 180ms ease-out; }
+        #player-hud #hud-score.hud-pulse-strong { animation: hud-score-pulse-strong 240ms ease-out; }
+
+        @keyframes hud-lives-lost-pulse {
+            0% { transform: scale(1); filter: brightness(1); }
+            35% { transform: scale(0.88); filter: brightness(0.65) saturate(1.5); }
+            100% { transform: scale(1); filter: brightness(1); }
+        }
+
+        #player-hud #hud-lives.hud-lives-lost { animation: hud-lives-lost-pulse 320ms ease-out; }
+
         /* HUD hierarchy audit (UX polish, no new mechanic) - which of this game's existing
            systems (mission/rank/temp score multiplier/bonus multiplier/ball save/kickback/skill
            shot/combo) are worth a guaranteed-legible spot outside the 3D backglass, without
@@ -966,6 +1003,14 @@
             .launch-btn.ready { animation: none; }
             .rotate-icon { animation: none; }
             .screen-overlay .pulse-text, #loading-panel h1 { animation: none; }
+            /* Belt-and-suspenders alongside pulseScoreHud()/pulseLivesHud()'s own
+               window.SPIRITBALL_reducedMotion check (babylon-game.js) - those already skip adding
+               the class at all, but this guarantees the same outcome even if a class somehow ends
+               up applied (e.g. mid-transition when the setting changes), consistent with every
+               other animation in this block. */
+            #player-hud #hud-score.hud-pulse,
+            #player-hud #hud-score.hud-pulse-strong,
+            #player-hud #hud-lives.hud-lives-lost { animation: none; }
         }
     </style>
 

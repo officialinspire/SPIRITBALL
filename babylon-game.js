@@ -4813,6 +4813,55 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         setScore(0);
         setLives(lives);
 
+        // Restrained score/lives HUD feedback (user-requested - "brief subtle brightness/scale
+        // punch... no long animation... no counting animation delaying true value"). Purely
+        // visual: setScore()/setLives() above already update the real text synchronously - this
+        // only layers a short CSS animation (transform/filter, compositor-only - never a layout
+        // property) on top via a class toggle, so it can never delay or shift the real number.
+        // Coalesced rather than restarted on every call: while a pulse is already playing, a
+        // fresh addScore() (e.g. the rapid end-of-ball bonus count, ticking every
+        // BONUS_COUNT_TICK_MS - far shorter than one pulse's own duration) doesn't restart the
+        // animation from scratch, it can only upgrade an in-flight pulse to the "strong" tier if a
+        // big-enough delta lands mid-pulse. Without this, a 16-tick bonus count would fire 16
+        // back-to-back restarts and read as one continuous flicker/vibration - exactly what "no
+        // distracting continuous animation" (the lives half of this same request) rules out for
+        // the score side too.
+        const HUD_SCORE_PULSE_STRONG_THRESHOLD = 1500; // roughly the line between routine hits (bumpers/targets/combos, 100-1200) and the board's bigger events (Saturn, lane/target-bank clears, Vision Gate, mission bonus, 1500+)
+        let scorePulseActive = false;
+        function pulseScoreHud(delta) {
+            if (window.SPIRITBALL_reducedMotion) return;
+            const strong = delta >= HUD_SCORE_PULSE_STRONG_THRESHOLD;
+            if (scorePulseActive) {
+                if (strong) hudScore.classList.add('hud-pulse-strong');
+                return;
+            }
+            scorePulseActive = true;
+            hudScore.classList.toggle('hud-pulse-strong', strong);
+            hudScore.classList.add('hud-pulse');
+            hudScore.addEventListener('animationend', function onScorePulseEnd() {
+                hudScore.classList.remove('hud-pulse', 'hud-pulse-strong');
+                scorePulseActive = false;
+            }, { once: true });
+        }
+
+        // Lives: single subtle "dip" pulse on loss only (never on the initial setLives(lives) at
+        // startup or startNewGame()'s full reset, both of which call setLives() directly without
+        // going through this) - see its own call site in handleDrain() for why. One-shot and
+        // non-overlapping (a second loss can't happen before this animation's own short duration
+        // elapses anyway, given the drain/reset flow in between), so there's no coalescing logic
+        // to mirror from pulseScoreHud() above.
+        let livesPulseActive = false;
+        function pulseLivesHud() {
+            if (window.SPIRITBALL_reducedMotion) return;
+            if (livesPulseActive) return;
+            livesPulseActive = true;
+            hudLives.classList.add('hud-lives-lost');
+            hudLives.addEventListener('animationend', function onLivesPulseEnd() {
+                hudLives.classList.remove('hud-lives-lost');
+                livesPulseActive = false;
+            }, { once: true });
+        }
+
         // HUD hierarchy audit (UX polish, no new mechanic) - see index.html's #mission-hud/
         // #effects-hud CSS comment for the full design reasoning behind which of this game's
         // existing systems get a persistent-while-relevant spot here. Every value read below
@@ -4868,6 +4917,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             lastScoreDelta = delta;
             lastScoreTotal = score;
             setScore(score);
+            if (delta > 0) pulseScoreHud(delta);
             if (score > backglass.state.highScore) {
                 backglass.state.highScore = score;
                 writeHighScoreToStorage(score); // high-score audit fix - see its own comment; a throwing/unavailable browser keeps the in-memory record for this session without crashing
@@ -6191,6 +6241,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
             lives--;
             setLives(lives);
+            pulseLivesHud();
             // BALL SAVE reset (fairness mechanics) - this life is genuinely over now, so the next
             // one gets its own fresh save opportunity (see armBallSave()'s "usedThisLife" gate).
             ballSave.usedThisLife = false;
