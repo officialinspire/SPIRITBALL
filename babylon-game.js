@@ -1373,9 +1373,34 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // into this same panel once Stage 12 gives them real values to show.
     // ===================================
     function buildBackglass(scene) {
-        const width = 512;
-        const height = 256;
-        const texture = new BABYLON.DynamicTexture('backglassTex', { width, height }, scene, false);
+        // Readability pass (user-requested - "evaluate readability from the ACTUAL gameplay
+        // camera, not texture pixels"): the fixed gameplay camera (buildCamera()) sits roughly
+        // 1.3m from this panel, and at that distance/FOV the 0.32x0.15m plane only ever covers a
+        // small slice of screen - on the smallest phone viewport tested (320px wide) it's well
+        // under 100 screen pixels tall regardless of texture resolution. Two consequences drove
+        // every change below: (1) texture resolution alone was never the bottleneck - the old
+        // 512x256 canvas was already being downsampled well below 1:1 on screen, so the real fix
+        // is bigger font-to-panel ratios and fewer/clearer blocks, not just more source pixels;
+        // (2) resolution is still bumped 2x (to 1024x480, and corrected to exactly match the
+        // panel's own 0.32:0.15 aspect ratio, fixing a pre-existing slight stretch the old
+        // 512:256 - 2:1 vs. 2.133:1 - mismatch caused) so the now-much-larger glyphs stay crisp
+        // instead of visibly blocky when the GPU downsamples them for a small on-screen area.
+        const width = 1024;
+        const height = 480;
+        // Mipmaps ON (was `false`, the DynamicTexture constructor's generateMipMaps arg) - found
+        // via the same real-camera screenshot testing this whole pass is built around: with
+        // mipmaps off, the GPU has no choice but to point/bilinear-sample the full-res texture
+        // directly at this panel's real, heavily-minified on-screen size, and thin text strokes
+        // either vanish between sample points or blur unevenly depending on exactly where they
+        // land - confirmed via a zoomed-in crop of a 320px-viewport screenshot showing the
+        // smaller-tier text (RANK, mission label/progress, badges) as a barely-legible smear while
+        // the larger tiers (message, mission name) stayed readable purely because their strokes
+        // were wide enough to survive it anyway. Mipmapping gives the GPU a properly pre-filtered,
+        // evenly-downsampled version to sample from instead, which is what small text actually
+        // needs at this viewing distance - the DynamicTexture regenerates its mip chain
+        // automatically on every texture.update() call below, so this stays correct across
+        // redraws, not just the first paint.
+        const texture = new BABYLON.DynamicTexture('backglassTex', { width, height }, scene, true);
         const ctx = texture.getContext();
 
         const mat = new BABYLON.StandardMaterial('backglassMat', scene);
@@ -1416,53 +1441,154 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             bonusMultiplierX: 1
         };
 
+        // Manual rounded-rect path (not ctx.roundRect - not universally supported on every
+        // engine/browser this build might run on) used by the two "backing plate" helpers below.
+        function roundRectPath(x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.arcTo(x + w, y, x + w, y + r, r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+            ctx.lineTo(x + r, y + h);
+            ctx.arcTo(x, y + h, x, y + h - r, r);
+            ctx.lineTo(x, y + r);
+            ctx.arcTo(x, y, x + r, y, r);
+            ctx.closePath();
+        }
+
+        // Dark backing plate (user-requested - "dark backing opacity") behind a text block: a
+        // filled rounded rect well darker/more opaque than the panel's own base fill, plus a
+        // colored border, so the block reads as its own distinct, high-contrast callout instead
+        // of text floating directly on the busy dot-grid background. Used for the two
+        // priority-1/2 elements (message, mission) that most need to stand out at a glance.
+        function drawPanel(x, y, w, h, borderColor, fillColor) {
+            roundRectPath(x, y, w, h, 14);
+            ctx.fillStyle = fillColor;
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = borderColor;
+            ctx.stroke();
+        }
+
+        // Small pill-shaped badge for the supporting multiplier/bonus indicators - same visual
+        // language as the DOM #effects-hud badges (index.html), so a player who's already learned
+        // to recognize those reads these the same way. Returns the x just past its right edge so
+        // callers can lay badges out left-to-right without hardcoding widths.
+        function drawBadge(x, y, text, color) {
+            ctx.font = 'bold 30px monospace';
+            const paddingX = 20;
+            const textWidth = ctx.measureText(text).width;
+            const w = textWidth + paddingX * 2;
+            const h = 50;
+            roundRectPath(x, y, w, h, h / 2);
+            ctx.fillStyle = 'rgba(8, 0, 18, 0.7)';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = color;
+            ctx.stroke();
+            ctx.fillStyle = color;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x + paddingX, y + h / 2 + 1);
+            ctx.textBaseline = 'top';
+            return x + w;
+        }
+
+        // Font hierarchy (user-requested priority order - "temporary message easiest to notice,
+        // followed by mission/rank"): three explicit tiers, biggest/most-backed to
+        // smallest/plainest, rather than the old flat "everything ~18-32px, no backing" layout
+        // that gave every line roughly equal visual weight regardless of how often/urgently a
+        // player actually needs to read it.
+        //   Tier 1 (message):        84px start (shrink-to-fit), full backing plate, bottom zone.
+        //   Tier 2 (mission):        48px name / 30px progress, own backing plate.
+        //   Tier 3 (high score/rank/badges): 46px/30px, no backing - supporting info, still much
+        //     larger than the old 28px/18px so it stays legible at the real on-screen size, just
+        //     visually quieter than tiers 1-2.
         function redraw() {
             ctx.fillStyle = '#05000f';
             ctx.fillRect(0, 0, width, height);
 
+            // Dot-matrix grid, scaled 2x alongside the resolution bump (16px pitch/4px dot vs.
+            // the old 8px/2px) - same visual density as before, not a new pattern.
             ctx.fillStyle = 'rgba(0, 255, 255, 0.05)';
-            for (let y = 6; y < height; y += 8) {
-                for (let x = 6; x < width; x += 8) {
-                    ctx.fillRect(x, y, 2, 2);
+            for (let y = 12; y < height; y += 16) {
+                for (let x = 12; x < width; x += 16) {
+                    ctx.fillRect(x, y, 4, 4);
                 }
             }
 
             ctx.textBaseline = 'top';
+
+            // --- Tier 3: HIGH SCORE / RANK, stacked (not side-by-side) ---
+            // Deliberately NOT a same-row "HIGH SCORE ... RANK" layout with RANK right-aligned:
+            // an earlier version of this pass did exactly that, and at narrow phone viewports the
+            // backglass panel's own on-screen projection places its right edge directly behind
+            // the DOM #player-hud score/lives card (a fixed top-right screen overlay, unrelated
+            // to this panel's 3D position) - confirmed via Playwright at 320px, where "RANK:
+            // Cadet" rendered but was fully hidden underneath that DOM card. Both lines left-
+            // aligned keeps everything on the panel's left/near side, matching where the DOM HUD
+            // never reaches regardless of viewport, at the cost of one extra line of height.
+            ctx.font = 'bold 46px monospace';
             ctx.textAlign = 'left';
-            // HIGH SCORE is now the headline number here (score itself lives on #player-hud) -
-            // the one score-related fact worth featuring on the cabinet is the target to beat.
-            ctx.font = 'bold 28px monospace';
             ctx.fillStyle = '#ffd700';
-            ctx.fillText('HIGH SCORE ' + state.highScore, 16, 16);
+            ctx.fillText('HIGH SCORE ' + state.highScore, 28, 16);
 
-            ctx.font = 'bold 18px monospace';
+            ctx.font = 'bold 30px monospace';
             ctx.fillStyle = '#00ff99';
-            ctx.fillText('RANK: ' + state.rank, 16, 58);
+            ctx.fillText('RANK: ' + state.rank, 28, 75);
 
+            // Thin divider - separates the quieter status block above from the mission/message
+            // zone below, a cheap spacing cue that costs almost no vertical room.
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.25)';
+            ctx.fillRect(28, 118, width - 56, 2);
+
+            // --- Tier 2: MISSION - its own backed callout, second-most prominent element ---
+            let nextY = 130;
             if (state.missionName) {
+                const boxY = nextY;
+                const boxH = 122;
+                drawPanel(28, boxY, width - 56, boxH, 'rgba(255, 170, 0, 0.7)', 'rgba(10, 0, 20, 0.6)');
+                ctx.font = 'bold 24px monospace';
+                ctx.fillStyle = 'rgba(255, 210, 140, 0.9)';
+                ctx.fillText('ACTIVE MISSION', 48, boxY + 10);
+                ctx.font = 'bold 48px monospace';
                 ctx.fillStyle = '#ffaa00';
-                ctx.fillText(
-                    'MISSION: ' + state.missionName + ' ' + state.missionProgress + '/' + state.missionRequired,
-                    16, 84
-                );
+                ctx.fillText(state.missionName, 48, boxY + 40);
+                ctx.font = 'bold 30px monospace';
+                ctx.fillStyle = '#ffd27a';
+                ctx.fillText(state.missionProgress + ' / ' + state.missionRequired, 48, boxY + 82);
+                nextY = boxY + boxH + 12;
             }
 
+            // --- Tier 3: MULTIPLIER / BONUS - small pill badges, supporting info ---
+            let badgeX = 28;
             if (state.multiplierActive) {
-                ctx.fillStyle = '#ff00ff';
-                ctx.fillText('★ ' + POWERUP_MULTIPLIER + 'X SCORE ACTIVE ★', 16, 110);
+                badgeX = drawBadge(badgeX, nextY, '★ ' + POWERUP_MULTIPLIER + 'X SCORE', '#ff00ff') + 16;
             }
-
             if (state.bonusMultiplierX > 1) {
-                ctx.fillStyle = '#ffaa00';
-                ctx.fillText('BONUS MULT: ' + state.bonusMultiplierX + 'X', 16, 136);
+                badgeX = drawBadge(badgeX, nextY, 'BONUS ' + state.bonusMultiplierX + 'X', '#ffaa00') + 16;
             }
 
+            // --- Tier 1: MESSAGE - the single most prominent element on the whole panel ---
             if (state.message) {
-                ctx.font = 'bold 32px monospace';
+                const boxH = 130;
+                const boxY = height - boxH - 18;
+                drawPanel(28, boxY, width - 56, boxH, 'rgba(255, 255, 255, 0.85)', 'rgba(0, 0, 0, 0.8)');
+                // Shrink-to-fit so a longer message (e.g. "BONUS x3: 12,500") never overflows the
+                // plate instead of just clipping or spilling past its border.
+                let fontSize = 84;
+                ctx.font = 'bold ' + fontSize + 'px monospace';
+                while (ctx.measureText(state.message).width > width - 112 && fontSize > 34) {
+                    fontSize -= 4;
+                    ctx.font = 'bold ' + fontSize + 'px monospace';
+                }
                 ctx.fillStyle = '#ffffff';
                 ctx.textAlign = 'center';
-                ctx.fillText(state.message, width / 2, height - 76);
+                ctx.textBaseline = 'middle';
+                ctx.fillText(state.message, width / 2, boxY + boxH / 2 + 2);
                 ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
             }
 
             texture.update();
@@ -3894,6 +4020,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // brightness in createStarfieldTexture() and losing the "sparse bright stars" contrast
         // that texture is deliberately built around.
         glowLayer.addExcludedMesh(skybox);
+        // Backglass readability pass (user-requested - "keep text crisp and avoid excessive
+        // bloom"): same reasoning as the skybox exclusion directly above, applied to the
+        // backglass panel's own DynamicTexture instead. GlowLayer's soft outward blur is tuned
+        // for the game's neon playfield elements (bumpers/lamps/rails), not for small, distant
+        // text that already loses definition from the panel's own tiny on-screen footprint at
+        // real gameplay camera distance (see buildBackglass()'s own comment) - stacking GlowLayer
+        // on top turned already-small glyphs into a soft blur instead of a crisp readout. The
+        // panel is still bright/emissive and still reads as part of the same lit cabinet (its own
+        // colors/contrast do that job now, see buildBackglass()), it just no longer gets the
+        // additional per-mesh glow treatment.
+        glowLayer.addExcludedMesh(backglass.mesh);
 
         // Hoisted to a `let` (not a const declared only inside the if-block) so the dev HUD's
         // "post-processing" checkbox (below, once devMode is confirmed) can toggle
@@ -6806,6 +6943,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // (inspecting Map contents only, no mutation) purely so a test can assert whether
                 // a given mesh is currently gated, the same thing isOnCooldown() itself checks.
                 updateHitCooldowns, hitCooldowns,
+                // Backglass readability pass (user-requested) - same "expose the real object, not
+                // a second implementation" rationale as everything above. Lets a test drive
+                // backglass.state directly (mission/multiplier/bonus/message) and call its own
+                // real redraw()/showMessage() to inspect the actual rendered DynamicTexture output
+                // for every tier/combination without needing to play through the real, much
+                // slower mission-select/powerup/lane-bank flows that would otherwise be required
+                // to reach each state at least once.
+                backglass,
                 pivotWorldPosition(flipper) {
                     return flipper.pivotNode.getAbsolutePosition().clone();
                 },
