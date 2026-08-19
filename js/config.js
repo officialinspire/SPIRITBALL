@@ -103,25 +103,28 @@ export const BALL_MASS_KG = 0.08;
 // PhysicsAggregate call; pulled out here, same "one place to retune" reasoning as the flipper
 // pass's FLIPPER_RESTITUTION/FLIPPER_FRICTION.
 //
-// BALL_FRICTION was the single root cause behind a demonstrated, reproducible bug: a ball at
-// rest in open, level playfield (away from any obstacle) would accelerate downhill correctly for
-// a moment, then STOP DEAD and stay frozen indefinitely (confirmed via direct Playwright physics-
-// step measurement - zero velocity for 400+ ms straight, well past this table's own
-// STUCK_TIME_THRESHOLD_MS, meaning it would only ever move again via the anti-stuck kick, not
-// real gameplay physics). Root cause, not a guess: on a level surface tilted at
-// TABLE_TILT_DEGREES (6.5 deg, see its own comment), a ball held by static friction stays put
-// whenever friction exceeds tan(tilt) ~= 0.114 - gravity's own tiny tangential pull (~0.089N for
-// this ball's mass) simply can't overcome max static friction (~0.35 * that same normal force)
-// once mu is that high. The old 0.35 was nearly 3x over that threshold. Confirmed via Havok's own
-// vendored source (PhysicsShape.setMaterial()'s default frictionCombine = MINIMUM) that the ball's
-// own friction value alone governs every ball<->surface pairing where it's the lower of the two
-// (true for every surface in this file except the flipper's own passive FLIPPER_FRICTION, which
-// is lower still) - so this one constant was the actual lever, not PLAYFIELD_FRICTION.
-// 0.08 sits comfortably below tan(6.5 deg) with margin for floating-point settling, low enough
-// that gravity always wins on open playfield (matching a real polished-steel-ball-on-waxed-wood
-// pinball table, whose real kinetic friction is much lower than either old value), while still
-// high enough to develop real rolling-without-slipping (not an ice rink) and to let the ball
-// settle normally in an actual pocket/corner where geometry, not friction alone, holds it.
+// BALL_FRICTION addresses a demonstrated, reproducible problem: a ball given ordinary rolling
+// velocity in open, level playfield decayed to a fraction of its speed far faster than a real
+// low-friction ball-on-lacquered-wood table would (measured: a 0.6 m/s lateral roll fell to ~15%
+// of that speed within 800ms at the old 0.35; 0.08 retains ~29% over the same window) - a real,
+// direct win for "retain momentum through lanes". On a surface tilted at TABLE_TILT_DEGREES
+// (6.5 deg), 0.08 also sits below tan(6.5 deg) ~= 0.114, so static friction alone can no longer
+// explain a ball refusing to start rolling downhill from rest. Confirmed via Havok's own vendored
+// source (PhysicsShape.setMaterial()'s default frictionCombine = MINIMUM) that the ball's own
+// friction value alone governs every ball<->surface pairing where it's the lower of the two (true
+// for every surface in this file except the flipper's own passive FLIPPER_FRICTION, which is
+// lower still) - so this one constant was the actual lever, not PLAYFIELD_FRICTION.
+//
+// IMPORTANT caveat, found by the anti-stuck audit pass right after this one: lowering this alone
+// does NOT eliminate every case of a ball freezing at exactly zero velocity from a dead stop -
+// a SEPARATE, still-unexplained resting-contact behavior (confirmed to survive this friction
+// value unchanged, and to survive explicitly disabling Havok body sleep via
+// PhysicsActivationControl.ALWAYS_ACTIVE too - neither changed the measured freeze at all) can
+// still hold a ball motionless long enough to trip STUCK_TIME_THRESHOLD_MS from a genuine dead
+// start. That specific edge case never reproduced in any more realistic scenario tested (a moving
+// roll, a corner shot, a wall rebound), and the existing anti-stuck kick already recovers it
+// correctly, so it's left as a known, mitigated characteristic - see updateBallPhysics()'s own
+// comment (STUCK_KICK_CENTERWARD_MS etc.) for the anti-stuck pass this caveat belongs to.
 //
 // BALL_RESTITUTION: Havok's default restitutionCombine is MAXIMUM (same vendored-source check),
 // meaning the ball's OWN restitution was the effective FLOOR for every surface it touches,
@@ -167,11 +170,53 @@ export const WORLD_MAX_LINEAR_SPEED_MS = MAX_BALL_SPEED_MS * 3;
 // bottom of the screen).
 export const STUCK_SPEED_THRESHOLD_MS = 40 * PX_TO_M; // ~0.038 m/s
 export const STUCK_TIME_THRESHOLD_MS = 450;
-export const STUCK_KICK_X_RANGE_MS = 400 * PX_TO_M; // ~0.378 m/s, randomized +/-
-export const STUCK_KICK_DOWNHILL_MS = 380 * PX_TO_M; // ~0.359 m/s toward -Z
-export const STUCK_KICK_UP_MS = 0.15; // small vertical hop to help clear resting contact - new in
-                                // 3D, no 2D equivalent needed since 2D had no "resting on a
-                                // surface via normal contact" concept the same way
+
+// Anti-stuck audit (user-requested - "safety net, not visible gameplay mechanic... small
+// deterministic escape... downhill bias... minimal vertical component... avoid obvious random
+// teleport/kick behavior"). The escape used to be Math.random()*STUCK_KICK_X_RANGE_MS (a
+// randomized +/- sideways component) plus a 0.15 m/s vertical hop - both read as an obvious,
+// non-physical "reset" the instant they fired (0.15 m/s straight up is a large, visibly floaty
+// pop for a 0.027m ball, and a random sideways component means the same stuck position could
+// escape in a different direction every time, which is the opposite of a believable physical
+// nudge).
+//
+// A first attempt replaced the random component with a fixed, deterministic push toward table
+// center (X=0) alone - reproducible, but a real playtest (a synthetic box-canyon trap: the ball
+// centered exactly between two close walls, boxed in on the downhill side too, so it could only
+// escape sideways) found a genuine flaw: a trap that happens to be roughly SYMMETRIC around the
+// ball's stuck position makes "always push toward center" walk the ball back toward the middle
+// after every kick, never accumulating the net progress needed to actually clear either wall -
+// it can oscillate indefinitely instead of escaping. The old random version didn't have this
+// specific failure mode (a lucky streak of same-direction random kicks would eventually clear
+// it), so simply removing the randomness without addressing this would have been a real
+// regression in the one thing this system exists to guarantee: an eventual escape.
+//
+// The fix keeps the direction deterministic (still toward center - correct for the much more
+// common asymmetric case, where it makes real one-directional progress) but makes the MAGNITUDE
+// escalate on each consecutive kick that fails to produce a real recovery (ball.stuckKickStreak
+// in updateBallPhysics() below, reset the moment the ball demonstrates real, sustained motion on
+// its own - not just right after a kick). The first kick for any given stuck episode stays small
+// (this preference's #1 priority); magnitude only grows if that wasn't enough, capped at
+// STUCK_KICK_ESCALATION_MAX so even a pathological trap can't produce a runaway velocity (also
+// still bounded by the same MAX_BALL_SPEED_MS clamp everything else respects).
+//
+// Verified against a REALISTIC synthetic box canyon (closed on both sides and uphill, open
+// downhill - a ball settling into a pocket while rolling downhill necessarily has this shape,
+// since an opening on the downhill side would mean it just kept rolling through instead of
+// stopping there): escalation clears it in a handful of kicks where a flat magnitude alone
+// oscillated the ball around center forever. A deliberately backwards/adversarial version of the
+// same test (closed downhill instead, open uphill - the opposite of how a real trap forms) does
+// NOT clear even at full escalation, because only Z-axis movement can clear that particular
+// trap's walls and this kick's Z is locked downhill by design (the "downhill bias" preference
+// itself). Not fixed, and not expected to be: no real table geometry should ever produce a
+// pocket that's open specifically on the uphill side only, so this isn't a case the system needs
+// to solve, just one worth naming so a future reader doesn't assume escalation makes any and
+// every trap shape solvable.
+export const STUCK_KICK_CENTERWARD_MS = 400 * PX_TO_M; // ~0.378 m/s, toward table center (X=0) at streak 0 - same magnitude as the old random range's peak, now a fixed, deterministic push instead of a coin-flip direction
+export const STUCK_KICK_DOWNHILL_MS = 380 * PX_TO_M; // ~0.359 m/s toward -Z at streak 0 - unchanged, already deterministic and already the correct "downhill" direction this preference asks for
+export const STUCK_KICK_UP_MS = 0.02; // was 0.15 - just enough to break exact resting Y-contact for one step, not a visible hop (see this block's own comment). Deliberately NOT escalated with the horizontal kicks below - more height never helps clear a horizontal pinch, it would only make repeated attempts look more like a visible "hop"
+export const STUCK_KICK_ESCALATION_STEP = 0.5; // +50% magnitude (X and Z only) per consecutive failed kick
+export const STUCK_KICK_ESCALATION_MAX = 3; // caps escalation at 3x the base magnitude (~1.1 m/s X, ~1.1 m/s Z - still comfortably inside MAX_BALL_SPEED_MS's own ceiling even before that clamp catches it next frame)
 
 // ===================================
 // Flippers + obstacle layout: an authentic, Space-Cadet-inspired arrangement, NOT a raw

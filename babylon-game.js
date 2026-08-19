@@ -66,7 +66,8 @@ import {
     COLLISION_CATEGORY_BALL, toWorldX, toWorldZ, toWorldRotationY,
     TABLE_TILT_DEGREES, TILT_RAD, GRAVITY_VECTOR_FN, BALL_DIAMETER_M,
     BALL_MASS_KG, BALL_RESTITUTION, BALL_FRICTION, MAX_BALL_SPEED_MS, WORLD_MAX_LINEAR_SPEED_MS, STUCK_SPEED_THRESHOLD_MS,
-    STUCK_TIME_THRESHOLD_MS, STUCK_KICK_X_RANGE_MS, STUCK_KICK_DOWNHILL_MS, STUCK_KICK_UP_MS,
+    STUCK_TIME_THRESHOLD_MS, STUCK_KICK_CENTERWARD_MS, STUCK_KICK_DOWNHILL_MS, STUCK_KICK_UP_MS,
+    STUCK_KICK_ESCALATION_STEP, STUCK_KICK_ESCALATION_MAX,
     FLIPPER_LENGTH_M, FLIPPER_THICKNESS_M, FLIPPER_HEIGHT_M, FLIPPER_MASS_KG,
     FLIPPER_GAP_HALF_M, FLIPPER_Z_M, FLIPPER_PLAYFIELD_CLEARANCE_M, FLIPPER_SWEEP_RAD,
     FLIPPER_LEFT_REST_RAD, FLIPPER_RIGHT_REST_RAD, FLIPPER_ACTIVATE_SPEED_RAD_S, FLIPPER_RETURN_SPEED_RAD_S,
@@ -1743,7 +1744,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // every reset/dev-button code path already assumed it was getting.
         aggregate.body.disablePreStep = false;
 
-        return { mesh, aggregate, stuckTimeMs: 0 };
+        return { mesh, aggregate, stuckTimeMs: 0, stuckKickStreak: 0, stuckRecoveryMs: 0, stuckKickDirX: 1 };
     }
 
     // Shared speed ceiling enforcement - uniformly rescales a body's velocity down to maxSpeed if
@@ -1767,6 +1768,36 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // that function's "accumulate, then one decisive kick" design rather than the per-frame
     // nudge it replaced - see the STUCK_* constants' comment for why that matters. `ball` is one
     // of the {mesh, aggregate, stuckTimeMs} objects created by createBall().
+    //
+    // Anti-stuck audit (user-requested - "safety net, not visible gameplay mechanic... small
+    // deterministic escape... downhill bias... minimal vertical component... avoid obvious random
+    // teleport/kick"). The escape direction is fully deterministic, not random: X is a push back
+    // toward table center (X=0), signed by whichever side of center the ball is CURRENTLY on -
+    // the same physical intuition as "nudge it off whatever wall is probably pinning it" the old
+    // random version was going for, but reproducible (the same stuck position always escapes the
+    // same way) instead of a coin flip. Z keeps the same fixed downhill (-Z) bias it already had.
+    // Y is a much smaller nudge than before (STUCK_KICK_UP_MS) and does NOT escalate - see that
+    // constant's own comment for why.
+    //
+    // The X/Z magnitude escalates on consecutive failed attempts (ball.stuckKickStreak, reset the
+    // moment the ball shows real sustained motion on its own) rather than staying flat - see
+    // STUCK_KICK_ESCALATION_STEP's own comment for why a flat deterministic magnitude alone turned
+    // out to be a real regression against a symmetric trap (a synthetic box-canyon playtest found
+    // it could oscillate the ball back toward center forever instead of ever clearing a wall).
+    // Escalating keeps the common case small (this preference's #1 priority - most real stuck
+    // episodes clear on the first, smallest kick) while still guaranteeing eventual escape for a
+    // harder trap, which the old random version got "for free" from luck alone.
+    //
+    // Audited against genuine trapped corners, a ball cradled on a raised/held flipper, brief
+    // low-speed moments in open play (e.g. cresting a slow uphill shot), the plunger's resting
+    // state, and Vision Gate capture - the WHEN this fires was already correctly guarded for the
+    // last two (see this file's own "Skipped while the Vision Gate holds the ball"/"Anti-stuck
+    // audit fix - same reasoning extends to !ballInPlay" comment at the real call site), and
+    // direct playtest measurement found the other three don't actually produce a sustained
+    // near-zero-speed state in this table's current geometry (a raised flipper has no adjacent
+    // wall close enough to trap the ball - it rolls off well within STUCK_TIME_THRESHOLD_MS every
+    // time tested, single or double flipper) - so no additional firing-condition guard was needed
+    // this pass; only the escape's OWN character (this comment) changed.
     function updateBallPhysics(ball, deltaMs) {
         if (!ball.aggregate.body) return;
 
@@ -1774,13 +1805,44 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         if (speed < STUCK_SPEED_THRESHOLD_MS) {
             ball.stuckTimeMs += deltaMs;
+            // Any dip back below the speed threshold cancels recovery progress - a kick that only
+            // produces a brief high-speed instant before the ball settles right back into the same
+            // trap must NOT look like a "real" recovery, or every failed kick would immediately
+            // erase the escalation it just earned.
+            ball.stuckRecoveryMs = 0;
             if (ball.stuckTimeMs >= STUCK_TIME_THRESHOLD_MS) {
-                const kickX = (Math.random() - 0.5) * STUCK_KICK_X_RANGE_MS;
-                ball.aggregate.body.setLinearVelocity(new BABYLON.Vector3(kickX, STUCK_KICK_UP_MS, -STUCK_KICK_DOWNHILL_MS));
+                if (ball.stuckKickStreak === 0) {
+                    // Lock in the escape direction on the FIRST kick of a new streak - whichever
+                    // side of center the ball is on right now (defaulting rightward in the
+                    // vanishingly unlikely exact-center case). Every escalating follow-up kick in
+                    // this SAME streak (below) reuses this stored direction instead of
+                    // recomputing it from the ball's position each time - recomputing from
+                    // current position was the actual bug a synthetic symmetric-trap playtest
+                    // found: once an escape attempt overshoots back across center, "always push
+                    // toward instantaneous center" reverses direction on the very next kick,
+                    // so magnitude escalation alone still zigzagged forever instead of ever
+                    // clearing a wall. A locked direction plus escalating magnitude makes
+                    // consistent, one-way progress instead.
+                    ball.stuckKickDirX = -Math.sign(ball.mesh.position.x) || 1;
+                }
+                const escalation = Math.min(1 + ball.stuckKickStreak * STUCK_KICK_ESCALATION_STEP, STUCK_KICK_ESCALATION_MAX);
+                const kickX = ball.stuckKickDirX * STUCK_KICK_CENTERWARD_MS * escalation;
+                const kickZ = -STUCK_KICK_DOWNHILL_MS * escalation;
+                ball.aggregate.body.setLinearVelocity(new BABYLON.Vector3(kickX, STUCK_KICK_UP_MS, kickZ));
                 ball.stuckTimeMs = 0;
+                ball.stuckKickStreak++;
             }
         } else {
             ball.stuckTimeMs = 0;
+            // The streak only resets once the ball has stayed above the speed threshold
+            // CONTINUOUSLY for as long as the stuck-detection window itself, not just for the one
+            // frame right after a kick (which is always fast) - see this branch's own guard
+            // above. That's what makes escalation actually escalate for a genuinely hard trap
+            // instead of getting wiped back to the base magnitude by the kick's own velocity.
+            ball.stuckRecoveryMs += deltaMs;
+            if (ball.stuckRecoveryMs >= STUCK_TIME_THRESHOLD_MS) {
+                ball.stuckKickStreak = 0;
+            }
         }
     }
 
