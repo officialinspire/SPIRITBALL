@@ -72,12 +72,12 @@ import {
     FLIPPER_GAP_HALF_M, FLIPPER_Z_M, FLIPPER_PLAYFIELD_CLEARANCE_M, FLIPPER_SWEEP_RAD,
     FLIPPER_LEFT_REST_RAD, FLIPPER_RIGHT_REST_RAD, FLIPPER_ACTIVATE_SPEED_RAD_S, FLIPPER_RETURN_SPEED_RAD_S,
     FLIPPER_RESTITUTION, FLIPPER_FRICTION, FLIPPER_CONTACT_VELOCITY_TRANSFER,
-    BUMPER_RADIUS_M, BUMPER_CLUSTER, BUMPER_KICK_SPEED_MS, TARGET_RADIUS_M,
+    BUMPER_RADIUS_M, BUMPER_CLUSTER, BUMPER_KICK_SPEED_MS, SPECIAL_EVENT_KICK_SPEED_MS, TARGET_RADIUS_M,
     MISSION_TARGET_BANK, TARGET_RAISED_Y_M, TARGET_DROPPED_Y_M, TARGET_DROP_ANIM_MS,
     SATURN_RADIUS_M, SATURN_POS, COMET_RADIUS_M, COMET_POS,
     POWERUP_RADIUS_M, POWERUP_POS, POWERUP_SPAWN_INTERVAL_MS, POWERUP_ACTIVE_DURATION_MS,
     POWERUP_MULTIPLIER, POWERUP_MULTIPLIER_DURATION_MS, SLINGSHOT_SIZE_M, SLINGSHOTS,
-    SLINGSHOT_KICK_SPEED_MS, SLINGSHOT_KICK_UPTABLE_BIAS_MS, REENTRY_LANE_RADIUS_M, REENTRY_LANES,
+    SLINGSHOT_KICK_SPEED_MS, SLINGSHOT_KICK_UPTABLE_BIAS_MS, SLINGSHOT_RESTITUTION, REENTRY_LANE_RADIUS_M, REENTRY_LANES,
     LANE_Z_TOP_M, LANE_Z_BOTTOM_M, LANE_DIVIDER_X_M, LANE_TRIGGER_Z_M,
     INLANE_TRIGGER_X_M, OUTLANE_TRIGGER_X_M, LANE_TRIGGER_WIDTH_M, LANE_TRIGGER_DEPTH_M,
     INLANE_GUIDE_TOP_X_M, INLANE_GUIDE_BOTTOM_X_M, SIDE_LANES, ORBIT_RAIL_BOTTOM_Z_M,
@@ -2682,7 +2682,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mesh.position.set(def.x, 0.015, def.z);
             mesh.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20); // angled inward, like a real slingshot kicker
             mesh.material = slingshotMat;
-            new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
+            new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: SLINGSHOT_RESTITUTION, friction: 0.3 }, scene);
 
             // Kicker housing: a triangular-prism wedge (a cylinder with 3-sided tessellation is a
             // cheap way to get a real prism from MeshBuilder) behind the rubber face above,
@@ -5346,21 +5346,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // hitSlingshot() did. That manual angle-based bounce was a workaround for Arcade Physics
         // circles not imparting real force on overlap; real rigid-body contact response in Havok
         // makes it unnecessary, not just redundant - see 04-*.md's flipper implementation note for
-        // the same reasoning applied to flippers. Bumpers are the one deliberate exception: real
-        // pop bumpers actively fire the ball away rather than just reflecting it, so the 'bumper'
-        // branch below adds a real, controlled velocity kick on top of the restitution bounce via
-        // applyBumperKick() - see its comment for how that kick is kept bounded.
-        function applyBumperKick(mesh) {
+        // the same reasoning applied to flippers. Bumpers (and, since the active-obstacle power-
+        // hierarchy pass, Saturn) are the deliberate exception: a real pop bumper actively fires
+        // the ball away rather than just reflecting it, and Saturn is narratively the board's other
+        // "boss" hit, so both the 'bumper' and 'saturn' branches below add a real, controlled
+        // velocity kick on top of the restitution bounce via applyRadialKick() - see its comment
+        // for how that kick is kept bounded, and SPECIAL_EVENT_KICK_SPEED_MS's own comment for why
+        // Saturn didn't have one before this pass.
+        //
+        // Shared by both callers (not two near-duplicate functions) because the underlying math is
+        // identical - only the magnitude differs (BUMPER_KICK_SPEED_MS for a regular bumper,
+        // SPECIAL_EVENT_KICK_SPEED_MS for the boss bumper and Saturn, both passed in by the caller
+        // rather than hardcoded here).
+        function applyRadialKick(mesh, kickSpeed) {
             const body = mainBall.aggregate.body;
             if (!body) return;
 
-            // Horizontal (X/Z) direction from the bumper's center to the ball's current position -
+            // Horizontal (X/Z) direction from the obstacle's center to the ball's current position -
             // "horizontal" deliberately excludes Y so the kick can't launch the ball vertically off
             // the table, just push it away across the playfield the way a real pop bumper does.
             const dx = mainBall.mesh.position.x - mesh.position.x;
             const dz = mainBall.mesh.position.z - mesh.position.z;
             const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-            // Degenerate case (ball reported dead-center over the bumper, horizontally) - no
+            // Degenerate case (ball reported dead-center over the obstacle, horizontally) - no
             // well-defined push direction, so skip the kick rather than divide by ~0. The
             // restitution bounce and normal scoring/feedback still happen either way.
             if (horizontalDist < 1e-4) return;
@@ -5373,16 +5381,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // gentler net result than a square hit at speed, matching how a real pop bumper feels).
             const v = body.getLinearVelocity();
             body.setLinearVelocity(new BABYLON.Vector3(
-                v.x + dirX * BUMPER_KICK_SPEED_MS,
+                v.x + dirX * kickSpeed,
                 v.y,
-                v.z + dirZ * BUMPER_KICK_SPEED_MS
+                v.z + dirZ * kickSpeed
             ));
 
             // Re-clamped through the same ceiling updateBallPhysics() enforces every frame (see
             // clampBodySpeed()'s comment), applied immediately rather than waiting for next frame -
             // this is what actually bounds the kick: no incoming speed, kick magnitude, or run of
-            // repeated bumper hits (each individual bumper is still separately rate-limited by its
-            // own COOLDOWN_BUMPER_MS below) can ever push the ball past MAX_BALL_SPEED_MS.
+            // repeated hits (each individual obstacle is still separately rate-limited by its own
+            // per-kind cooldown below) can ever push the ball past MAX_BALL_SPEED_MS.
             clampBodySpeed(body, MAX_BALL_SPEED_MS);
         }
 
@@ -5786,7 +5794,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 addScore(points);
                 stats.bumperHits++;
                 recordComboShot('bumper'); // combo scoring (user-requested) - feeds 'TRIPLE BUMPER'
-                applyBumperKick(mesh);
+                applyRadialKick(mesh, meta.boss ? SPECIAL_EVENT_KICK_SPEED_MS : BUMPER_KICK_SPEED_MS);
                 // Feedback bumped slightly (pulse scale, shake, sound volume) above the shared
                 // defaults now that bumpers actively kick the ball - the hit should read as a
                 // touch punchier than a passive bounce, without changing scoring or any other
@@ -5815,10 +5823,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // scoring hit on the board (SCORE_SATURN), with a correspondingly bigger camera
                 // beat than any regular obstacle. Not mission-tied (there's no 4th mission-target
                 // object for it to belong to) - a standalone "boss" bonus, same spirit as the
-                // bumper cluster's own boss bumper above.
+                // bumper cluster's own boss bumper above - including, since the active-obstacle
+                // power-hierarchy pass, the same real velocity kick that boss bumper gets
+                // (applyRadialKick() with SPECIAL_EVENT_KICK_SPEED_MS - see its own comment).
+                // Previously Saturn relied purely on Havok's own restitution bounce, so its
+                // resulting speed scaled with whatever the ball happened to be carrying instead of
+                // reliably reading as the board's biggest hit.
                 setCooldown(mesh, COOLDOWN_SATURN_MS);
                 addScore(SCORE_SATURN);
                 stats.saturnHits++;
+                applyRadialKick(mesh, SPECIAL_EVENT_KICK_SPEED_MS);
                 pulseMesh(mesh);
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('SATURN! +' + SCORE_SATURN, 1100);
@@ -6730,6 +6744,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // _step(), instead of only the raw Havok response - needed to confirm the existing
                 // safety systems still engage correctly during this pass's tuning experiments.
                 updateBallPhysics,
+                // Active-obstacle-physics normalization pass (user-requested) - same "expose the
+                // real per-frame function" rationale as the two above. Lets a test drive
+                // hitCooldowns' own real decay (updateHitCooldowns()) at manual-step speed
+                // alongside scene.getPhysicsEngine()._step(), so a controlled comparison of
+                // bumper/slingshot/Saturn/comet kick magnitudes can wait out real per-object
+                // cooldowns between measurements (and deliberately hit within cooldown to confirm
+                // stacking is actually prevented) without needing real wall-clock time to pass in
+                // this sandbox's slow render loop. hitCooldowns itself is exposed read-only
+                // (inspecting Map contents only, no mutation) purely so a test can assert whether
+                // a given mesh is currently gated, the same thing isOnCooldown() itself checks.
+                updateHitCooldowns, hitCooldowns,
                 pivotWorldPosition(flipper) {
                     return flipper.pivotNode.getAbsolutePosition().clone();
                 },

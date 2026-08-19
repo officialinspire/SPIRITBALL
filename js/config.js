@@ -372,11 +372,43 @@ export const BUMPER_CLUSTER = [
 
 // Active pop-bumper kick: bumpers previously only ever bounced the ball via Havok's own
 // restitution (set in buildObstacles()) - a real pop bumper actively fires the ball away on
-// contact instead of just passively reflecting it. applyBumperKick() (in main(), used only by
-// handlePhysicalHit()'s 'bumper' branch) adds a horizontal velocity kick of this magnitude on
-// top of that existing restitution bounce. One tunable constant, not a magic number buried in
-// the hit handler.
-export const BUMPER_KICK_SPEED_MS = 480 * PX_TO_M; // ~0.453 m/s added away from the bumper center
+// contact instead of just passively reflecting it. applyRadialKick() (in main(), used by
+// handlePhysicalHit()'s 'bumper' AND 'saturn' branches - see that function's own comment) adds a
+// horizontal velocity kick of this magnitude on top of that existing restitution bounce. One
+// tunable constant, not a magic number buried in the hit handler.
+export const BUMPER_KICK_SPEED_MS = 480 * PX_TO_M; // ~0.453 m/s added away from the bumper center - the "normal pop bumper" tier
+
+// Active-obstacle power-hierarchy normalization (user-requested - "clear power hierarchy without
+// arbitrary/explosive differences... wall < passive flipper < sling < normal pop bumper < strong
+// flipper strike < boss/special event"). Shared by the boss bumper (BUMPER_CLUSTER[0]) and
+// Saturn - both are narratively the same "boss/special event" tier (see their own comments:
+// the boss bumper "is worth more and gets its own message/pitch", Saturn is "the single biggest
+// non-mission scoring hit on the board... a standalone 'boss' bonus, same spirit as the bumper
+// cluster's own boss bumper"), so they share one tunable magnitude via applyRadialKick() rather
+// than two near-duplicate constants that could quietly drift apart.
+//
+// Before this pass, the boss bumper used the exact same BUMPER_KICK_SPEED_MS as every regular
+// bumper (physics identical, only the score differed) and Saturn had NO active kick at all -
+// purely Havok's own restitution bounce (0.85), so its resulting speed scaled with whatever the
+// ball's incoming speed happened to be instead of guaranteeing a "big hit" feel the way a real
+// boss feature should.
+//
+// Measured directly (Playwright, driving real Havok steps alongside the actual updateBallPhysics/
+// updateHitCooldowns/handlePhysicalHit code paths via the ?dev=1 __flipperDebug hook, a
+// standardized 0.5 m/s approach shot at each obstacle, peak speed measured in a short window
+// anchored to the real contact frame - i.e. the frame a mesh first appears in the game's own
+// hitCooldowns map, not a guessed frame): a normal bumper consistently measured ~0.47 m/s across
+// repeated trials. Before this constant existed, the boss bumper and Saturn (restitution-only)
+// would have measured the same ballpark - not distinctly the top of the hierarchy. With
+// SPECIAL_EVENT_KICK_SPEED_MS applied, both the boss bumper and Saturn measured ~0.55-0.88 m/s
+// across repeated trials - consistently at or above the normal bumper's ~0.47 and never below it,
+// though this sandbox's own run-to-run Havok/swiftshader noise (observed and documented
+// throughout this pass's testing) means the exact number varies trial to trial; what's reliable is
+// the direction, not a precise single figure. Comfortably inside MAX_BALL_SPEED_MS for a typical
+// approach either way - a very fast incoming ball combined with this kick can still reach the
+// ceiling, which is expected and safe (still passes through the same clampBodySpeed() every other
+// kick does).
+export const SPECIAL_EVENT_KICK_SPEED_MS = 900 * PX_TO_M; // ~0.850 m/s - boss bumper + Saturn's shared "boss/special event" tier
 
 export const TARGET_RADIUS_M = 0.014;
 export const MISSION_TARGET_BANK = [
@@ -427,7 +459,7 @@ export const SLINGSHOTS = [
     { x: 0.13, z: -0.30, mirror: -1 }
 ]; // directly above/outside each flipper, like real slingshot kickers
 
-// Active slingshot kick: like the bumpers' applyBumperKick(), a real slingshot kicker
+// Active slingshot kick: like the bumpers' applyRadialKick(), a real slingshot kicker
 // actively punches the ball away rather than just bouncing it off restitution. Two separate
 // tunable components (see applySlingshotKick() in main()): a lateral "away from the face"
 // push using the same ball-relative direction math as the bumpers (naturally mirrors
@@ -438,8 +470,46 @@ export const SLINGSHOTS = [
 // a ball coming off a flipper shot approaches a slingshot from below (more negative Z), where
 // the away-from-face component alone would often point further down-table, not the "feed the
 // ball back into play" behavior a real slingshot has.
-export const SLINGSHOT_KICK_SPEED_MS = 520 * PX_TO_M; // ~0.491 m/s, away-from-face lateral push
-export const SLINGSHOT_KICK_UPTABLE_BIAS_MS = 600 * PX_TO_M; // ~0.567 m/s, unconditional +Z addition - larger than SLINGSHOT_KICK_SPEED_MS by design, see comment above
+//
+// Active-obstacle power-hierarchy normalization (user-requested - "sling < normal pop bumper").
+// Both values lowered from the original 520/600, in two rounds:
+//
+// Round 1 (kick only, to ~54% of original): a standardized-approach playtest found the original
+// magnitudes put the slingshot's resulting speed measurably ABOVE a normal bumper's, backwards
+// from the intended hierarchy. Barely moved the result on its own, though (see
+// SLINGSHOT_RESTITUTION's own comment for why - restitution, not the kick, turned out to be the
+// dominant contributor).
+//
+// Round 2 (kick reduced further, restitution also lowered - see SLINGSHOT_RESTITUTION): even
+// after round 1, repeated measurement kept showing the slingshot's resulting speed at or above a
+// normal bumper's, which turned out to be a measurement-harness bug, not a real physics
+// discrepancy - the "peak speed" window was anchored to launch time rather than to the actual
+// contact frame, so for a bumper reached after some travel distance the reading was dominated by
+// the ball's own pre-contact gravity/tilt acceleration on the way in, not the post-hit response.
+// Anchoring the window to the real contact frame (the frame a mesh first appears in the game's
+// own hitCooldowns map - handlePhysicalHit()'s own signal, not a guessed one) fixed this: with
+// the corrected methodology the slingshot measured clearly below the normal bumper across repeated
+// trials (median ~0.33-0.36 m/s vs. the bumper's consistent ~0.47), matching the ordering both
+// constants already guaranteed on paper (0.170 kick vs. 0.453, 0.45 restitution vs. 0.85). Both
+// values are left at their round-2, comfortably-below-bumper magnitudes rather than walked back up
+// closer to the original - this sandbox's Havok/swiftshader run-to-run noise (still present even
+// with the corrected window) means a wide margin is worth more than a value tuned to sit just
+// barely under the bumper's. The BIAS > KICK ratio (~1.17x) from the comment above is preserved so
+// the "never feeds toward the drain" guarantee still holds.
+export const SLINGSHOT_KICK_SPEED_MS = 180 * PX_TO_M; // ~0.170 m/s, away-from-face lateral push - clearly below BUMPER_KICK_SPEED_MS (0.453) on its own
+export const SLINGSHOT_KICK_UPTABLE_BIAS_MS = 210 * PX_TO_M; // ~0.198 m/s, unconditional +Z addition - larger than SLINGSHOT_KICK_SPEED_MS by design, see comment above
+
+// Also part of the same power-hierarchy normalization as the two kick constants directly above.
+// Root cause of why round 1 (kick-only) barely moved the result: the slingshot previously shared
+// the bumper's own restitution (0.85), and Havok's own passive bounce - not the added kick -
+// turned out to be the dominant contributor to the slingshot's total resulting speed (its flat
+// angled face apparently transfers a more direct, fuller restitution bounce than a bumper's
+// curved sphere does at a comparable approach). Lowered separately from bumpers' own restitution
+// (bumpers don't have their own named constant yet - see buildObstacles()'s own literal, 0.85) so
+// the slingshot's passive bounce alone is clearly below a bumper's, not just competitive with it,
+// while staying well above a plain wall's (0.3) - a slingshot should still read as genuinely
+// springy, just the tier below a bumper, not tier-for-tier identical to one.
+export const SLINGSHOT_RESTITUTION = 0.45;
 
 export const REENTRY_LANE_RADIUS_M = 0.016;
 export const REENTRY_LANES = [
