@@ -61,8 +61,13 @@ function toDeg(rad) {
 // Reads pivot/tip world positions for both flippers at the current instant, via
 // window.__flipperDebug (see its own declaration in babylon-game.js for what it exposes and why).
 async function readGeometry(page) {
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
     const h = window.__flipperDebug;
+    // Real constant, dynamically imported from the game's own config module - NOT
+    // mesh.getBoundingInfo().boundingSphere, which reads ~2.5x too large here (the same inflated-
+    // bounding-sphere trap documented in this repo's obstacle-power-hierarchy tuning notes) and
+    // silently turned the drain-gap assertion below into nonsense on its first run.
+    const cfg = await import('../js/config.js');
     function snapshot(flipper) {
       const pivot = h.pivotWorldPosition(flipper);
       const tip = h.tipWorldPosition(flipper);
@@ -76,6 +81,7 @@ async function readGeometry(page) {
     }
     return {
       FLIPPER_SWEEP_RAD: h.FLIPPER_SWEEP_RAD,
+      ballDiameterM: cfg.BALL_DIAMETER_M,
       left: snapshot(h.leftFlipper),
       right: snapshot(h.rightFlipper)
     };
@@ -188,15 +194,32 @@ async function readGeometry(page) {
     Math.abs(leftFired.left.tip.y - rightFired.right.tip.y) < EPS_M && Math.abs(leftFired.left.tip.z - rightFired.right.tip.z) < EPS_M,
     { leftTip: leftFired.left.tip, rightTip: rightFired.right.tip });
 
-  // --- rest tips are down/outward. "Down" here means toward the camera/drain end of the table
+  // --- rest tips are down/inward. "Down" here means toward the camera/drain end of the table
   // (smaller world Z - see FLIPPER_Z_M's own comment: negative Z is the near-camera end), NOT
   // world-vertical Y (a flipper's Y never changes at all - see the pivot-displacement check
-  // above - rotation is purely about the Y axis). "Outward" means further from the table's own
-  // centerline (X=0) than the pivot, on the same side as that flipper's own half. ---
-  check('rest: LEFT tip is outward of its own pivot (more negative X)', rest.left.tip.x < rest.left.pivot.x - EPS_M,
+  // above - rotation is purely about the Y axis). "Inward" means the tip sits closer to the
+  // table's centerline (X=0) than its own hinge does - the real-machine mounting (see
+  // FLIPPER_PIVOT_X_M's "MOUNTING LAYOUT" comment in config.js) hinges each bat at the OUTER end
+  // with the bat reaching in toward center, so a correct rest pose is inboard-and-down. The two
+  // tips stop short of the centerline, leaving the classic center drain gap - that gap's width is
+  // asserted separately below. ---
+  check('rest: LEFT tip is inboard of its own hinge (closer to centerline)', rest.left.tip.x > rest.left.pivot.x + EPS_M,
     { tipX: rest.left.tip.x, pivotX: rest.left.pivot.x });
-  check('rest: RIGHT tip is outward of its own pivot (more positive X)', rest.right.tip.x > rest.right.pivot.x + EPS_M,
+  check('rest: RIGHT tip is inboard of its own hinge (closer to centerline)', rest.right.tip.x < rest.right.pivot.x - EPS_M,
     { tipX: rest.right.tip.x, pivotX: rest.right.pivot.x });
+  // --- Real-machine mounting invariants: hinges outboard of the tips (a bat reaching IN, not
+  // OUT - the exact thing that was mirrored before and made the flippers read as "backwards"),
+  // and a center drain gap wide enough for the ball to pass between two idle flippers, which is
+  // what makes flipping matter at all. ---
+  check('mounting: LEFT hinge is outboard of its own tip', Math.abs(rest.left.pivot.x) > Math.abs(rest.left.tip.x) + EPS_M,
+    { pivotX: rest.left.pivot.x, tipX: rest.left.tip.x });
+  check('mounting: RIGHT hinge is outboard of its own tip', Math.abs(rest.right.pivot.x) > Math.abs(rest.right.tip.x) + EPS_M,
+    { pivotX: rest.right.pivot.x, tipX: rest.right.tip.x });
+  const restGapM = rest.right.tip.x - rest.left.tip.x;
+  const ballD = rest.ballDiameterM;
+  check('mounting: idle flippers leave a ball-sized center drain gap (1-2 ball diameters)',
+    restGapM > ballD && restGapM < ballD * 2,
+    { restGapM, ballDiameterM: ballD, ballDiameters: restGapM / ballD });
   check('rest: LEFT tip is toward the camera/drain end (smaller Z than its pivot)', rest.left.tip.z < rest.left.pivot.z - EPS_M,
     { tipZ: rest.left.tip.z, pivotZ: rest.left.pivot.z });
   check('rest: RIGHT tip is toward the camera/drain end (smaller Z than its pivot)', rest.right.tip.z < rest.right.pivot.z - EPS_M,
