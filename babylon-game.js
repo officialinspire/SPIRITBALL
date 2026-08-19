@@ -4346,6 +4346,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         let plungerChargeElapsedMs = 0;
         let plungerPower = PLUNGER_MIN_POWER_MS;
         const statusPlungerCharge = document.getElementById('status-plunger-charge');
+        // Guards triggerLaunchFiredFlash() below against re-entry - not a real-world concern (a
+        // second real fire can't happen until ballInPlay cycles back through resetBallToPlunger(),
+        // which is well past this flash's own short lifetime either way) but cheap to have.
+        let launchFiredFlashActive = false;
 
         // Ported from InputManager.setLaunchReady() in ../index.js - toggles the launch button's
         // idle-pulse affordance (see .launch-btn.ready in index.html) so it only visibly invites
@@ -4365,6 +4369,37 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function setControlsDimmed(dimmed) {
             const controls = document.getElementById('mobile-controls');
             if (controls) controls.classList.toggle('dimmed', dimmed);
+        }
+
+        // Control-feedback polish (user-requested - "distinguish READY/CHARGING/FIRED"): the one
+        // launch-button state that had no visual of its own before this - READY is .ready (see its
+        // own CSS comment) and CHARGING is .pressed with the real chargePercent-scaled glow (see
+        // that rule's own comment), but the instant AFTER a real launch both of those get removed
+        // and nothing replaced them, so a just-fired button looked identical to an idle one with
+        // nothing pending. Same "look the button up fresh" pattern as setLaunchReady()/
+        // setControlsDimmed() above. Called only from handleLaunchRelease() at the exact real
+        // ballInPlay=false->true transition (see its own call site) - never a decorative timer of
+        // its own, so this can't drift out of sync with whether a launch actually happened.
+        function triggerLaunchFiredFlash() {
+            const btn = document.getElementById('launch-btn');
+            if (!btn || launchFiredFlashActive) return;
+            launchFiredFlashActive = true;
+            btn.classList.add('fired');
+            if (window.SPIRITBALL_reducedMotion) {
+                // No 'animationend' will ever fire (index.html's reduced-motion block sets
+                // animation: none on .fired) - hold the static flash look this same CSS rule
+                // defines for a fixed duration instead, so reduced-motion players still get a
+                // clear, if motion-free, "that fired" acknowledgement rather than none at all.
+                setTimeout(() => {
+                    btn.classList.remove('fired');
+                    launchFiredFlashActive = false;
+                }, 260); // matches launch-fired-flash's own animation-duration in index.html
+            } else {
+                btn.addEventListener('animationend', function onLaunchFiredFlashEnd() {
+                    btn.classList.remove('fired');
+                    launchFiredFlashActive = false;
+                }, { once: true });
+            }
         }
 
         function resetBallToPlunger() {
@@ -4455,6 +4490,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mainBall.aggregate.body.setLinearVelocity(new BABYLON.Vector3(velocityX, 0, velocityZ));
             mainBall.stuckTimeMs = 0;
             ballInPlay = true;
+            triggerLaunchFiredFlash(); // FIRED state - see its own comment; right at the real fire transition, not before (the guard above can still return early with no fire at all)
             plungerCharging = false;
             plunger.chargePercent = 0;
             launchBtn.style.setProperty('--charge-pct', 0);

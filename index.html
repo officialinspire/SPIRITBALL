@@ -468,7 +468,15 @@
         }
 
         .flipper-zone {
-            transition: opacity 0.12s ease-out;
+            /* Control-feedback polish (user-requested - "immediate subtle pressed-state
+               reaction... release visual immediately on release"): shortened from 0.12s. This only
+               governs the dimmed<->full-opacity fade (see #mobile-controls.dimmed above) - the
+               class toggle itself (leftZone.classList.add/remove('pressed'), in babylon-game.js)
+               is already synchronous with touchstart/touchend, so this duration was always purely
+               how long the CSS took to visually catch up, never real input lag. Still eased, not
+               0ms, so a mid-ball dimmed->pressed jump doesn't pop instantaneously, but short enough
+               to read as immediate rather than a fade. */
+            transition: opacity 0.06s ease-out;
             position: absolute;
             top: 0;
             bottom: 0;
@@ -523,7 +531,13 @@
                 0 0 25px rgba(0, 255, 255, 0.5),
                 0 4px 15px rgba(0, 0, 0, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.2);
-            transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
+            /* Same "immediate...reaction" polish as .flipper-zone's own opacity transition above -
+               shortened from 0.1s. This is the visible icon's press/release snap (scale + glow);
+               the actual flipper motor activates synchronously on touchstart regardless of this
+               value (see activateFlipper()/deactivateFlipper() in babylon-game.js) - shortening it
+               only makes the on-screen cue catch up to that real state change faster, it can't make
+               the real activation any faster or slower. */
+            transition: transform 0.06s ease-out, box-shadow 0.06s ease-out;
         }
 
         .flipper-zone.pressed .flipper-zone-icon {
@@ -562,7 +576,12 @@
                 0 0 30px rgba(255, 165, 0, 0.5),
                 0 4px 15px rgba(0, 0, 0, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.3);
-            transition: transform 0.1s ease-out, box-shadow 0.1s ease-out, background 0.1s ease-out, opacity 0.12s ease-out;
+            /* Control-feedback polish (user-requested) - same "immediate...reaction" tightening as
+               the flipper zones' own transitions above (0.1s/0.12s -> 0.06s); the actual plunger
+               charge itself is driven every frame by real chargePercent regardless of this value
+               (see this rule's own --charge-pct comment below), so shortening it only makes the
+               PRESS/RELEASE edges (not the continuous charging glow) read as more instant. */
+            transition: transform 0.06s ease-out, box-shadow 0.06s ease-out, background 0.06s ease-out, opacity 0.06s ease-out;
             /* Read by .launch-btn.pressed's box-shadow below - kept updated every frame while
                charging (see updatePlungerVisual()'s call site in babylon-game.js), reusing
                plunger.chargePercent, which already exists for the in-scene plunger piston
@@ -575,13 +594,61 @@
         .launch-btn-icon { font-size: clamp(22px, 6vw, 32px); line-height: 1; }
         .launch-btn-label { font-size: clamp(10px, 2.6vw, 13px); font-weight: 900; letter-spacing: 2px; }
 
+        /* Control-feedback polish (user-requested - "distinguish READY/CHARGING/FIRED" and
+           "reduced-motion mode should keep state indication while removing motion"): .ready used
+           to define NOTHING but the animation itself, so under prefers-reduced-motion (which
+           strips it to `animation: none` a few rules below, same as every other looping animation
+           in this file) a ready button fell back to the exact same box-shadow/border as a plain,
+           not-yet-ready one - the ONLY thing distinguishing "you can launch right now" from "wait"
+           was motion, which is precisely what a reduced-motion player has turned off. Ready now
+           has its own real, static, brighter border/glow baseline (matching the pulse's own 0%/
+           100% keyframe values, so a motion-enabled player sees no jump when the animation is
+           removed/added) - the animation becomes a pulse ON TOP of a real static difference, not
+           the only signal of it. */
         .launch-btn.ready {
+            border-color: rgba(255, 200, 0, 1);
+            box-shadow:
+                0 0 38px rgba(255, 190, 0, 0.75),
+                0 4px 15px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3);
             animation: launch-ready-pulse 1.4s ease-in-out infinite;
         }
 
         @keyframes launch-ready-pulse {
-            0%, 100% { box-shadow: 0 0 30px rgba(255, 165, 0, 0.5), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
-            50% { box-shadow: 0 0 48px rgba(255, 200, 0, 0.85), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+            0%, 100% { box-shadow: 0 0 38px rgba(255, 190, 0, 0.75), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+            50% { box-shadow: 0 0 52px rgba(255, 210, 0, 0.95), 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+        }
+
+        /* FIRED - the one launch-button state this panel never actually had before (user-requested
+           - "distinguish READY/CHARGING/FIRED"). Previously, the instant after a real launch,
+           .ready was removed and .pressed was removed right behind it, leaving the button with
+           NO visual difference from "idle, nothing to do" (e.g. mid-ball with nothing pending) -
+           a player got camera shake/sound/haptic for the launch itself, but the button they just
+           held gave no acknowledgement of its own. This is a brief, one-shot flash (not a loop),
+           triggered directly by the real fire transition (see triggerLaunchFiredFlash()'s call
+           site in handleLaunchRelease(), babylon-game.js - exactly the moment ballInPlay flips
+           true, never a decorative timer of its own) and removed again via the real 'animationend'
+           event once it plays out - the class's own presence IS the state, not a fixed-length
+           setTimeout racing the animation. */
+        @keyframes launch-fired-flash {
+            0% {
+                border-color: #ffffff;
+                box-shadow:
+                    0 0 60px rgba(255, 255, 255, 0.95),
+                    0 0 95px rgba(255, 180, 0, 0.75),
+                    inset 0 0 30px rgba(255, 255, 255, 0.5);
+            }
+            100% {
+                border-color: rgba(255, 165, 0, 0.8);
+                box-shadow:
+                    0 0 30px rgba(255, 165, 0, 0.5),
+                    0 4px 15px rgba(0, 0, 0, 0.3),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            }
+        }
+
+        .launch-btn.fired {
+            animation: launch-fired-flash 260ms ease-out;
         }
 
         /* CHARGING, not just "pressed" - the glow's own spread/blur/alpha scale continuously with
@@ -1011,6 +1078,22 @@
             #player-hud #hud-score.hud-pulse,
             #player-hud #hud-score.hud-pulse-strong,
             #player-hud #hud-lives.hud-lives-lost { animation: none; }
+            /* FIRED flash (user-requested - "keep state indication while removing motion"): the
+               animation is dropped like everything else in this block, but unlike those, .fired
+               needs a static replacement, not just a bare `animation: none` - it's a one-shot
+               transient acknowledgement, not a persistent state with its own resting look
+               elsewhere in this file. triggerLaunchFiredFlash() (babylon-game.js) checks this same
+               reduced-motion flag and holds the class for a fixed duration via setTimeout instead
+               of waiting for 'animationend' (which never fires with animation:none), so the class
+               being present for that window is what carries the signal here. */
+            .launch-btn.fired {
+                animation: none;
+                border-color: #ffffff;
+                box-shadow:
+                    0 0 45px rgba(255, 255, 255, 0.85),
+                    0 4px 15px rgba(0, 0, 0, 0.3),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            }
         }
     </style>
 
