@@ -155,6 +155,38 @@ async function readGeometry(page) {
     await page.waitForTimeout(300);
   }
 
+  // --- SUSTAINED-USE DRIFT (regression guard for the "flippers fly off the screen after a few
+  // flips" playtest bug). The paddle mesh is a CHILD of the pivot node with a constant local
+  // offset that createFlipper() sets once and must never touch again. Anything that writes to the
+  // paddle's world transform - notably pushing a velocity onto the ANIMATED body, which Havok then
+  // integrates and Babylon syncs back onto the parented mesh - lands in that local offset and
+  // compounds every swing, walking the bat off the table (measured before the fix: 0.03m after one
+  // cycle, 1.4m by the eighth, 4.7m by the twenty-fifth, on a 0.9m table). A single flip barely
+  // moves it, which is exactly why this survived every earlier single-fire geometry check - so
+  // this one deliberately runs many cycles and demands EXACT invariance, not a tolerance. ---
+  const drift = await page.evaluate(({ cycles }) => {
+    const h = window.__flipperDebug;
+    const engine = h.scene.getPhysicsEngine();
+    const out = {};
+    for (const side of ['left', 'right']) {
+      const f = side === 'left' ? h.leftFlipper : h.rightFlipper;
+      const localBefore = f.mesh.position.clone();
+      const pivotBefore = f.pivotNode.position.clone();
+      for (let c = 0; c < cycles; c++) {
+        f.active = true;
+        for (let i = 0; i < 10; i++) { h.updateFlipperMotor(f, 16); engine._step(16 / 1000); }
+        f.active = false;
+        for (let i = 0; i < 14; i++) { h.updateFlipperMotor(f, 16); engine._step(16 / 1000); }
+      }
+      const lp = f.mesh.position, pn = f.pivotNode.position;
+      out[side] = {
+        localOffsetDrift: Math.hypot(lp.x - localBefore.x, lp.y - localBefore.y, lp.z - localBefore.z),
+        pivotDrift: Math.hypot(pn.x - pivotBefore.x, pn.y - pivotBefore.y, pn.z - pivotBefore.z),
+      };
+    }
+    return out;
+  }, { cycles: 40 });
+
   await browser.close();
 
   // =====================================================================================
@@ -285,6 +317,17 @@ async function readGeometry(page) {
   const leftStayedOnArrowRight = dist(rest.left.tip, rightFired.left.tip);
   check('ArrowRight moves the physical RIGHT paddle', rightMovedOnArrowRight > 0.01, { rightMovedOnArrowRight });
   check('ArrowRight leaves the physical LEFT paddle untouched', leftStayedOnArrowRight < EPS_M, { leftStayedOnArrowRight, EPS_M });
+
+  // Threshold, not exact zero: the live render loop is stepping physics alongside this test, so a
+  // float32 transform round-trip leaves sub-micrometre residue (measured: 3.1e-6 m over 40 cycles
+  // with the bug fixed). 0.5mm sits ~160x above that noise floor and ~15,000x below the actual bug
+  // (7.8 METRES over the same 40 cycles), so it cannot be tripped by rounding nor slip a real leak
+  // through - even a leak 100x weaker than the original would still register ~80mm here.
+  const EPS_DRIFT_M = 0.0005;
+  check('sustained use: LEFT paddle local offset never drifts (40 flip cycles)', drift.left.localOffsetDrift < EPS_DRIFT_M, { ...drift.left, EPS_DRIFT_M });
+  check('sustained use: RIGHT paddle local offset never drifts (40 flip cycles)', drift.right.localOffsetDrift < EPS_DRIFT_M, { ...drift.right, EPS_DRIFT_M });
+  check('sustained use: LEFT hinge never moves (40 flip cycles)', drift.left.pivotDrift < EPS_DRIFT_M, { ...drift.left, EPS_DRIFT_M });
+  check('sustained use: RIGHT hinge never moves (40 flip cycles)', drift.right.pivotDrift < EPS_DRIFT_M, { ...drift.right, EPS_DRIFT_M });
 
   check('no uncaught page errors', pageErrors.length === 0, pageErrors);
 

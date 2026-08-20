@@ -2195,16 +2195,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // point instead of the paddle's center of mass - this function's job is just keeping
     // angularVelocityRad (and the body's own velocity fields, for correctness) current for that to
     // read.
+    //
+    // RUNAWAY-PADDLE FIX (playtest bug: "flippers fly off the screen after a few flips"): this
+    // function used to ALSO push that same omega/v back onto the Havok body via
+    // setAngularVelocity()/setLinearVelocity(). Those two calls were the bug. Havok integrates
+    // velocity on an ANIMATED body, so each frame it displaced the body slightly; Babylon then
+    // synced the body's world transform back onto the paddle mesh, and because that mesh is a
+    // CHILD of the pivot node (see createFlipper()) the write landed in its LOCAL offset - the one
+    // value createFlipper() sets once to (FLIPPER_LENGTH_M/2, 0, 0) and must never touch again.
+    // The error compounded every swing: measured across repeated flip cycles, the local offset
+    // drifted 0.03m after one cycle, 1.4m by the eighth, and 4.7m by the twenty-fifth - on a
+    // 0.9m table. That is exactly the reported "works the first few times, then flies away"
+    // (the pivot node itself never moved - 0.00m drift throughout - so the hierarchy was sound;
+    // only the parented mesh was being walked away from it).
+    //
+    // Removing them costs nothing: this function's own comment above already documents, from
+    // direct measurement, that Havok never reads a kinematic body's velocity for contact response,
+    // and applyFlipperContactVelocity() - the code that actually transfers momentum to the ball -
+    // reads flipper.angularVelocityRad (a plain JS field, set below), not the body. Nothing in
+    // this file reads the flipper body's velocity at all. So the paddle keeps its full, correct
+    // contact behaviour while no longer being integrated out of position.
     function syncFlipperPhysicsVelocity(flipper, oldAngleRad, dt) {
         const omega = dt > 0 ? (flipper.currentAngleRad - oldAngleRad) / dt : 0;
         flipper.angularVelocityRad = omega;
-        const omegaVec = new BABYLON.Vector3(0, omega, 0);
-        flipper.aggregate.body.setAngularVelocity(omegaVec);
-
-        const pivotPos = flipper.pivotNode.getAbsolutePosition();
-        const comPos = flipper.mesh.getAbsolutePosition();
-        const r = comPos.subtract(pivotPos);
-        flipper.aggregate.body.setLinearVelocity(BABYLON.Vector3.Cross(omegaVec, r));
     }
 
     function flipperAngleDegrees(flipper) {
