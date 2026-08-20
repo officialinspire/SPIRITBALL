@@ -394,7 +394,34 @@ export const FLIPPER_FRICTION = 0.4;
 // respects (clampBodySpeed() call at the end of applyFlipperContactVelocity()), so no value here
 // can ever produce an unbounded spike regardless of how many genuine separate contacts compound
 // during one swing.
-export const FLIPPER_CONTACT_VELOCITY_TRANSFER = 3.0;
+// Flipper->ball energy-transfer tuning pass (user-requested, measured): 3.0 -> 2.4.
+//
+// The problem with 3.0 was NOT weak shots - it was the opposite. Measured on realistic rolling
+// approaches (ball rolls down-table, flipper fires as it arrives), every contact point pinned the
+// MAX_BALL_SPEED_MS ceiling: base 1.700 (100% of the 1.7 clamp), mid 1.600 (94%), tip 1.702
+// (100%). A base hit and a clean tip hit came off at the SAME speed, so how well the player timed
+// the shot carried no information - the "every touch launching maximum speed" failure mode.
+//
+// 2.4 differentiates shot strength without costing any reach. Across 42 varied flipper shots it
+// measured indistinguishable from 3.0 on how far the ball actually travels (upper-third reach
+// 12% vs 10%, best Z 0.251 vs 0.248, mid-table reach 100% both) while pulling average exit speed
+// down 1.580 -> 1.463 and taking a mid-bat contact from 94% to 76% of the clamp. So the strongest
+// shot is undiminished and the softer ones are no longer maxed out.
+//
+// Do NOT drop this further chasing a wider spread: 2.0 was measured and is a clear regression -
+// upper-third reach 0%, mid-table reach falls 100% -> 86%, and best Z halves (0.248 -> 0.111).
+// The tip shot needs to stay at/near the clamp for "a properly timed hit is the main tool for
+// reaching the upper table" to hold.
+//
+// The base < tip ordering needs no special-casing and is not tuned here: the transfer is
+// v = omega x r at the REAL contact point, so contact radius alone produces it. Verified linear in
+// this scalar - at a fixed 0.0277m contact radius, exit speed went 0.757 / 0.484 / 0.348 / 0.212
+// for transfer 3.0 / 2.0 / 1.5 / 1.0.
+//
+// Unchanged: flipper geometry, sweep, activate/return speeds, resting behaviour, and the
+// held-flipper guarantee (omega is 0 once the bat reaches its stop, so a held flipper adds
+// nothing - re-verified at every value tested; a cradled ball stayed at ~0 m/s).
+export const FLIPPER_CONTACT_VELOCITY_TRANSFER = 2.4;
 
 // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
 export const BUMPER_RADIUS_M = 0.02;
