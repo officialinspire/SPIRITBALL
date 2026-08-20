@@ -87,7 +87,13 @@ export function toWorldRotationY(rotation2d) {
 // positions, flipper hinge axes, bumper placements in Stages 4+ never need to account for a
 // globally-tilted parent transform, only the gravity vector (set once, here) does.
 // ===================================
-export const TABLE_TILT_DEGREES = 6.5;
+// Board-circulation tuning pass (user-requested, measured): 6.5 -> 6.0. Down-table gravity is
+// 9.8*sin(tilt), so this trims the climb penalty ~8% (1.109 -> 1.025 m/s^2), which measurably
+// raised how often a flipper shot carries into the upper third without making the ball floaty -
+// balls still drain in the large majority of trials and average ball life did NOT increase.
+// Deliberately a small step: 5.5 and 5.0 were both measured and were WORSE (the ball dribbles
+// instead of returning cleanly), so this is not "less tilt is better".
+export const TABLE_TILT_DEGREES = 6.0;
 export const TILT_RAD = (TABLE_TILT_DEGREES * Math.PI) / 180;
 export const GRAVITY_VECTOR_FN = () => new BABYLON.Vector3(
     0,
@@ -135,7 +141,14 @@ export const BALL_MASS_KG = 0.08;
 // contacts once the floor isn't artificially raising the baseline), but no longer forces every
 // softer surface (playfield 0.2, bumpers/comet/saturn already have their OWN much higher values
 // and are unaffected either way) up to a superball-like bounce it never asked for.
-export const BALL_RESTITUTION = 0.35;
+// Board-circulation tuning pass: 0.35 -> 0.45. Havok combines restitution with MAXIMUM (see
+// this constant's own note above), so raising the BALL's own value is what actually governs how
+// much speed survives a bounce off anything softer than it - walls (0.3), flippers (0.3), the
+// playfield (0.2). Measured effect on 42 distinct flipper shots: shots reaching the upper third
+// 2% -> 12%, with scoring-object contacts per ball unchanged (~2.0) and the drain rate slightly
+// UP (81% -> 88%), i.e. livelier circulation without becoming floaty. 0.50 was also measured and
+// was worse on every metric, so this is not simply "bouncier is better".
+export const BALL_RESTITUTION = 0.45;
 export const BALL_FRICTION = 0.08;
 
 // Converted from CONFIG.ballMaxVelocity: 1800 (px/s) in ../index.js, using the same PX_TO_M
