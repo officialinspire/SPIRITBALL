@@ -85,7 +85,7 @@ import {
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
     VISION_GATE_RADIUS_M, VISION_GATE_COLLAR_RADIUS_M, SCORE_VISION_GATE, VISION_GATE_SEQUENCE_MS,
     COOLDOWN_VISION_GATE_MS, VISION_GATE_EJECT_SPEED_MS, HEX_VISION_GATE, BALL_REST_X_PX,
-    BALL_REST_Z_PX, BALL_REST_Z_M, BALL_REST_Y_M, LANE_INNER_WALL_X_PX,
+    BALL_REST_Z_PX, BALL_REST_Z_M, BALL_REST_Y_M, LANE_INNER_WALL_X_PX, LANE_INNER_WALL_WIDTH_PX,
     LANE_WALL_Z_TOP_PX, LANE_WALL_Z_BOTTOM_PX, PLUNGER_CHARGE_TIME_MS, PLUNGER_MIN_POWER_MS,
     PLUNGER_MAX_POWER_MS, PLUNGER_HORIZONTAL_BASE_MS, PLUNGER_HORIZONTAL_RATIO, SKILL_SHOT_WINDOW_MS,
     SKILL_SHOT_Z_M, SKILL_SHOT_DEPTH_M, SCORE_SKILL_SHOT_SUPER, SCORE_SKILL_SHOT_MID,
@@ -959,9 +959,52 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             { name: 'leftWall', x: 15, y: 480, w: 30, h: 960, rot: 0 },
             { name: 'rightWall', x: 525, y: 480, w: 30, h: 960, rot: 0 },
             { name: 'leftSlant', x: 90, y: 760, w: 180, h: 20, rot: -0.5 },
-            { name: 'rightSlant', x: 450, y: 760, w: 180, h: 20, rot: 0.5 },
-            { name: 'leftGuide', x: 100, y: 450, w: 200, h: 15, rot: 1.2 },
-            { name: 'rightGuide', x: 440, y: 450, w: 200, h: 15, rot: -1.2 }
+            // Ball-flow geometry pass (user-requested, measured): rightSlant SHORTENED from its
+            // outer (wall-side) end, 180px -> 85px, centre walked back along its own axis so the
+            // inner end - the junction with slingshot1 that actually forms the lower-right funnel -
+            // lands within 0.3mm of where it already was. The removed 95px lay entirely INSIDE the
+            // plunger lane, which it crossed diagonally, and did three bad things there:
+            //   1. It sealed the lane. Widest opening at z=-0.250 was 12.4mm against a 27.0mm ball;
+            //      measured 0/6 balls driven up the lane from below ever got past z=-0.267.
+            //   2. It intercepted the ball before the PLUNGER could. createPlunger()'s own comment
+            //      is explicit that the plunger is the mechanical stop the resting ball leans on -
+            //      but the slant caught the ball ~18mm up-table of the rod, so the rod never
+            //      touched it, and the configured rest spot (toWorldX/Z of BALL_REST_*_PX) put the
+            //      ball's centre INSIDE this wall, ejecting it at up to 0.15 m/s before every
+            //      launch. With the slant clear of the lane the ball rolls the last ~7mm onto the
+            //      plunger exactly as that comment describes.
+            //   3. It turned the lane into a one-way ball trap. The pocket it formed above the seal
+            //      had no drain and no up-table exit, and the anti-stuck kick (centreward + DOWNHILL
+            //      by construction) pushes a ball there straight back into the corner: measured 18%
+            //      of shots ending permanently parked, unrecoverable. The lane now falls through to
+            //      the right outlane like any other return path.
+            // The outer end still overlaps launchLaneWall (which runs z -0.331..-0.161 right where
+            // the slant now terminates), so the lower-right funnel stays sealed against the
+            // playfield - only the part of this wall that was inside the lane is gone.
+            { name: 'rightSlant', x: 408, y: 783, w: 85, h: 20, rot: 0.5 },
+            // Ball-flow geometry pass (user-requested, measured): both mid-table guides SHORTENED
+            // from their lower (down-table) ends, 200px -> 157px, with the centre walked up the
+            // guide's own axis by half the removed length (100,450 -> 108,430 and its mirror) so
+            // the UPPER tip lands within 0.2mm of where it already was. Only the lower tip moves.
+            //
+            // Why: each guide's lower tip was the widest-outboard point on the whole rail, and it
+            // sat 25.3mm from its side wall's inner face - 1.7mm LESS than the ball's own 27.0mm
+            // diameter (BALL_DIAMETER_M). The wall-hugging channel outboard of each guide is the
+            // table's only full-height route from mid-table to the top arc, and that tip sealed
+            // its entrance. Worse, it sealed it *inconsistently*: measured 0/20 balls through at
+            // 0.35-0.70 m/s but 16/20 at 1.20-1.60 m/s, because a fast ball forces the 1.7mm
+            // shortfall by solver penetration. Same shot, same aim, different outcome by speed is
+            // the definition of "feels random rather than physical".
+            //
+            // Shortening rather than translating is deliberate and was checked both ways: moving
+            // the whole guide inboard widens this pinch but closes the guide-tip-to-orbit-rail gap
+            // at the TOP by the same amount, which is the middle third's other entrance to the
+            // upper board. Trimming the lower end only widens the pinch to 40.2mm (1.49 ball
+            // diameters) while leaving that upper gap untouched. The guides keep their full
+            // inward-redirect job for everything approaching between the tips - only their dead
+            // bottom 43px, whose sole measured effect was rejecting up-table shots, is gone.
+            { name: 'leftGuide', x: 108, y: 430, w: 157, h: 15, rot: 1.2 },
+            { name: 'rightGuide', x: 432, y: 430, w: 157, h: 15, rot: -1.2 }
         ];
 
         const walls = wallDefs.map((def) => {
@@ -1080,7 +1123,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         laneMat.emissiveColor = COLOR_WALL.scale(0.07);
 
         const wall = BABYLON.MeshBuilder.CreateBox('launchLaneWall', {
-            width: 8 * PX_TO_M,
+            width: LANE_INNER_WALL_WIDTH_PX * PX_TO_M,
             height: WALL_HEIGHT_M,
             depth: (LANE_WALL_Z_BOTTOM_PX - LANE_WALL_Z_TOP_PX) * PX_TO_M
         }, scene);

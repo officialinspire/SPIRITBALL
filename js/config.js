@@ -704,11 +704,28 @@ export const ORBIT_TRIGGER_DEPTH_M = 0.025;
 // considered stale (a ball that entered, stalled, and rolled back down shouldn't silently
 // score if it happens to clip the completion trigger much later on some unrelated pass).
 export const ORBIT_COMPLETION_WINDOW_MS = 4000;
+//
+// Ball-flow geometry pass (user-requested, measured): the right rail moved INBOARD ~13mm, from
+// 0.09/0.10 to 0.077/0.082, so it now very nearly mirrors the left one. The two rails had never
+// been mirrored while leftGuide/rightGuide (which they meet) always were, and the consequence was
+// only visible once the real colliders were measured: the gap a ball must thread to get from the
+// centre channel out into its orbit lane was 38.1mm (1.41 ball diameters) on the LEFT and 23.4mm
+// (0.87) on the RIGHT - i.e. the right orbit had no ball-sized entrance from mid-table at all,
+// reachable only over the top arc. It is now ~35mm (1.30) against the left's ~36.5mm (1.35).
+// Deliberately 2mm short of an exact mirror: a perfect mirror puts the rail's own edge 0.3mm from
+// visionGatePost1, which would read as an intersecting mesh; 0.077/0.082 keeps 2.3mm of daylight
+// there while still opening the entrance. Everything downstream follows the rail automatically -
+// its end post, bevel cap, floor tint, and the entrance/completion rollovers (moved with it so
+// they stay in the lane they mark). No scoring value, trigger size, or Z position changed.
+//
+// Side effect, checked and wanted: this also makes the four upper-table corridors symmetric -
+// Saturn's shoulders become 39.5mm/39.4mm (was 58.4/39.4), the boss-bumper lanes 43mm/43.3mm
+// (was 59.0/43.3), and the comet channel widens from 45.4mm to ~64mm.
 export const ORBITS = [
     // Left: rail runs alongside the mission target bank's inner (Saturn-facing) edge.
     { side: 'left', railBottomX: -0.075, railTopX: -0.08, entranceX: -0.078, completionX: -0.08 },
-    // Right: rail runs alongside the comet's inner (Saturn-facing) edge, through the wider gap.
-    { side: 'right', railBottomX: 0.09, railTopX: 0.1, entranceX: 0.095, completionX: 0.1 }
+    // Right: near-mirror of the left (see the note just above), running inboard of the comet.
+    { side: 'right', railBottomX: 0.077, railTopX: 0.082, entranceX: 0.08, completionX: 0.082 }
 ];
 
 // ===================================
@@ -765,7 +782,15 @@ export const HEX_VISION_GATE = 0xaa00ff; // vivid violet - "third eye" adjacent 
 
 // Launch lane position/size, ported from setupPlunger()'s launchPort rectangle and
 // resetBall()'s ball-rest position in ../index.js (2D CONFIG-space pixels), not redesigned.
-export const BALL_REST_X_PX = 470; // matches resetBall()'s (CONFIG.width-70, CONFIG.height-220) exactly
+// Ball-flow geometry pass (user-requested, measured): 470 -> 477. This is the axis the plunger
+// rod, the resting ball, and the shooter-lane dressing all share, and at 470 it sat 17mm inboard
+// of the launch lane's own centre line - hard against the lane's inner wall once the ball settled.
+// Measured consequence: a ball launched from x=0.1785 tops out at z=-0.034 every time (it is aimed
+// straight into rightGuide's lower end cap and thrown back), while the identical launch from the
+// lane's centre reaches z=+0.30 to +0.41. 477 puts the rod on the lane's centre line, so a launch
+// goes UP the lane instead of into its inner wall. LANE_INNER_WALL_X_PX still tracks it, keeping
+// the same 30px ball-clearance invariant that constant's own comment describes.
+export const BALL_REST_X_PX = 477; // was 470, ported from resetBall()'s (CONFIG.width-70, CONFIG.height-220)
 export const BALL_REST_Z_PX = 740;
 // The ball's actual rest position in world space - used directly for its spawn/reset
 // position, NOT plunger.baseZ (see PLUNGER_REST_Z_M's comment for why those two used to be,
@@ -785,6 +810,7 @@ export const BALL_REST_Y_M = BALL_DIAMETER_M / 2 + 0.002;
 // wall's own half-thickness (~0.0038m) =~0.017m of clearance from BALL_REST_X_PX; picked 30px
 // (~0.028m) for a comfortable margin, which also reads as a believably real-width lane.
 export const LANE_INNER_WALL_X_PX = BALL_REST_X_PX - 30; // 440
+export const LANE_INNER_WALL_WIDTH_PX = 8; // launchLaneWall's own thickness, shared with buildLaunchLane()
 // Bug fix (reported: ball gets stuck in the chute on mobile, never reaching the main table) -
 // was 500 ("a bit past the old decorative port's own 535-785 span for margin"), meaning the
 // ball had to coast ~0.227m from its rest position to the lane's exit while the tilted table's
