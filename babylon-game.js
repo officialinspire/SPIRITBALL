@@ -1444,6 +1444,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // automatically on every texture.update() call below, so this stays correct across
         // redraws, not just the first paint.
         const texture = new BABYLON.DynamicTexture('backglassTex', { width, height }, scene, true);
+        // Backglass typography pass: anisotropic filtering, gated on real hardware support the
+        // same way applySkinTexture() gates its own (the WEBGL_ANISOTROPIC_FILTER extension is
+        // not universal). This panel is BOTH minified ~4.2x and tilted 0.4rad away from the
+        // camera, which is precisely the case plain mipmapping handles worst - it picks one mip
+        // level for the whole quad, so a surface foreshortened in one axis gets over-blurred
+        // along the other. Measured rather than assumed to be the useful lever here: raising the
+        // texture's own resolution does nothing at this minification (the source is already ~4x
+        // oversampled), whereas how it is SAMPLED is exactly what was costing the small type.
+        const bgMaxAnisotropy = scene.getEngine().getCaps().maxAnisotropy;
+        if (bgMaxAnisotropy > 0) {
+            texture.anisotropicFilteringLevel = Math.min(8, bgMaxAnisotropy);
+        }
         const ctx = texture.getContext();
 
         const mat = new BABYLON.StandardMaterial('backglassMat', scene);
@@ -1484,8 +1496,52 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             bonusMultiplierX: 1
         };
 
+        // ===================================================================================
+        // Backglass typography pass (user-requested - relate this panel to the player score HUD,
+        // keep high score / rank / mission / multiplier / messages, never duplicate the live
+        // SCORE, and stop important information depending on tiny text).
+        //
+        // MEASURED FIRST, designed second. "Readable from the actual gameplay camera" is not a
+        // judgement call, so the panel's real on-screen size was measured rather than estimated:
+        // the render loop is stopped, the texture is painted flat black, screenshotted, painted
+        // flat white, screenshotted again, and the two frames differenced - whatever changed IS
+        // the panel, with no projection maths to get wrong and no scene animation to pollute it.
+        // Result: this 0.32x0.15m plane covers 238x111 CSS px at a 390px viewport and 253x118 at
+        // 1280, i.e. the 1024px-wide texture is minified about 4.2x on screen. That converts
+        // directly into a type scale:
+        //     30px texture ->  7.0 CSS px    (unreadable - recognisable as a shape at best)
+        //     46px         -> 10.7 px        (borderline)
+        //     60px         -> 13.9 px        (a readable label)
+        //    100px         -> 23.2 px        (comfortably readable)
+        //    150px         -> 34.9 px        (hero)
+        // The previous layout put RANK, the mission's own label, its progress numbers and both
+        // badges at 24-30px - 5.6 to 7.0 CSS px on screen. Those were not small, they were gone.
+        // Nothing below 46px survives this pass, every VALUE is at least 78px, and mission
+        // progress additionally stopped being text at all (see drawSegmentBar below): a bar is
+        // legible at any size, which is the only real answer to "do not make important
+        // information depend on tiny text" on a panel this size.
+        //
+        // RELATING TO #player-hud. The two displays now share a deliberate visual grammar rather
+        // than a colour: the same condensed/technical font stack for values and the same plain
+        // grotesque for legends, the same legend-above-readout split (small, wide-tracked, cyan
+        // legend; large, tight, bright value), and the same recessed display window - near-black
+        // face, hairline bezel, light catch along the top edge, fine dot grid. What differs is the
+        // register: the DOM HUD's readout is near-white, this panel's primary readout is amber.
+        // That is the point - a player must never mistake HIGH SCORE for their live score, which
+        // is also why the live score is still not drawn here at all.
+        // ===================================================================================
+        // Same stacks as #player-hud's --hud-digit-font / --hud-label-font (index.html). Canvas
+        // takes a full CSS font shorthand, so the identical fallback chain applies here; on a
+        // platform with none of the condensed faces both land on the same technical monospace the
+        // DOM HUD does, so the two displays stay in step wherever they end up.
+        const BG_VALUE_FONT = '"Bahnschrift", "DIN Condensed", "DIN Alternate", "Roboto Condensed", '
+            + '"Arial Narrow", "Liberation Sans Narrow", "Nimbus Sans Narrow", Consolas, "SF Mono", '
+            + 'Menlo, "Roboto Mono", "DejaVu Sans Mono", "Liberation Mono", monospace';
+        const BG_LABEL_FONT = 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, '
+            + '"Liberation Sans", "DejaVu Sans", sans-serif';
+
         // Manual rounded-rect path (not ctx.roundRect - not universally supported on every
-        // engine/browser this build might run on) used by the two "backing plate" helpers below.
+        // engine/browser this build might run on) used by the drawing helpers below.
         function roundRectPath(x, y, w, h, r) {
             ctx.beginPath();
             ctx.moveTo(x + r, y);
@@ -1500,138 +1556,297 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             ctx.closePath();
         }
 
-        // Dark backing plate (user-requested - "dark backing opacity") behind a text block: a
-        // filled rounded rect well darker/more opaque than the panel's own base fill, plus a
-        // colored border, so the block reads as its own distinct, high-contrast callout instead
-        // of text floating directly on the busy dot-grid background. Used for the two
-        // priority-1/2 elements (message, mission) that most need to stand out at a glance.
-        function drawPanel(x, y, w, h, borderColor, fillColor) {
-            roundRectPath(x, y, w, h, 14);
-            ctx.fillStyle = fillColor;
+        // Letterspaced legend text. ctx.letterSpacing exists but only landed in Firefox 121 and
+        // Safari 17.4, and a legend silently losing its tracking on an older browser would break
+        // the one cue that separates a legend from a readout here - so the spacing is applied per
+        // character instead, which works everywhere. Legends are short, so the cost is nil.
+        function drawLegend(text, x, y, size, color, tracking) {
+            ctx.font = '700 ' + size + 'px ' + BG_LABEL_FONT;
+            ctx.fillStyle = color;
+            ctx.textAlign = 'left';
+            let cx = x;
+            for (const ch of text) {
+                ctx.fillText(ch, cx, y);
+                cx += ctx.measureText(ch).width + tracking;
+            }
+            return cx - tracking;
+        }
+
+        // A recessed display window, deliberately the same construction as #player-hud's score
+        // well: near-black face, fine dot grid, hairline accent bezel, light catch along the
+        // inside top edge. This is what makes a block read as a lit display cut into the panel
+        // rather than text floating on a background.
+        function drawWindow(x, y, w, h, accent) {
+            roundRectPath(x, y, w, h, 12);
+            ctx.fillStyle = 'rgba(0, 2, 6, 0.96)';
             ctx.fill();
+            ctx.save();
+            roundRectPath(x, y, w, h, 12);
+            ctx.clip();
+            ctx.fillStyle = 'rgba(120, 245, 255, 0.05)';
+            for (let gy = y + 6; gy < y + h; gy += 12) {
+                for (let gx = x + 6; gx < x + w; gx += 12) ctx.fillRect(gx, gy, 3, 3);
+            }
+            ctx.restore();
             ctx.lineWidth = 3;
-            ctx.strokeStyle = borderColor;
+            ctx.strokeStyle = accent;
+            roundRectPath(x + 1.5, y + 1.5, w - 3, h - 3, 11);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x + 14, y + 3.5);
+            ctx.lineTo(x + w - 14, y + 3.5);
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(190, 255, 255, 0.18)';
             ctx.stroke();
         }
 
-        // Small pill-shaped badge for the supporting multiplier/bonus indicators - same visual
-        // language as the DOM #effects-hud badges (index.html), so a player who's already learned
-        // to recognize those reads these the same way. Returns the x just past its right edge so
-        // callers can lay badges out left-to-right without hardcoding widths.
+        // Mission progress as a segmented bar rather than "2 / 5". At 4.2x minification the old
+        // 30px progress text rendered 7 CSS px tall; a bar of the same height carries the same
+        // information at any scale, because the reader is comparing lit area, not parsing glyphs.
+        // The numbers stay alongside it at a legible size for anyone who wants the exact count.
+        function drawSegmentBar(x, y, w, h, filled, total, color) {
+            const n = Math.max(1, total);
+            const gap = 6;
+            const segW = (w - gap * (n - 1)) / n;
+            for (let i = 0; i < n; i++) {
+                const sx = x + i * (segW + gap);
+                roundRectPath(sx, y, segW, h, 4);
+                if (i < filled) {
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                } else {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+                    ctx.fill();
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Pill badge for the multiplier/bonus indicators - same visual language as the DOM
+        // #effects-hud badges, so a player who already reads those reads these the same way.
+        // Text raised 30px -> 46px (7.0 -> 10.7 CSS px on screen) with the pill grown to match.
         function drawBadge(x, y, text, color) {
-            ctx.font = 'bold 30px monospace';
-            const paddingX = 20;
-            const textWidth = ctx.measureText(text).width;
-            const w = textWidth + paddingX * 2;
-            const h = 50;
+            ctx.font = '700 46px ' + BG_LABEL_FONT;
+            const paddingX = 22;
+            const w = ctx.measureText(text).width + paddingX * 2;
+            const h = 62;
             roundRectPath(x, y, w, h, h / 2);
-            ctx.fillStyle = 'rgba(8, 0, 18, 0.7)';
+            ctx.fillStyle = 'rgba(0, 2, 8, 0.85)';
             ctx.fill();
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 3;
             ctx.strokeStyle = color;
             ctx.stroke();
             ctx.fillStyle = color;
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(text, x + paddingX, y + h / 2 + 1);
+            ctx.fillText(text, x + paddingX, y + h / 2 + 2);
             ctx.textBaseline = 'top';
             return x + w;
         }
 
-        // Font hierarchy (user-requested priority order - "temporary message easiest to notice,
-        // followed by mission/rank"): three explicit tiers, biggest/most-backed to
-        // smallest/plainest, rather than the old flat "everything ~18-32px, no backing" layout
-        // that gave every line roughly equal visual weight regardless of how often/urgently a
-        // player actually needs to read it.
-        //   Tier 1 (message):        84px start (shrink-to-fit), full backing plate, bottom zone.
-        //   Tier 2 (mission):        48px name / 30px progress, own backing plate.
-        //   Tier 3 (high score/rank/badges): 46px/30px, no backing - supporting info, still much
-        //     larger than the old 28px/18px so it stays legible at the real on-screen size, just
-        //     visually quieter than tiers 1-2.
+        // Dot-matrix grid over the message plate, so the message reads as an actual lit matrix
+        // rather than as flat painted type. Drawn as thin DARK lines in normal source-over mode,
+        // NOT punched out with destination-out: the first attempt carved alpha instead, and this
+        // texture is uploaded as an opaque emissive map, so those partially-transparent bands
+        // came back as a grey wash across the plate that visibly cost the message its contrast
+        // (caught in a real camera screenshot, not reasoned about). Darkening the gaps produces
+        // the same matrix read with alpha left at 1 everywhere. Restrained on purpose - at ~3.8x
+        // minification a 2px line every 9px lands near half a screen pixel every two, which
+        // resolves into texture rather than visible holes, and costs the glyphs almost no weight.
+        function drawDotMatrixGrid(x, y, w, h) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(x, y, w, h);
+            ctx.clip();
+            ctx.fillStyle = 'rgba(0, 4, 10, 0.34)';
+            for (let gy = y; gy < y + h; gy += 9) ctx.fillRect(x, gy, w, 2);
+            for (let gx = x; gx < x + w; gx += 9) ctx.fillRect(gx, y, 2, h);
+            ctx.restore();
+        }
+
+        // Layout constants. One place to see the whole vertical budget, which is what stops a
+        // future edit quietly re-introducing a 30px line: 480px of texture, and every band below
+        // is sized so its VALUE clears 78px.
+        const PAD = 26;
+        const HS_Y = 14, HS_H = 150;                    // high score window
+        const ROW_Y = HS_Y + HS_H + 14, ROW_H = 76;     // rank + badges row
+        const MI_Y = ROW_Y + ROW_H + 12;                // mission window
+        const MI_H = height - MI_Y - 14;
+
+        // Greedy word wrap into AT MOST two lines - the remainder of a very long string all lands
+        // on the second one rather than spilling into a third, because a third line on a panel
+        // this size would have to be small enough to be pointless. Assumes ctx.font is already
+        // set to the size being tested.
+        function wrapToTwoLines(text, maxW) {
+            if (ctx.measureText(text).width <= maxW) return [text];
+            const words = text.split(' ');
+            if (words.length < 2) return [text];
+            let first = words[0];
+            let i = 1;
+            while (i < words.length && ctx.measureText(first + ' ' + words[i]).width <= maxW) {
+                first += ' ' + words[i];
+                i++;
+            }
+            const second = words.slice(i).join(' ');
+            return second ? [first, second] : [first];
+        }
+
+        // --- MESSAGE: takes over the whole transient zone while it is up ----------------------
+        // Not the whole panel: HIGH SCORE is the one thing worth keeping visible at all times and
+        // it lives in its own band above. Everything below is transient anyway, so a message gets
+        // all ~290px of it, which is what lets it be drawn at a size that is genuinely the easiest
+        // thing on the panel to notice - about 34 CSS px on screen, against the 18 the old
+        // 84px-on-a-small-plate treatment managed.
+        function drawMessage() {
+            const mY = ROW_Y - 6;
+            const mH = height - mY - 14;
+            drawWindow(PAD, mY, width - PAD * 2, mH, 'rgba(255, 255, 255, 0.5)');
+            const maxW = width - PAD * 2 - 60;
+            const maxH = mH - 40;
+            // Wrap to a second line BEFORE shrinking past readability. A single-line-only fit was
+            // the first attempt and the game's own longest real message ("SUPER SKILL SHOT
+            // COMPLETE 25,000", 32 characters) ran straight off both edges of the plate: it needs
+            // ~1075px at the old 56px floor against 912px of usable width, so the loop bottomed
+            // out and drew it anyway. Two lines at ~90px are far more legible on this panel than
+            // one line at 40px would have been, and the plate is tall enough to take them.
+            let fontSize = 150;
+            let lines = [state.message];
+            for (;;) {
+                ctx.font = '700 ' + fontSize + 'px ' + BG_VALUE_FONT;
+                lines = wrapToTwoLines(state.message, maxW);
+                const tooWide = lines.some((l) => ctx.measureText(l).width > maxW);
+                const tooTall = lines.length * fontSize * 1.12 > maxH;
+                if ((!tooWide && !tooTall) || fontSize <= 48) break;
+                fontSize -= 4;
+            }
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(160, 250, 255, 0.55)';
+            ctx.shadowBlur = 10;
+            const lineH = fontSize * 1.12;
+            const firstY = mY + mH / 2 + 2 - ((lines.length - 1) * lineH) / 2;
+            lines.forEach((line, i) => ctx.fillText(line, width / 2, firstY + i * lineH));
+            ctx.shadowBlur = 0;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            drawDotMatrixGrid(PAD + 4, mY + 4, width - PAD * 2 - 8, mH - 8);
+        }
+
         function redraw() {
-            ctx.fillStyle = '#05000f';
+            // --- Panel face: near-black, with a top-lit gradient so it reads as a surface -----
+            const face = ctx.createLinearGradient(0, 0, 0, height);
+            face.addColorStop(0, '#0a0718');
+            face.addColorStop(1, '#02010a');
+            ctx.fillStyle = face;
             ctx.fillRect(0, 0, width, height);
 
-            // Dot-matrix grid, scaled 2x alongside the resolution bump (16px pitch/4px dot vs.
-            // the old 8px/2px) - same visual density as before, not a new pattern.
-            ctx.fillStyle = 'rgba(0, 255, 255, 0.05)';
+            // Panel-wide dot-matrix grid. Coarser than the grid inside the display windows so the
+            // two surfaces read as two materials - the same trick the DOM HUD uses between its
+            // panel grain and its score well's dot grid.
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.045)';
             for (let y = 12; y < height; y += 16) {
-                for (let x = 12; x < width; x += 16) {
-                    ctx.fillRect(x, y, 4, 4);
-                }
+                for (let x = 12; x < width; x += 16) ctx.fillRect(x, y, 4, 4);
             }
 
             ctx.textBaseline = 'top';
-
-            // --- Tier 3: HIGH SCORE / RANK, stacked (not side-by-side) ---
-            // Deliberately NOT a same-row "HIGH SCORE ... RANK" layout with RANK right-aligned:
-            // an earlier version of this pass did exactly that, and at narrow phone viewports the
-            // backglass panel's own on-screen projection places its right edge directly behind
-            // the DOM #player-hud score/lives card (a fixed top-right screen overlay, unrelated
-            // to this panel's 3D position) - confirmed via Playwright at 320px, where "RANK:
-            // Cadet" rendered but was fully hidden underneath that DOM card. Both lines left-
-            // aligned keeps everything on the panel's left/near side, matching where the DOM HUD
-            // never reaches regardless of viewport, at the cost of one extra line of height.
-            ctx.font = 'bold 46px monospace';
             ctx.textAlign = 'left';
-            ctx.fillStyle = '#ffd700';
-            ctx.fillText('HIGH SCORE ' + state.highScore, 28, 16);
 
-            ctx.font = 'bold 30px monospace';
-            ctx.fillStyle = '#00ff99';
-            ctx.fillText('RANK: ' + state.rank, 28, 75);
+            // --- HIGH SCORE: the panel's primary readout, in its own recessed window ----------
+            drawWindow(PAD, HS_Y, width - PAD * 2, HS_H, 'rgba(255, 190, 60, 0.35)');
+            drawLegend('HIGH SCORE', PAD + 26, HS_Y + 20, 46, 'rgba(255, 214, 140, 0.85)', 7);
+            // Deliberately NOT thousands-separated: #player-hud prints the live score as raw
+            // digits, and two score readouts formatting the same kind of number differently is
+            // exactly the sort of small inconsistency that makes a cabinet feel assembled from
+            // parts. Restrained glow - 8 texture px is under 2 CSS px on screen, a lit edge
+            // rather than a bloom.
+            ctx.font = '700 108px ' + BG_VALUE_FONT;
+            ctx.fillStyle = '#ffc849';
+            ctx.textAlign = 'right';
+            ctx.shadowColor = 'rgba(255, 170, 40, 0.5)';
+            ctx.shadowBlur = 8;
+            ctx.fillText(String(state.highScore), width - PAD - 26, HS_Y + 66);
+            ctx.shadowBlur = 0;
+            ctx.textAlign = 'left';
 
-            // Thin divider - separates the quieter status block above from the mission/message
-            // zone below, a cheap spacing cue that costs almost no vertical room.
-            ctx.fillStyle = 'rgba(0, 255, 255, 0.25)';
-            ctx.fillRect(28, 118, width - 56, 2);
-
-            // --- Tier 2: MISSION - its own backed callout, second-most prominent element ---
-            let nextY = 130;
-            if (state.missionName) {
-                const boxY = nextY;
-                const boxH = 122;
-                drawPanel(28, boxY, width - 56, boxH, 'rgba(255, 170, 0, 0.7)', 'rgba(10, 0, 20, 0.6)');
-                ctx.font = 'bold 24px monospace';
-                ctx.fillStyle = 'rgba(255, 210, 140, 0.9)';
-                ctx.fillText('ACTIVE MISSION', 48, boxY + 10);
-                ctx.font = 'bold 48px monospace';
-                ctx.fillStyle = '#ffaa00';
-                ctx.fillText(state.missionName, 48, boxY + 40);
-                ctx.font = 'bold 30px monospace';
-                ctx.fillStyle = '#ffd27a';
-                ctx.fillText(state.missionProgress + ' / ' + state.missionRequired, 48, boxY + 82);
-                nextY = boxY + boxH + 12;
-            }
-
-            // --- Tier 3: MULTIPLIER / BONUS - small pill badges, supporting info ---
-            let badgeX = 28;
-            if (state.multiplierActive) {
-                badgeX = drawBadge(badgeX, nextY, '★ ' + POWERUP_MULTIPLIER + 'X SCORE', '#ff00ff') + 16;
-            }
-            if (state.bonusMultiplierX > 1) {
-                badgeX = drawBadge(badgeX, nextY, 'BONUS ' + state.bonusMultiplierX + 'X', '#ffaa00') + 16;
-            }
-
-            // --- Tier 1: MESSAGE - the single most prominent element on the whole panel ---
+            // Everything below is the transient zone: while a message is up it is replaced
+            // outright rather than drawn under a plate. Drawing it and covering it was the first
+            // attempt, and the mission legend ghosted through the plate's own 4% transparency -
+            // visible in a camera screenshot. Skipping it is also simply less work per redraw.
             if (state.message) {
-                const boxH = 130;
-                const boxY = height - boxH - 18;
-                drawPanel(28, boxY, width - 56, boxH, 'rgba(255, 255, 255, 0.85)', 'rgba(0, 0, 0, 0.8)');
-                // Shrink-to-fit so a longer message (e.g. "BONUS x3: 12,500") never overflows the
-                // plate instead of just clipping or spilling past its border.
-                let fontSize = 84;
-                ctx.font = 'bold ' + fontSize + 'px monospace';
-                while (ctx.measureText(state.message).width > width - 112 && fontSize > 34) {
-                    fontSize -= 4;
-                    ctx.font = 'bold ' + fontSize + 'px monospace';
+                drawMessage();
+                texture.update();
+                return;
+            }
+
+            // --- RANK + multiplier/bonus badges, one row -------------------------------------
+            // Badges are vertically centred on the row, so the rank value is drawn from its own
+            // middle rather than its top - otherwise a 78px cap sits ~10px proud of a 62px pill
+            // and the row reads as two things that missed each other.
+            const badges = [];
+            if (state.multiplierActive) badges.push(['\u2605 ' + POWERUP_MULTIPLIER + 'X', '#ff5ce0']);
+            if (state.bonusMultiplierX > 1) badges.push(['BONUS ' + state.bonusMultiplierX + 'X', '#ffaa00']);
+            // Badges first, right-to-left, so the row's right edge stays fixed as they come and go
+            // - a badge appearing must not shove its neighbour sideways on a display this small -
+            // and so the rank knows how much room is actually left before it draws.
+            let badgeX = width - PAD - 4;
+            for (let i = badges.length - 1; i >= 0; i--) {
+                ctx.font = '700 46px ' + BG_LABEL_FONT;
+                const bw = ctx.measureText(badges[i][0]).width + 44;
+                badgeX -= bw;
+                drawBadge(badgeX, ROW_Y + 2, badges[i][0], badges[i][1]);
+                badgeX -= 14;
+            }
+
+            const rankLegendEnd = drawLegend('RANK', PAD + 4, ROW_Y + 6, 46, 'rgba(150, 245, 255, 0.8)', 7);
+            const rankX = rankLegendEnd + 22;
+            // Shrink-to-fit against whatever the badges left. Without this a long rank name runs
+            // straight underneath them - "Ascendant" alongside both badges was overlapping in a
+            // camera screenshot, and rank names are content, not something this layout controls.
+            let rankSize = 78;
+            ctx.font = '700 ' + rankSize + 'px ' + BG_VALUE_FONT;
+            while (ctx.measureText(state.rank).width > badgeX - rankX - 16 && rankSize > 46) {
+                rankSize -= 3;
+                ctx.font = '700 ' + rankSize + 'px ' + BG_VALUE_FONT;
+            }
+            ctx.fillStyle = '#7dffe0';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(state.rank, rankX, ROW_Y + ROW_H / 2 - 2);
+            ctx.textBaseline = 'top';
+
+            // --- MISSION window. Always drawn, even with no mission active: a display that
+            // changes height as state comes and goes reads as a web page reflowing, not as a
+            // cabinet. Idle simply shows the same "no mission selected" state the 2D HUD had. ---
+            const missionActive = !!state.missionName;
+            drawWindow(PAD, MI_Y, width - PAD * 2, MI_H,
+                missionActive ? 'rgba(255, 170, 0, 0.45)' : 'rgba(120, 245, 255, 0.16)');
+            drawLegend('MISSION', PAD + 26, MI_Y + 18, 46,
+                missionActive ? 'rgba(255, 210, 140, 0.9)' : 'rgba(150, 245, 255, 0.45)', 7);
+            if (missionActive) {
+                // Shrink-to-fit so a long mission name never spills past the window's bezel.
+                let nameSize = 84;
+                ctx.font = '700 ' + nameSize + 'px ' + BG_VALUE_FONT;
+                while (ctx.measureText(state.missionName).width > width - PAD * 2 - 52 && nameSize > 52) {
+                    nameSize -= 4;
+                    ctx.font = '700 ' + nameSize + 'px ' + BG_VALUE_FONT;
                 }
-                ctx.fillStyle = '#ffffff';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(state.message, width / 2, boxY + boxH / 2 + 2);
+                ctx.fillStyle = '#ffaa00';
+                ctx.fillText(state.missionName, PAD + 26, MI_Y + 62);
+
+                const barY = MI_Y + MI_H - 52;
+                const barW = width - PAD * 2 - 52 - 150;
+                drawSegmentBar(PAD + 26, barY, barW, 26, state.missionProgress, state.missionRequired, '#ffc849');
+                ctx.font = '700 56px ' + BG_VALUE_FONT;
+                ctx.fillStyle = '#ffd27a';
+                ctx.textAlign = 'right';
+                ctx.fillText(state.missionProgress + '/' + state.missionRequired, width - PAD - 26, barY - 18);
                 ctx.textAlign = 'left';
-                ctx.textBaseline = 'top';
+            } else {
+                ctx.font = '700 64px ' + BG_VALUE_FONT;
+                ctx.fillStyle = 'rgba(150, 245, 255, 0.35)';
+                ctx.fillText('NONE ACTIVE', PAD + 26, MI_Y + 70);
             }
 
             texture.update();
