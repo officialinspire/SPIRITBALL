@@ -1648,6 +1648,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // past each other instead of turning as one painted shell. Still one rotation per ~11 minutes:
     // the differential is a depth cue you notice having happened, never a motion you can watch.
     const NEAR_SKY_SPIN_RATE_RAD_MS = 0.0000095;
+    // Between the sky spheres (8 and effectively 10) and the cabinet (never closer to the camera
+    // than about 0.4, never further than about 1.6). Any value in that band works - the quad is
+    // scaled to the frustum, so its distance changes nothing about how much screen it covers.
+    const VIGNETTE_DISTANCE = 5;
 
     function createNearStarTexture(scene, highFidelity) {
         const width = highFidelity ? 1024 : 512;
@@ -1764,7 +1768,100 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             nearSky.position.copyFrom(cam.position).scaleInPlace(1 - parallax);
         });
 
-        return { far: skybox, near: nearSky };
+        // ===================================================================================
+        // BACKGROUND VIGNETTE (user-requested - "the cabinet appears illuminated and suspended in
+        // deep space... centre receives strongest focus, outer screen falls into deeper darkness
+        // ... do not darken the actual playfield").
+        //
+        // A post-process vignette cannot do this job here. DefaultRenderingPipeline has one built
+        // in, but it darkens the FINAL IMAGE, and the cabinet does not politely stay in the middle
+        // of it: measured on a 390px viewport the table spans the full screen width at the bottom,
+        // so any vignette strong enough to matter would be shading the flippers. That is the one
+        // thing the request rules out.
+        //
+        // So the darkening is geometry instead of post-processing, and its own depth does the
+        // discriminating: a screen-filling quad parented to the camera, 5 units out - in front of
+        // both sky spheres (8 and effectively 10) and well behind the cabinet (under 1.6). It is
+        // alpha-blended with depth-WRITE off and depth-TEST on, so it composites over background
+        // pixels and is rejected by every pixel the opaque cabinet already wrote. The playfield is
+        // not "carefully avoided" by tuning - it is unreachable by construction.
+        //
+        // Draw order is pinned with alphaIndex rather than left to distance sorting, because
+        // distance sorting gets this exactly backwards: the near star layer's bounding sphere is
+        // centred a few centimetres from the camera, so it sorts as the CLOSEST transparent mesh
+        // and would draw last - over the vignette, and over the particle effects too. Explicit
+        // indices give sky -> vignette -> everything else. (Everything else keeps Babylon's
+        // default alphaIndex of Number.MAX_VALUE, so this only orders these two.)
+        // ===================================================================================
+        nearSky.alphaIndex = 0;
+
+        const vigSize = 512;
+        const vigTex = new BABYLON.DynamicTexture('skyVignetteTex', { width: vigSize, height: vigSize }, scene, true);
+        const vctx = vigTex.getContext();
+        // Gradient radius is the half-DIAGONAL, not the half-width, so alpha keeps climbing all
+        // the way into the corners instead of flattening off at the edge midpoints - the corners
+        // are the deepest part of the falloff, which is what makes it read as depth rather than as
+        // a dark frame.
+        const vg = vctx.createRadialGradient(vigSize / 2, vigSize / 2, 0, vigSize / 2, vigSize / 2, vigSize * 0.707);
+        // Stops are authored as the DARKENING WANTED, then converted to texture alpha, because
+        // the two are not the same number. Measured on a real frame by painting this texture a
+        // series of uniform alphas and reading back the sky: a texture alpha of a produces an
+        // effective blend of a^1.99 - the engine blends in linear light and the framebuffer is
+        // sRGB-encoded, so half alpha buys about a quarter of the effect. Authoring against raw
+        // alpha is what made two earlier passes at these numbers come out barely visible: the
+        // ramp asked for 74% in the corners and delivered 24%.
+        const vigStop = (r, darkening) => vg.addColorStop(r, 'rgba(255,255,255,' + Math.sqrt(darkening).toFixed(4) + ')');
+        vigStop(0.00, 0.04); // centre: imperceptible - the sky immediately behind the cabinet stays a sky
+        vigStop(0.35, 0.10);
+        vigStop(0.62, 0.32);
+        vigStop(0.82, 0.55);
+        vigStop(1.00, 0.78); // corners: most of the light gone, so nothing out here competes with the ball
+        vctx.fillStyle = vg;
+        vctx.fillRect(0, 0, vigSize, vigSize);
+        vigTex.update();
+        vigTex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+        vigTex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+
+        const vigMat = new BABYLON.StandardMaterial('skyVignetteMat', scene);
+        vigMat.disableLighting = true;
+        vigMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        // A hint of violet rather than a dead grey, but genuinely DARKER than the sky it is laid
+        // over - which the first attempt was not. That one used (0.008, 0, 0.030), about RGB
+        // (2, 0, 8), which is very nearly the deep-sky background's own colour: blending 76%
+        // toward a colour the background already is dims the peripheral stars nicely and does
+        // almost nothing to the field between them, and the measured falloff came out at 76% of
+        // brightness retained in the corners where the alpha ramp asks for 26%. The value below
+        // is a quarter of that luminance, so the ramp actually has somewhere to go.
+        vigMat.emissiveColor = new BABYLON.Color3(0.002, 0.0, 0.010);
+        vigMat.opacityTexture = vigTex; // alpha channel drives it; RGB above is the colour it fades to
+        vigMat.disableDepthWrite = true;
+        vigMat.backFaceCulling = false;
+
+        const vignette = BABYLON.MeshBuilder.CreatePlane('skyVignette', { size: 1 }, scene);
+        vignette.material = vigMat;
+        vignette.isPickable = false;
+        vignette.alwaysSelectAsActiveMesh = true;
+        vignette.alphaIndex = 1;
+
+        // Parented to the active camera rather than positioned by hand every frame: a child at
+        // local (0, 0, VIGNETTE_DISTANCE) is screen-aligned and in front for free, with no
+        // per-frame quaternion work. Re-parenting only happens on the one frame the active camera
+        // actually changes (attract -> gameplay).
+        scene.onBeforeCameraRenderObservable.add((cam) => {
+            if (vignette.parent !== cam) {
+                vignette.parent = cam;
+                vignette.position.set(0, 0, VIGNETTE_DISTANCE);
+                vignette.rotation.set(0, 0, 0);
+            }
+            // Sized to the frustum every frame, because the aspect ratio changes on rotate/resize
+            // and a quad that stops short of the edge is far more obvious than one that overhangs.
+            // Babylon's default FOVMODE_VERTICAL_FIXED makes height the fixed axis.
+            const engine = scene.getEngine();
+            const h = 2 * VIGNETTE_DISTANCE * Math.tan(cam.fov / 2) * 1.06; // 6% overscan
+            vignette.scaling.set(h * (engine.getRenderWidth() / engine.getRenderHeight()), h, 1);
+        });
+
+        return { far: skybox, near: nearSky, vignette };
     }
 
     // Per-frame sky update - both layers, one call. Two independent mechanisms:
@@ -4704,6 +4801,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // that texture is deliberately built around.
         glowLayer.addExcludedMesh(skybox.far);
         glowLayer.addExcludedMesh(skybox.near); // same reasoning - its stars are already their own light, bloom would only smear them
+        glowLayer.addExcludedMesh(skybox.vignette); // a darkening layer has nothing to glow; excluded so it can never be treated as emissive
         // Backglass readability pass (user-requested - "keep text crisp and avoid excessive
         // bloom"): same reasoning as the skybox exclusion directly above, applied to the
         // backglass panel's own DynamicTexture instead. GlowLayer's soft outward blur is tuned
