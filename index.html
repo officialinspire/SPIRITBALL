@@ -75,15 +75,69 @@
             display: flex;
             align-items: stretch;
             gap: 12px;
-            background: rgba(8, 0, 20, 0.82);
-            border: 1px solid rgba(0, 255, 255, 0.55);
+            /* Display-surface pass (user-requested - make this read as a small physical
+               illuminated score display rather than floating HTML). Typography, layout, padding
+               and every font-size from the previous pass are untouched; nothing here changes the
+               panel's measured footprint, because a 1px border, inset shadows, outer shadows and
+               background layers are all layout-free by construction (verified: 44/48/59px tall at
+               320/390/1280, identical before and after).
+               ---------------------------------------------------------------------------------
+               THE FACE. Was a single flat `rgba(8, 0, 20, 0.82)` fill, which is the specific thing
+               that read as HTML: a real display face is a dark surface catching light, not a
+               uniform translucent rectangle. It is now three layers, all under the content so none
+               of them can ever veil the digits:
+                 1. a single soft sheen falling across the upper-left - the glass, lit from the
+                    same direction as everything else on this page;
+                 2. a top-to-bottom face gradient, so the surface is fractionally brighter where it
+                    faces up and darker where it turns away;
+                 3. a 3px-pitch hairline grain at under 2% alpha - display texture at reading
+                    distance, invisible as a pattern. Alpha was set from the DPR 3 render, not the
+                    DPR 1 one: at DPR 1 the pattern antialiases into a wash and reads far fainter
+                    than it does on a phone, where 1px/2px lands on exactly 3x3 device pixels and
+                    stays crisp. Deliberately a different pitch and axis from
+                    the score window's own dot grid so the two surfaces read as two materials
+                    rather than one moire.
+               The fill also went darker and slightly more opaque (0.82 -> 0.90). That is what buys
+               the score its headroom: every readout on the panel gains contrast against it (the
+               SCORE legend goes from ~7.1:1 to ~8.8:1 over a worst-case bright playfield), and the
+               brightest thing inside the panel stays the one thing that must be.
+               THE BEZEL. The old border was a uniform `rgba(0, 255, 255, 0.55)` neon outline - a
+               drawn line, with no thickness and no light direction. Replaced with an actual frame:
+               a dimmer cyan edge, a 1px dark ring painted outside it so the unit still separates
+               cleanly from a lit playfield, a light catch along the inside top and a shadow along
+               the inside bottom. Add a short inner shadow falling from the top edge and the face
+               sits BELOW the frame instead of level with it.
+               THE GLOW. The old wide neon spill is gone: the outer drop shadow tightens (14px ->
+               10px blur) so less of it lands on gameplay, and the only light the unit now emits
+               outward is a 1px hairline along its bottom edge, like a real bezel leaking a little
+               of what is behind it. */
+            background-color: rgba(6, 3, 14, 0.9);
+            background-image:
+                linear-gradient(158deg,
+                    rgba(200, 255, 255, 0.07) 0%,
+                    rgba(200, 255, 255, 0.03) 20%,
+                    rgba(200, 255, 255, 0.008) 40%,
+                    rgba(200, 255, 255, 0) 62%),
+                linear-gradient(180deg,
+                    rgba(255, 255, 255, 0.035) 0%,
+                    rgba(0, 0, 0, 0.17) 100%),
+                repeating-linear-gradient(180deg,
+                    rgba(150, 255, 255, 0.018) 0 1px,
+                    rgba(150, 255, 255, 0) 1px 3px);
+            border: 1px solid rgba(126, 226, 236, 0.3);
             border-radius: 10px;
             /* Scoreboard typography pass: 6px/7px -> 4px, absorbing the score window's own
                vertical padding so adding a recessed display costs the panel no height. The panel
                footprint is deliberately unchanged by this pass - #effects-hud sits directly below
                this corner at a fixed offset, so a taller panel would eat into it. */
             padding: 4px 14px 4px;
-            box-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
+            box-shadow:
+                inset 0 1px 0 rgba(190, 255, 255, 0.14),      /* bezel catching light, inside top */
+                inset 0 -1px 0 rgba(0, 0, 0, 0.6),            /* bezel's own shadow, inside bottom */
+                inset 0 5px 10px -6px rgba(0, 0, 0, 0.75),    /* the face sitting below the frame */
+                0 0 0 1px rgba(0, 0, 0, 0.5),                 /* dark outer ring - reads against a lit table */
+                0 1px 0 rgba(120, 240, 255, 0.09),            /* the only outward light: a hairline */
+                0 3px 10px rgba(0, 0, 0, 0.6);                /* grounding, tighter than the old 14px */
             color: #00ffff;
             /* Fixed max-width room for an 8-digit score at the largest step below, so the panel's
                footprint (and therefore its distance from #pause-btn/#effects-hud) doesn't shift
@@ -100,7 +154,15 @@
         #player-hud .hud-divider {
             align-self: stretch;
             width: 1px;
-            background: rgba(0, 255, 255, 0.3);
+            /* Display-surface pass: an etched groove rather than a drawn line - it fades out at
+               both ends the way a milled channel does, and casts a 1px hard shadow down its right
+               side. The shadow has zero blur and zero spread, so it costs no layout. */
+            background: linear-gradient(180deg,
+                rgba(0, 255, 255, 0) 0%,
+                rgba(0, 255, 255, 0.3) 24%,
+                rgba(0, 255, 255, 0.3) 76%,
+                rgba(0, 255, 255, 0) 100%);
+            box-shadow: 1px 0 0 rgba(0, 0, 0, 0.45);
             /* Scoreboard typography pass: the score's display window is now an opaque surface, and
                the existing "strong" score pulse scales it 1.16 from its centre - enough to reach
                the 12px gap and momentarily paint over this rule. Lifting the divider a layer keeps
@@ -225,7 +287,12 @@
                cut-out in the panel rather than a highlight painted on it. */
             padding: 1px var(--hud-well-pad) 3px;
             border-radius: 5px;
-            background-color: rgba(2, 6, 12, 0.92);
+            /* Display-surface pass: darkened from rgba(2, 6, 12, 0.92) alongside the panel face
+               above. The face is now near-black itself, so the window needed to go further to keep
+               reading as a hole cut into it rather than a patch painted on it - a fill difference
+               the recess shadow alone could not carry over a DARK playfield, where both surfaces
+               otherwise land within a few luminance points of each other. */
+            background-color: rgba(0, 2, 6, 0.95);
             /* Dot-matrix panel texture. 3px pitch and ~4% alpha: present as a surface at reading
                distance, invisible as a pattern, and coarse enough not to alias into moire at
                DPR 1. Sits behind the glyphs, never over them, so it cannot soften an edge. */
@@ -1204,6 +1271,14 @@
            background-image, which would leave the score's display window and dot grid painted
            over a system-coloured panel. Everything decorative comes off; the readout stays. */
         @media (forced-colors: active) {
+            /* Display-surface pass: the panel's sheen/grain/bezel are decoration in exactly the
+               same sense as the score window's, and forced-colors strips neither background-image
+               nor box-shadow on its own. */
+            #player-hud {
+                background-image: none;
+                box-shadow: none;
+            }
+            #player-hud .hud-divider { background: currentColor; box-shadow: none; }
             #player-hud #hud-score {
                 background-image: none;
                 box-shadow: none;
