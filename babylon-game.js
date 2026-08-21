@@ -5398,7 +5398,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // ambiguity this audit is about. Now consistent with the other two: dismiss only,
             // suppress the matching keyup, and require the player's own separate, deliberate
             // press afterward to begin charging - same as the click/touch tap-anywhere path below.
-            if (menuOverlay.style.display === 'flex') {
+            if (isMenuUp()) {
                 hideMenuScreen();
                 endAttractMode();
                 suppressNextLaunchRelease = true;
@@ -7350,6 +7350,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // "Final Rank" would've just been a permanently-fake "Rookie." Both now show real,
         // earned values - see improvement-prompts/05-*.md.
         const menuOverlay = document.getElementById('menu-overlay');
+        // Visual length of the title screen's exit fade. Must match #menu-overlay.is-starting's
+        // transition-duration in index.html; nothing about gameplay is gated on it.
+        const MENU_EXIT_MS = 170;
+        let menuUp = false;
         const pauseOverlay = document.getElementById('pause-overlay');
         const controlsOverlay = document.getElementById('controls-overlay');
         const gameOverOverlay = document.getElementById('gameover-overlay');
@@ -7371,12 +7375,51 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // in index.html, so this writes the VALUE only - the two are styled as legend-over-value,
         // the same grammar #player-hud and the backglass already use.
         document.getElementById('menu-highscore').textContent = String(backglass.state.highScore);
-        document.getElementById('menu-start-instructions').textContent =
-            touchControlsActive() ? 'TAP ⚡ TO START' : 'PRESS SPACE TO START';
+        document.getElementById('menu-start-label').textContent =
+            touchControlsActive() ? 'TAP TO START' : 'PRESS SPACE TO START';
         menuOverlay.style.display = 'flex';
+        menuUp = true;
+        // Deliberately NOT auto-focusing the CTA, despite the overlay's aria-modal. Measured in
+        // Chromium: a programmatic .focus() matches :focus-visible even when the player has only
+        // ever used the mouse, so autofocus puts a 3px ring around the button on every load for
+        // everyone. It would buy keyboard users exactly one Tab (Babylon puts a tabIndex on
+        // #renderCanvas for its own key handling, so the canvas is first in the order), and it
+        // buys them nothing at all for the action the button actually names - SPACE dismisses the
+        // menu from anywhere, focus or no focus.
 
+        // Dismissing the title screen is now two separate things happening at two different
+        // speeds, and keeping them separate is the whole point.
+        //
+        // LOGICALLY the menu is gone on the same tick as the input - menuUp flips synchronously,
+        // so every guard that asks "are we still at the menu?" (the Space handler, the launch
+        // press handler, the dev HUD's phase readout) sees the answer immediately and the player's
+        // very next input is live. VISUALLY the overlay spends ~170ms fading out over the game
+        // that has already started underneath it. Nothing waits on the animation; there is no
+        // artificial delay in front of gameplay.
+        //
+        // Those guards used to read `menuOverlay.style.display === 'flex'` directly, which made
+        // the CSS the state machine. That works only as long as hide is instantaneous - the
+        // moment the overlay lingers for a fade, every one of them would keep reporting MENU for
+        // 170ms and would swallow the input that arrives during it. menuUp is the single source
+        // of truth precisely so the visual can take as long as it likes.
+        function isMenuUp() {
+            return menuUp;
+        }
+
+        // Idempotent: the click-anywhere handler, the Space handler and a click on the CTA itself
+        // can all arrive for one dismissal (a keyboard activation of the button fires both the
+        // Space handler and a synthetic click), and re-entering must not restart the fade.
         function hideMenuScreen() {
-            menuOverlay.style.display = 'none';
+            if (!menuUp) return;
+            menuUp = false;
+            menuOverlay.classList.add('is-starting');
+            // Matches the transition duration in index.html. Under prefers-reduced-motion that
+            // transition is removed, so the overlay is already invisible well before this fires
+            // and the player sees a straight cut - same code path, no branch.
+            setTimeout(() => {
+                menuOverlay.style.display = 'none';
+                menuOverlay.classList.remove('is-starting');
+            }, MENU_EXIT_MS);
         }
 
         // Tap-anywhere-to-start, matching MenuScene's this.input.once('pointerdown', ...) in
@@ -7441,7 +7484,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // ../index.js. scene.physicsEnabled toggling confirmed against Babylon's actual source
         // (see the render loop's pause-gate comment below) - not guessed. ---
         function openPauseMenu() {
-            if (isPaused || gameOverActive || menuOverlay.style.display === 'flex') return;
+            if (isPaused || gameOverActive || isMenuUp()) return;
             isPaused = true;
             scene.physicsEnabled = false;
             pauseOverlay.style.display = 'flex';
@@ -7674,7 +7717,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }
             if (isPaused) {
                 resumeGame();
-            } else if (!gameOverActive && menuOverlay.style.display !== 'flex') {
+            } else if (!gameOverActive && !isMenuUp()) {
                 openPauseMenu();
             }
         });
@@ -7928,7 +7971,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 let phase;
                 if (gameOverActive) phase = 'GAME_OVER';
                 else if (isPaused) phase = 'PAUSED';
-                else if (menuOverlay.style.display === 'flex') phase = 'MENU';
+                else if (isMenuUp()) phase = 'MENU';
                 else if (visionGate.active) phase = 'VISION_GATE';
                 else if (bonusCount.active) phase = 'BONUS_COUNT';
                 else if (drainTimeoutHandle !== null) phase = 'DRAIN_DELAY';

@@ -1225,6 +1225,92 @@
                 0 0 0 1px rgba(0, 255, 160, 0.35),
                 0 8px 26px rgba(0, 255, 150, 0.26);
             animation: title-cta-breathe 2.6s ease-in-out infinite;
+
+            /* --- button reset + interaction ------------------------------------------------
+               Resting state is unchanged from when this was a <p>; everything below is the
+               affordance the <p> could not have. */
+            display: block;
+            margin: 0 auto;
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+            /* Kills the ~300ms synthetic-click delay and the grey flash on mobile Safari/Chrome,
+               so the press state is what the player sees instead of the browser's. */
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            /* Comfortably past the 44px minimum touch target at every clamp value: 14px type +
+               2x14px padding is 48px at the floor. */
+            min-height: 48px;
+            /* transform and filter only - the box-shadow is owned by the breathe animation and
+               naming it here would let the transition fight the keyframes every cycle. */
+            transition: transform 120ms ease-out, filter 120ms ease-out;
+        }
+
+        /* Hover is a desktop-only statement, and gating it matters: without the query, a touch
+           browser applies :hover on tap and then STICKS in the hovered state, so the button stays
+           lit after the press. */
+        @media (hover: hover) and (pointer: fine) {
+            #menu-overlay #menu-start-instructions:hover {
+                filter: brightness(1.08);
+                transform: translateY(-1px);
+            }
+        }
+
+        /* focus-visible, not focus: a keyboard user gets an unmistakable ring, a mouse user who
+           clicks the button does not get one left behind. The ring is drawn with outline rather
+           than box-shadow so it survives forced-colors mode and cannot collide with the breathe
+           animation's shadow. */
+        #menu-overlay #menu-start-instructions:focus { outline: none; }
+        #menu-overlay #menu-start-instructions:focus-visible {
+            outline: 2px solid #9dfbe0;
+            outline-offset: 3px;
+        }
+
+        /* Press. Deliberately faster than the hover transition (60ms vs 120ms) and slightly
+           inside the resting size: the button should feel like it goes down under the finger the
+           instant it is touched, and a press that eases in as slowly as a hover reads as lag. */
+        #menu-overlay #menu-start-instructions:active {
+            transform: translateY(1px) scale(0.985);
+            filter: brightness(0.94);
+            transition-duration: 60ms;
+        }
+
+        /* The secondary line inside the pill. The overlay has always started on a click anywhere
+           on the screen, but nothing said so - the button looked like the only way in. This says
+           it without adding a second competing control: same pill, quieter register. */
+        #menu-overlay .start-anywhere {
+            display: block;
+            font-size: 0.62em;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-indent: 0.16em;
+            text-transform: uppercase;
+            color: rgba(4, 33, 26, 0.62);
+            margin-top: 3px;
+        }
+        /* Same platform split as .title-hint, and the same specificity trap - each selector
+           carries the `span` type so it can outrank `#menu-overlay .start-anywhere` above. See
+           updateMobileControlsVisibility() in babylon-game.js for what publishes the attribute. */
+        #menu-overlay span.start-anywhere.sa-touch { display: none; }
+        @media (hover: none) and (pointer: coarse) {
+            #menu-overlay span.start-anywhere.sa-desktop { display: none; }
+            #menu-overlay span.start-anywhere.sa-touch { display: block; }
+        }
+        html[data-touch-controls="on"] #menu-overlay span.start-anywhere.sa-desktop { display: none; }
+        html[data-touch-controls="on"] #menu-overlay span.start-anywhere.sa-touch { display: block; }
+        html[data-touch-controls="off"] #menu-overlay span.start-anywhere.sa-desktop { display: block; }
+        html[data-touch-controls="off"] #menu-overlay span.start-anywhere.sa-touch { display: none; }
+
+        /* The hand-off into gameplay. The game has ALREADY started when this class lands - see
+           hideMenuScreen() in babylon-game.js - so this is a title screen getting out of the way,
+           not a loading screen. pointer-events goes first so the fading overlay cannot eat the
+           player's next input, and the scale is tiny on purpose: the screen should feel like it
+           lifts away, not like it zooms. */
+        #menu-overlay.is-starting {
+            opacity: 0;
+            transform: scale(1.015);
+            pointer-events: none;
+            transition: opacity 170ms ease-out, transform 170ms ease-out;
         }
 
         /* Breathes on the GLOW only. The old treatment reused .pulse-text, which fades opacity to
@@ -1593,6 +1679,17 @@
                needs no static replacement: its resting state is the full-strength pill, which is
                already the readable one. */
             #menu-overlay #menu-start-instructions { animation: none; }
+            /* Press and hover stop moving the button and change only its brightness - the
+               feedback still has to exist, it just cannot be motion. The exit becomes a straight
+               cut: hideMenuScreen()'s timeout still runs, but with no transition the overlay is
+               already invisible when it fires. */
+            #menu-overlay #menu-start-instructions,
+            #menu-overlay #menu-start-instructions:hover,
+            #menu-overlay #menu-start-instructions:active {
+                transform: none;
+                transition: filter 100ms linear;
+            }
+            #menu-overlay.is-starting { transition: none; transform: none; }
             /* Belt-and-suspenders alongside pulseScoreHud()/pulseLivesHud()'s own
                window.SPIRITBALL_reducedMotion check (babylon-game.js) - those already skip adding
                the class at all, but this guarantees the same outcome even if a class somehow ends
@@ -1773,7 +1870,21 @@
                 <span class="title-score-label">HIGH SCORE</span>
                 <span class="title-score-value" id="menu-highscore">0</span>
             </p>
-            <p class="start-instructions" id="menu-start-instructions">PRESS SPACE TO START</p>
+            <!-- A real <button>, not the <p> this was: focusability, Enter/Space activation,
+                 :hover/:focus-visible/:active and the AT role all come from the platform instead
+                 of being simulated. It does NOT carry its own click handler - the overlay's
+                 existing click-anywhere listener catches the bubbled event, so pressing the
+                 button and clicking the backdrop remain literally the same code path.
+                 #menu-start-label is what babylon-game.js writes; the anywhere-line is static so
+                 a textContent write cannot wipe it. -->
+            <button type="button" class="start-instructions" id="menu-start-instructions">
+                <span id="menu-start-label">PRESS SPACE TO START</span>
+                <span class="start-anywhere sa-desktop">or click anywhere</span>
+                <!-- Not "or tap anywhere": the touch label above is already "TAP TO START", and
+                     the two together read as a stutter. This says the same thing without
+                     repeating the verb. -->
+                <span class="start-anywhere sa-touch">anywhere on screen</span>
+            </button>
             <p class="title-hint">
                 <span class="hint-desktop">&#8592; &#8594; FLIPPERS &nbsp;&middot;&nbsp; SPACE LAUNCH &nbsp;&middot;&nbsp; ESC PAUSE</span>
                 <span class="hint-touch">SIDE ZONES FLIP &nbsp;&middot;&nbsp; HOLD &#9889; TO LAUNCH</span>
