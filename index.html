@@ -242,6 +242,23 @@
             --hud-label-font:
                 system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial,
                 'Liberation Sans', 'DejaVu Sans', sans-serif;
+
+            /* The LOGO stack, and deliberately not --hud-digit-font. The title used to borrow the
+               HUD's display stack, whose whole job is tabular numerals, so its tail is
+               `Consolas, 'DejaVu Sans Mono', 'Liberation Mono', ui-monospace, monospace`. That is
+               correct for a score readout and wrong for a wordmark: on any machine without
+               Bahnschrift or DIN - every stock Linux box, and Windows without Office - SPIRITBALL
+               resolved to a monospace and the title read as Courier at 96px.
+
+               Geometric heavy faces first (Futura / Century Gothic / URW Gothic / Poppins /
+               Montserrat / Avenir), then the heaviest grotesques as a silhouette-preserving
+               fallback, then plain sans-serif. There is no `monospace` anywhere in it, so the
+               worst case is a neutral grotesque rather than a typewriter. */
+            --title-font:
+                'Futura', 'Futura PT', 'Century Gothic', 'URW Gothic', 'URW Gothic L',
+                'Poppins', 'Montserrat', 'Avenir Next', 'Avenir', 'Arial Black',
+                'Nimbus Sans', 'Helvetica Neue', Helvetica, 'Liberation Sans',
+                'DejaVu Sans', Arial, sans-serif;
         }
 
         #player-hud {
@@ -1054,53 +1071,65 @@
         }
 
         #menu-overlay h1 {
-            font-family: var(--hud-digit-font);
-            /* 11vw, not the 13.5 this started at: measured overflow at 390px, where the last L
-               was clipped off the right edge. The stack's LAST resort is a monospace, which is
-               the widest thing it can resolve to, so the ceiling has to fit that case - ten
-               characters at 0.602em advance plus 0.155em tracking is 7.57em, and 350px of usable
-               width at a 390px viewport allows 46px. On a machine that has one of the condensed
-               faces the title simply sits a little narrower, which costs nothing. */
-            font-size: clamp(34px, 11vw, 96px);
-            font-weight: 800;
-            /* Wide tracking is what turns a word into a marquee. text-indent puts the trailing
-               letter-space back on the left so the line stays optically centred. */
-            letter-spacing: 0.155em;
-            text-indent: 0.155em;
+            font-family: var(--title-font);
+            /* Sized against the WIDEST face the stack can land on, not the one this machine
+               happens to have. Measured em-advances for "SPIRITBALL" at 0.09em tracking:
+               Liberation Sans Bold 6.79em, DejaVu Sans Bold 7.36em. Arial Black - a very live
+               outcome on stock Windows - runs about 1.13x Arial Bold, so budget 7.8em. A 320px
+               viewport leaves 280px between the overlay's 20px gutters, and the narrow-width
+               rule below drops tracking to 0.055em there (worth ~0.35em), so a real Arial Black
+               costs 35 x 7.45 = 261px. The floor is 35 rather than 36 to survive the stricter
+               check in qa/title-fit: that one forces the full 7.8em AFTER the tracking
+               reduction - i.e. a face wider than Arial Black - and 36px missed it by a pixel.
+               11vw is safe the whole way up; the tightest point above the floor is ~420px,
+               where 46.2 x 7.8 = 360px fits in 380px. */
+            font-size: clamp(35px, 11vw, 96px);
+            /* 900 rather than 800: on Arial Black and Avenir Black this picks the real Black
+               weight instead of rounding down to Bold. */
+            font-weight: 900;
+            /* Tracking a logo, not a marquee of separate letters - a heavy geometric face needs
+               far less air than the condensed mono this replaced (0.155em). text-indent puts the
+               trailing letter-space back on the left so the line stays optically centred. */
+            letter-spacing: 0.09em;
+            text-indent: 0.09em;
             line-height: 0.95;
             margin: 0;
-            color: #eafcff;
-            /* Crisp core, soft halo - the same discipline as the HUD, but a hero mark can carry
-               an outer glow the score readouts deliberately cannot: the 2px shadow keeps every
-               edge hard and only the 20px/44px terms bloom.
+            color: #f4feff;
 
-               Every term here must be BLURRED. Chromium paints a `background-clip: text` fill as
-               the element's background, i.e. underneath the text layer, so text-shadow lands on
-               top of it rather than behind it. A hard unblurred term is a glyph-shaped opaque
-               shape and it covers the sheen completely - this stack used to open with
-               `0 1px 0 rgba(0,24,34,.9)` for edge contrast and the title rendered as a dark
-               outline with a 1px bright rim. Blurred terms only feather the edges, so they
-               coexist with the gradient; the scrim behind the marquee supplies the contrast the
-               dark term was there for. */
+            /* The mark is built entirely from stacked text-shadows, deliberately: a
+               `background-clip: text` fill cannot coexist with them. Chromium paints a clipped
+               gradient as the element's BACKGROUND, i.e. under the text layer, so any unblurred
+               shadow term is a glyph-shaped opaque shape sitting on top of the fill - an earlier
+               pass had exactly that and the title rendered as a dark outline with a 1px rim. A
+               solid fill plus real shadows gives the depth a gradient never did, and has no
+               support caveat at all.
+
+               Reading top to bottom, these are: the spectral edge (magenta a hair left, cyan a
+               hair right - chromatic split, held at 0.6 alpha so it reads as an edge rather than
+               a glitch effect), a three-step violet extrude that is the actual depth, a soft dark
+               ground that separates the mark where it crosses the backglass, and one restrained
+               cyan bloom. Every offset is in em so the whole construction scales with the clamp
+               instead of turning into a slab at 36px. */
             text-shadow:
-                0 0 2px rgba(190, 255, 255, 0.85),
-                0 0 20px rgba(0, 225, 255, 0.34),
-                0 0 44px rgba(150, 60, 255, 0.22);
+                -0.016em 0 0 rgba(255, 60, 190, 0.6),
+                0.016em 0 0 rgba(50, 238, 255, 0.6),
+                0 0.024em 0 #8c1f9e,
+                0 0.046em 0 #4b1068,
+                0 0.068em 0 #1e0730,
+                0 0.1em 0.09em rgba(0, 0, 0, 0.55),
+                0 0 0.19em rgba(0, 225, 255, 0.24);
         }
 
-        /* Top-lit metal sheen on the hero. Guarded, because an unsupported background-clip would
-           leave the title fully transparent - the single worst failure this file could ship - and
-           the plain `color` above is a complete fallback on its own. */
-        @supports (-webkit-background-clip: text) or (background-clip: text) {
+        /* Hairline keyline, for the widths where the title crosses the lit backglass. Gated on
+           paint-order because -webkit-text-stroke centres the stroke on the glyph outline: with
+           `paint-order: stroke fill` the fill is redrawn over the inner half and only the outer
+           half shows, but WITHOUT it the stroke eats into the letterform and a heavy face comes
+           out visibly thinner. The keyline is a refinement, so browsers that cannot paint it
+           correctly simply do not get it. */
+        @supports (paint-order: stroke) {
             #menu-overlay h1 {
-                /* Top-lit ramp: white crown, cyan base. The spread has to be wide enough to
-                   read as a sheen at 34px and still not dim the base of the glyph at 96px -
-                   #6fdcf6 is the darkest stop that stays clearly brighter than the subtitle. */
-                background: linear-gradient(180deg, #ffffff 0%, #d8f6ff 52%, #6fdcf6 100%);
-                -webkit-background-clip: text;
-                background-clip: text;
-                -webkit-text-fill-color: transparent;
-                color: transparent;
+                -webkit-text-stroke: 0.028em rgba(6, 2, 16, 0.9);
+                paint-order: stroke fill;
             }
         }
 
@@ -1130,13 +1159,19 @@
             box-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
         }
 
+        /* Same family as the logo, so the two read as one lockup rather than two typefaces
+           stacked. Smaller, lighter and more widely tracked than before (13px/700/0.36em ->
+           12px/600/0.44em): at this size the tracking is what makes it legible, and letting it
+           spread instead of grow keeps it from competing with the mark above it. Widest
+           measured advance is 24.7em, so the 9.5px floor is 235px inside a 320px viewport's
+           280px of usable width. */
         #menu-overlay .title-sub {
-            font-family: var(--hud-label-font);
-            font-weight: 700;
-            font-size: clamp(10px, 2.9vw, 13px);
-            letter-spacing: 0.36em;
-            text-indent: 0.36em;
-            color: rgba(150, 245, 255, 0.74);
+            font-family: var(--title-font);
+            font-weight: 600;
+            font-size: clamp(9.5px, 2.6vw, 12px);
+            letter-spacing: 0.44em;
+            text-indent: 0.44em;
+            color: rgba(146, 226, 243, 0.66);
             margin: 0;
         }
 
@@ -1241,6 +1276,10 @@
         /* Narrowest widths: the hint gives up tracking before it gives up a second line. */
         @media (max-width: 380px) {
             #menu-overlay .title-hint { letter-spacing: 0.08em; }
+            /* Buy the logo its width back from tracking rather than from size - see the
+               font-size comment on #menu-overlay h1 for the widest-face budget this protects. */
+            #menu-overlay h1 { letter-spacing: 0.055em; text-indent: 0.055em; }
+            #menu-overlay .title-sub { letter-spacing: 0.38em; text-indent: 0.38em; }
         }
 
         @media (max-height: 620px) {
