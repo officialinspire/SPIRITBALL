@@ -1608,6 +1608,116 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return texture;
     }
 
+    // ===================================================================================
+    // NEAR STAR LAYER (user-requested - "subtle DEPTH... at most one inexpensive secondary star
+    // layer that gives the background depth during attract-camera movement"). Exactly one extra
+    // sphere and one extra texture; the existing sky sphere is untouched.
+    //
+    // WHY THE EXISTING SPHERE ALONE CANNOT DO THIS. buildSkybox()'s sphere sets
+    // infiniteDistance = true, which pins it to the camera every frame. That is the correct
+    // behaviour for a backdrop - it guarantees no edge is ever revealed - but it also means camera
+    // TRANSLATION produces exactly zero parallax, and translation is the only depth cue the
+    // attract orbit actually has. So the second layer's whole job is to NOT be pinned: it is
+    // positioned at camera.position scaled by (1 - NEAR_SKY_PARALLAX) each frame, which is the
+    // classic parallax-layer trick and gives a single tunable knob:
+    //     0 -> identical to infiniteDistance, no depth at all
+    //     1 -> world-locked, full parallax
+    // At 0.28 the layer's centre lags the camera by 0.28 * |camera.position|. The attract camera
+    // orbits at radius 1.4, so that is a 0.39m offset against the layer's own 8-unit radius:
+    // atan(0.39 / 8) = 2.8 degrees of differential drift across the orbit. Subtle by construction,
+    // and it needs no separate "is attract mode running" flag - the gameplay camera is FIXED, so
+    // its position never changes, so the parallax term is a constant and the layer simply sits
+    // still. "Nearly imperceptible during gameplay" falls out of the geometry rather than being
+    // special-cased.
+    //
+    // Radius 8 is deliberately INSIDE the existing sphere's radius of 10. An infiniteDistance mesh
+    // still writes real depth (it is pinned to the camera, not pushed to the far plane), so a
+    // layer further out than 10 would simply be depth-rejected by the backdrop. Staying inside
+    // means ordinary depth testing does the right thing with no rendering-group surgery: the table
+    // occludes this layer, this layer draws over the backdrop.
+    //
+    // COST. One sphere at 16 segments, one 1024x512 texture (2MB, half that on the low tier), one
+    // additive draw call, and per frame a vector scale plus one float add. Additive blending means
+    // black texels contribute nothing and draw order does not matter; depth WRITE is off so it can
+    // never occlude anything, and backface culling is on so it costs one screen of fill, not two.
+    // ===================================================================================
+    const NEAR_SKY_SEED = 0x2C0FFEE1;
+    const NEAR_SKY_RADIUS = 8;
+    const NEAR_SKY_PARALLAX = 0.28;
+    // Slightly faster than the backdrop's own SKYBOX_SPIN_RATE_RAD_MS, so the two layers shear
+    // past each other instead of turning as one painted shell. Still one rotation per ~11 minutes:
+    // the differential is a depth cue you notice having happened, never a motion you can watch.
+    const NEAR_SKY_SPIN_RATE_RAD_MS = 0.0000095;
+
+    function createNearStarTexture(scene, highFidelity) {
+        const width = highFidelity ? 1024 : 512;
+        const height = width / 2;
+        const texture = new BABYLON.DynamicTexture('nearStarTex', { width, height }, scene, false);
+        const ctx = texture.getContext();
+        const rand = makeSeededRandom(NEAR_SKY_SEED);
+
+        // Opaque black, not transparent: this layer is composited additively, so black is the
+        // identity and an alpha channel would buy nothing but a chance of premultiplication
+        // artifacts around every star.
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, width, height);
+
+        // Deliberately NOT the backdrop's galactic band. The band is unresolved distant stars, so
+        // reproducing it here would put the same structure at two different depths and read as a
+        // registration error. Nearby stars are scattered - so these are drawn uniformly over the
+        // sphere (same acos inverse-CDF as the backdrop, for the same reason) with no density
+        // field at all, which also makes this generator trivially cheap.
+        const px = width / 1024;
+        // Sparse on purpose. Measured rather than guessed: differencing a full render against the
+        // same frame with this layer disabled counts 27-31 of these stars actually on screen at
+        // any moment, which is plenty of points for an eye to read a plane moving at its own rate
+        // - and still two orders of magnitude below the backdrop's own field, because this layer
+        // is punctuation, not a second sky. (Eyeballing a brightness-boosted crop suggested only
+        // two were visible and nearly sent this count far higher; the isolated difference is what
+        // the number is set from.)
+        const count = Math.round(highFidelity ? 130 : 72);
+        for (let i = 0; i < count; i++) {
+            const v = Math.acos(1 - 2 * rand()) / Math.PI;
+            const x = rand() * width;
+            const y = v * height;
+            // Radii are corrected for the fact that this layer is magnified roughly TWICE as hard
+            // as the backdrop on screen - its sphere is closer (radius 8 against an effective 10)
+            // and its texture is half the width, so 1024/360 = 2.84 texture px per degree against
+            // the backdrop's 5.69. A first pass used radii comparable to the backdrop's bright
+            // class and the result was unmistakable in a camera screenshot: soft blobs four times
+            // the size of any real star, which read as lens dirt rather than depth. Halved here,
+            // so a near star lands at about the same on-screen size as a backdrop bright star.
+            // "Nearer" is then carried entirely by the thing that actually carries it - moving at
+            // its own rate - rather than by being fatter.
+            const r = (0.45 + rand() * 0.55) * px;
+            const roll = rand();
+            const tint = roll < 0.12 ? '186,208,255' : roll < 0.22 ? '255,224,190' : '255,253,248';
+            const sx = 1 / Math.max(0.4, Math.sin(v * Math.PI)); // same clamped pole correction as the backdrop
+            const reach = r * 4 * sx;
+            const paint = (cx) => {
+                const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 4);
+                halo.addColorStop(0, 'rgba(' + tint + ',0.15)');
+                halo.addColorStop(1, 'rgba(' + tint + ',0)');
+                ctx.save();
+                ctx.translate(cx, y);
+                ctx.scale(sx, 1);
+                ctx.fillStyle = halo;
+                ctx.fillRect(-r * 4, -r * 4, r * 8, r * 8);
+                ctx.fillStyle = 'rgba(' + tint + ',' + (0.72 + rand() * 0.26).toFixed(3) + ')';
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            };
+            paint(x);
+            if (x < reach) paint(x + width);
+            else if (x > width - reach) paint(x - width);
+        }
+
+        texture.update();
+        return texture;
+    }
+
     function buildSkybox(scene) {
         const skyMat = new BABYLON.StandardMaterial('skyMat', scene);
         skyMat.backFaceCulling = false; // render the inside of the sphere, camera sits inside it
@@ -1618,25 +1728,72 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const skybox = BABYLON.MeshBuilder.CreateSphere('skybox', { diameter: 20, sideOrientation: BABYLON.Mesh.BACKSIDE }, scene);
         skybox.material = skyMat;
         skybox.infiniteDistance = true; // stays centered on the camera - translation never reveals an edge or creates parallax of its own
-        return skybox;
+
+        const nearMat = new BABYLON.StandardMaterial('nearSkyMat', scene);
+        nearMat.disableLighting = true;
+        nearMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        nearMat.emissiveTexture = createNearStarTexture(scene, detectHighFidelity());
+        // Additive: black adds nothing, so the layer is pure extra starlight over the backdrop and
+        // is order-independent. alpha < 1 is what actually routes a StandardMaterial into the
+        // blended pass - alphaMode alone does not - and at 0.985 it is doing nothing else.
+        nearMat.alpha = 0.985;
+        nearMat.alphaMode = BABYLON.Engine.ALPHA_ADD;
+        nearMat.disableDepthWrite = true; // may tint what is behind it, must never occlude anything
+        nearMat.backFaceCulling = true;   // inside faces only - one screen of fill, not two
+
+        const nearSky = BABYLON.MeshBuilder.CreateSphere('nearSky', {
+            diameter: NEAR_SKY_RADIUS * 2,
+            segments: 16, // a backdrop needs no silhouette; 16 is ~500 triangles
+            sideOrientation: BABYLON.Mesh.BACKSIDE
+        }, scene);
+        nearSky.material = nearMat;
+        nearSky.isPickable = false;
+        // The camera is always inside this sphere, so it is always visible - skipping the frustum
+        // test is both free and immune to the "camera inside a mesh gets culled" class of bug.
+        nearSky.alwaysSelectAsActiveMesh = true;
+
+        // The parallax follow is registered here, on the per-camera pre-render hook, rather than
+        // done alongside the spin in the render loop. Not a style choice: the loop advances the
+        // attract camera's orbit AFTER it updates the sky, so positioning the layer there left it
+        // one frame stale - harmless at 60fps (0.025 degrees) but measurable at software-renderer
+        // frame rates, and under reduced motion "pinned to the camera" has to mean pinned, not
+        // pinned-as-of-last-frame. This hook runs with the camera's final transform for the frame,
+        // whichever camera is active, so the offset is exact by construction.
+        scene.onBeforeCameraRenderObservable.add((cam) => {
+            const parallax = window.SPIRITBALL_reducedMotion ? 0 : NEAR_SKY_PARALLAX;
+            nearSky.position.copyFrom(cam.position).scaleInPlace(1 - parallax);
+        });
+
+        return { far: skybox, near: nearSky };
     }
 
-    // Gentle depth cue for the fixed gameplay camera (user-requested - "add gentle parallax/depth
-    // only if inexpensive and does not interfere with the fixed gameplay camera"): true multi-
-    // layer parallax needs camera movement or translation to read at all, and the gameplay camera
-    // is deliberately fixed (buildCamera()'s own comment - "must never be player-controllable
-    // during gameplay") - the only camera that ever moves is the pre-launch attract-mode orbit,
-    // which already reveals the skybox's texture from different angles for free, no extra code
-    // needed. What a fixed camera CAN show is the sky itself drifting - an extremely slow spin of
-    // the whole skybox sphere, independent of the camera, reads as ambient depth/vastness without
-    // ever being a distracting motion (one full rotation takes roughly 17 minutes - imperceptible
-    // frame to frame). Same "ambient decorative motion, reduced not stopped under reduced-motion"
-    // treatment as updateSaturnRotation() right above, not gameplay feedback so it stays running
-    // through pause/menu/game-over like that one does.
+    // Per-frame sky update - both layers, one call. Two independent mechanisms:
+    //
+    //   SPIN. Each sphere turns on its own axis at its own rate (backdrop ~17 minutes per
+    //   rotation, near layer ~11). This is what a FIXED camera can be shown: the gameplay camera
+    //   never moves (buildCamera()'s own comment - "must never be player-controllable during
+    //   gameplay"), so translation-based parallax has nothing to work with there, but the sky
+    //   drifting against itself still reads as ambient depth. Imperceptible frame to frame by
+    //   design; the differential between the two rates is the whole point.
+    //
+    //   PARALLAX. Only the near layer, and only from camera translation - see NEAR_SKY_PARALLAX.
+    //   It is dormant during gameplay for free (fixed camera -> constant term) and does its actual
+    //   work during the attract orbit, which is precisely where the request asked for depth.
+    //
+    // Runs through pause/menu/game-over like updateSaturnRotation() above, being ambient decoration
+    // rather than gameplay feedback. Unlike that one it now stops DEAD under reduced motion rather
+    // than merely slowing - see the guard below.
     const SKYBOX_SPIN_RATE_RAD_MS = 0.000006;
-    function updateSkyboxRotation(skybox, deltaMs) {
-        const rate = window.SPIRITBALL_reducedMotion ? SKYBOX_SPIN_RATE_RAD_MS * 0.15 : SKYBOX_SPIN_RATE_RAD_MS;
-        skybox.rotation.y += rate * deltaMs;
+    function updateSkyboxLayers(layers, deltaMs) {
+        // Reduced motion: a HARD stop, not the 15%-rate slowdown this used to do. The request is
+        // explicit - "no animated background movement when reduced motion is enabled" - and
+        // buildSkybox()'s own pre-render hook zeroes the parallax term at the same time, pinning
+        // the near layer to the camera exactly like the backdrop. The two layers then behave as
+        // one painted shell: the depth effect is not merely slowed, it is switched off, which is
+        // the only reading of that line that holds while the attract camera is still orbiting.
+        if (window.SPIRITBALL_reducedMotion) return;
+        layers.far.rotation.y += SKYBOX_SPIN_RATE_RAD_MS * deltaMs;
+        layers.near.rotation.y += NEAR_SKY_SPIN_RATE_RAD_MS * deltaMs;
     }
 
     // ===================================
@@ -4545,7 +4702,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // distinct (darkest, non-glowing) tier, rather than tuning down every individual star's
         // brightness in createStarfieldTexture() and losing the "sparse bright stars" contrast
         // that texture is deliberately built around.
-        glowLayer.addExcludedMesh(skybox);
+        glowLayer.addExcludedMesh(skybox.far);
+        glowLayer.addExcludedMesh(skybox.near); // same reasoning - its stars are already their own light, bloom would only smear them
         // Backglass readability pass (user-requested - "keep text crisp and avoid excessive
         // bloom"): same reasoning as the skybox exclusion directly above, applied to the
         // backglass panel's own DynamicTexture instead. GlowLayer's soft outward blur is tuned
@@ -7731,7 +7889,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // duration" requirement. Camera effects and the dev-panel status readouts are left
             // running during pause - harmless either way, and simpler than guarding everything.
             updateSaturnRotation(obstacles.saturnRings, deltaMs);
-            updateSkyboxRotation(skybox, deltaMs);
+            updateSkyboxLayers(skybox, deltaMs);
 
             if (!isPaused) {
                 // Timer audit fix - accumulates only while unpaused, see gameplayClockMs' own
