@@ -1252,17 +1252,315 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // attachControl() call - rotation is driven programmatically (camera.alpha incremented each
     // frame), not by user drag, so it can't be grabbed by the same touch input the flipper zones
     // already use.
+    // --- Attract-mode shot list -------------------------------------------------------------
+    //
+    // What this replaces: a single unbounded `camera.alpha += dt * 0.00015`, i.e. a continuous
+    // 360-degree orbit at 0.15 rad/s, one revolution every 42 seconds. Three problems with that,
+    // all of which this shot list exists to fix:
+    //
+    //   1. It went BEHIND the table. alpha sweeps all the way round, so for roughly a third of
+    //      every revolution the camera sat past the far end looking at the back of the backglass
+    //      with the playfield edge-on or fully occluded - the table stopped reading as a pinball
+    //      machine at all.
+    //   2. Sustained unidirectional rotation is the single most reliable way to make a moving
+    //      camera uncomfortable to watch. Constant angular velocity with no rest is exactly the
+    //      motion profile to avoid.
+    //   3. It showcased nothing. A uniform spin at a fixed radius never dwells, so Saturn, the
+    //      bumper cluster and the flippers all just slid past at the same distance.
+    //
+    // The replacement is five framings with long eased moves between them and a rest at each. All
+    // of them sit in the FRONT hemisphere - alpha stays within +/-0.30 rad of ATTRACT_FRONT_ALPHA,
+    // which is the flipper-end vantage the gameplay camera also uses - so the playfield is never
+    // hidden and the machine always reads as a pinball table.
+    //
+    // Angular travel is deliberately small and the work is done by dolly and target instead:
+    // adjacent shots differ by at most 0.30 rad of alpha. Measured peak combined (alpha+beta)
+    // rate across the whole cycle is 0.097 rad/s, against 0.15 for the constant spin this
+    // replaced - and unlike that spin it occurs only in a brief eased burst between two genuinely
+    // stationary holds, which is the part that matters for comfort. ATTRACT_MOVE_MS was raised
+    // from 7500 to 8500 for exactly this: at 7500 the bumpers->flippers leg peaked at 0.110,
+    // close enough to the budget that any later widening of a shot would have breached it.
+    //
+    // FOV is deliberately constant across every shot: varying it while dollying is a dolly-zoom,
+    // which warps perspective and is unpleasant to sit through even when it is slow.
+    const ATTRACT_FRONT_ALPHA = -Math.PI / 2;   // camera at -Z, the flipper end, looking up-table
+    const ATTRACT_DWELL_MS = 5000;              // hold at each framing
+    const ATTRACT_MOVE_MS = 8500;               // eased travel between framings
+    // dAlpha is an offset from ATTRACT_FRONT_ALPHA. beta is Babylon's polar angle from +Y, so
+    // LARGER beta = lower, more raking camera = more sky in frame; smaller = more top-down.
+    const ATTRACT_SHOTS = [
+        // Establishing shot: whole cabinet at a three-quarter elevation, well off-axis so it
+        // reads as a 3D object rather than a flat board, loose enough to sit surrounded by space.
+        { name: 'silhouette', dAlpha: 0.30, beta: 1.00, fill: 0.86, target: { x: 0, y: 0.03, z: 0.00 } },
+        // Saturn is a tall centrepiece at z=+0.32. Dropping the camera a little and aiming past
+        // the table's middle puts its globe and ring against the starfield instead of against the
+        // playfield, which is what makes the silhouette of the ring read at all.
+        { name: 'saturn', dAlpha: 0.02, beta: 1.08, fill: 0.98, target: { x: 0, y: 0.05, z: 0.13 } },
+        // The cluster is a tight diamond spanning z=-0.02..0.16, and a diamond is an arrangement
+        // you can only see from above - this is the most top-down beta in the cycle for exactly
+        // that reason. From a low angle the four bumpers collapse into a single row.
+        { name: 'bumpers', dAlpha: -0.26, beta: 0.82, fill: 0.96, target: { x: 0, y: 0.03, z: 0.04 } },
+        // Flippers live at z=-0.36, but this shot does NOT aim at them. Aiming that far off the
+        // table's middle throws the footprint so far off-centre that the framing solver has to
+        // retreat to radius 2.2 to keep the far end on screen - measured, and it left the table at
+        // 18% of frame width, a distant speck. A close-up and "never hide most of the table" are
+        // simply contradictory. So the prominence comes from the ANGLE: this is the lowest beta
+        // in the cycle, which puts the flipper end nearest the camera and lets perspective make
+        // it loom, with the whole machine still in frame.
+        { name: 'flippers', dAlpha: -0.04, beta: 1.20, fill: 0.98, clearCta: true, target: { x: 0, y: 0.015, z: -0.12 } },
+        // Pull back at a low elevation to let the starfield take the top of the frame: the
+        // cabinet lit and suspended in deep space. Also the largest camera TRANSLATION in the
+        // cycle, which is what gives the two sky layers something to parallax against.
+        { name: 'space', dAlpha: 0.26, beta: 1.12, fill: 0.82, target: { x: 0, y: 0.05, z: 0.02 } }
+    ];
+
+    // prefers-reduced-motion gets this and nothing else - no drift, no easing, no cycle. Chosen to
+    // be a shot worth holding indefinitely rather than a frozen frame of the animation: slightly
+    // wider and more off-axis than the silhouette shot so the whole machine, its depth and a
+    // generous field of stars are all present at once.
+    const ATTRACT_HERO_SHOT = { name: 'hero', dAlpha: 0.34, beta: 1.03, fill: 0.86, target: { x: 0, y: 0.03, z: 0.01 } };
+
+    // --- Framing solver ----------------------------------------------------------------------
+    //
+    // Shots store a FILL, not a radius, and the radius is solved per viewport. This is not
+    // over-engineering; a fixed radius provably cannot work here. camera.fov is Babylon's default
+    // FOVMODE_VERTICAL_FIXED, so the horizontal field narrows as the aspect does, and a phone in
+    // portrait sees the table far wider than a desktop does at the same distance. Measured: the
+    // closest radius that keeps the whole table on screen is 1.09 at 1280x900 but 2.11 at
+    // 390x844 for the same framing. Tuning one number for one of those breaks the other.
+    //
+    // The safe rect is the part of the screen the menu leaves free - measured from the title
+    // block's real box, so the camera follows the layout instead of duplicating its numbers. The
+    // table is allowed to sit BEHIND the bottom action block, which is the established
+    // composition (HIGH SCORE reads over the playfield by design); what it must not do is touch
+    // the hero title or run off the edge.
+    const ATTRACT_SAFE_TOP_FALLBACK = 0.28;      // used only if the title block cannot be measured
+    const ATTRACT_SAFE_BOTTOM = 0.98;            // default: the table may run behind the CTA
+    const ATTRACT_SAFE_BOTTOM_FALLBACK = 0.80;   // used by clearCta shots if unmeasurable
+    const ATTRACT_SAFE_SIDE = 0.03;
+    // The footprint the solver fits. Table corners at y=0, plus - importantly - the backglass.
+    //
+    // The backglass is a lit 0.32x0.15m panel standing at y=0.28 above the far end of the table,
+    // so it projects HIGHER on screen than any point on the playfield. Fitting the table alone
+    // let it drift up behind the marquee: on the Saturn framing the panel's own RANK/MISSION text
+    // ended up sitting directly behind "DMT VISION QUEST PINBALL", which is exactly the
+    // readability problem the framing is supposed to prevent. Its corners are read from the mesh
+    // rather than recomputed here, because the panel is tilted (rotation.x = 0.4) and hand-
+    // deriving the rotated corners is how you end up quietly fitting the wrong box.
+    //
+    // A bounding SPHERE over all of this would be ~2x too conservative for geometry this flat,
+    // which is why the fit works on projected corners instead.
+    const ATTRACT_TABLE_CORNERS = [
+        new BABYLON.Vector3(-TABLE_WIDTH_M / 2, 0, -TABLE_LENGTH_M / 2),
+        new BABYLON.Vector3(TABLE_WIDTH_M / 2, 0, -TABLE_LENGTH_M / 2),
+        new BABYLON.Vector3(-TABLE_WIDTH_M / 2, 0, TABLE_LENGTH_M / 2),
+        new BABYLON.Vector3(TABLE_WIDTH_M / 2, 0, TABLE_LENGTH_M / 2)
+    ];
+
+    // Table corners plus the backglass's real world-space corners, once the panel exists. Called
+    // from the framing cache, so this resolves on the first solve after the scene is built.
+    function attractFramePoints(scene) {
+        const glass = scene.getMeshByName('backglass');
+        if (!glass) return ATTRACT_TABLE_CORNERS;
+        glass.computeWorldMatrix(true);
+        return ATTRACT_TABLE_CORNERS.concat(glass.getBoundingInfo().boundingBox.vectorsWorld);
+    }
+
+    // Whether the backglass exists yet, cheaply, without touching world matrices. The camera is
+    // built BEFORE the backglass is, so the very first solve necessarily runs on table-only
+    // points; this is what tells the cache to redo it once the panel appears. Keying the cache on
+    // viewport alone silently pinned that first, wrong answer for the whole session.
+    function attractPointCount(scene) {
+        return scene.getMeshByName('backglass') ? ATTRACT_TABLE_CORNERS.length + 8 : ATTRACT_TABLE_CORNERS.length;
+    }
+
+    // Bottom of the free band for shots that set clearCta. The flipper beat needs it: flippers sit
+    // at z=-0.36, the near end of the table, which projects to the very bottom of the frame -
+    // directly behind the CTA. Framed against the default band, the shot showcased a green button
+    // sitting on top of the thing it was supposed to be showing.
+    //
+    // It clears the BUTTON, not the whole action block. That distinction is load-bearing rather
+    // than fussy: HIGH SCORE reading over the playfield is the established composition, and
+    // clearing the entire block instead costs about 20 points of band height - measured, that
+    // squeezed a 1024x700 window down to a 30%-tall band and drove the flipper shot back to a
+    // table 19% of frame width, which fails "avoid angles that hide most of the table" just as
+    // badly as the occlusion did. Swinging the camera sideways to dodge the CTA was tried first
+    // and does not work at all: at 1024x700 every offset from -0.04 to -0.60 rad still left 3 or
+    // 4 of the 4 flipper points behind the button.
+    function attractSafeBottom(shot) {
+        if (!shot.clearCta) return ATTRACT_SAFE_BOTTOM;
+        const el = document.getElementById('menu-start-instructions');
+        if (!el || !window.innerHeight) return ATTRACT_SAFE_BOTTOM_FALLBACK;
+        const box = el.getBoundingClientRect();
+        if (!box.height) return ATTRACT_SAFE_BOTTOM_FALLBACK;
+        return Math.max(0.55, box.top / window.innerHeight - 0.015);
+    }
+
+    function attractSafeTop() {
+        const el = document.querySelector('#menu-overlay .title-marquee');
+        if (!el || !window.innerHeight) return ATTRACT_SAFE_TOP_FALLBACK;
+        const box = el.getBoundingClientRect();
+        if (!box.height) return ATTRACT_SAFE_TOP_FALLBACK;
+        return Math.min(0.5, box.bottom / window.innerHeight + 0.02);
+    }
+
+    // Projected bbox of the table in normalised screen coords, straight from the camera matrices.
+    // Deliberately NOT via scene.render() - the solver samples this repeatedly and rendering the
+    // scene per sample turns a millisecond of arithmetic into minutes.
+    function attractTableBounds(camera, points) {
+        const transform = camera.getViewMatrix(true).multiply(camera.getProjectionMatrix(true));
+        const engine = camera.getScene().getEngine();
+        const w = engine.getRenderWidth();
+        const h = engine.getRenderHeight();
+        const viewport = camera.viewport.toGlobal(w, h);
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (const corner of points) {
+            const p = BABYLON.Vector3.Project(corner, BABYLON.Matrix.Identity(), transform, viewport);
+            x0 = Math.min(x0, p.x / w); x1 = Math.max(x1, p.x / w);
+            y0 = Math.min(y0, p.y / h); y1 = Math.max(y1, p.y / h);
+        }
+        return { x0, x1, y0, y1 };
+    }
+
+    // Fixed-point solve for the framing: BOTH the radius and a vertical projection shift.
+    //
+    // The shift is not a refinement, it is what makes the fit possible at all. ArcRotateCamera
+    // puts its target at the centre of the frame, but the band the menu leaves free is not
+    // centred - it runs from just under the title down to the bottom edge, roughly 0.26..0.98.
+    // Fitting a centred footprint into that means only the middle ~48% of the screen is usable
+    // and everything below 0.74 is wasted. Measured consequence: once the backglass joined the
+    // fit, every shot was forced back to radius 2-3 and the table came out at ~20% of frame
+    // width - a distant speck, which is its own failure of "avoid angles that hide most of the
+    // table". Biasing the projection down instead uses the full 72% band.
+    //
+    // targetScreenOffset is Babylon's off-centre projection, equivalent to a shift lens: it moves
+    // the image without rotating the camera, so verticals stay vertical and nothing is distorted.
+    // Measured behaviour, not assumed: a POSITIVE y offset moves content UP the screen by
+    // offset / (2 * radius * tan(fov/2)) of the frame height (verified to within 1.2%).
+    //
+    // Apparent size is very close to inversely proportional to distance, so alternating "recentre,
+    // then rescale" converges in a handful of passes. Extents are measured from the band's own
+    // centre, so a shot that aims off the table's middle is handled correctly rather than being
+    // allowed to push its far edge into the title.
+    function solveAttractFraming(camera, shot, points) {
+        const safeTop = attractSafeTop();
+        const safeBottom = attractSafeBottom(shot);
+        const bandCentre = (safeTop + safeBottom) / 2;
+        const bandHalfY = (safeBottom - safeTop) / 2;
+        const bandHalfX = 0.5 - ATTRACT_SAFE_SIDE;
+        const tanHalfFov = Math.tan(camera.fov / 2);
+
+        const savedAlpha = camera.alpha, savedBeta = camera.beta, savedRadius = camera.radius;
+        const savedTarget = camera.target.clone();
+        const savedOffset = camera.targetScreenOffset.clone();
+
+        camera.alpha = ATTRACT_FRONT_ALPHA + shot.dAlpha;
+        camera.beta = shot.beta;
+        camera.target.set(shot.target.x, shot.target.y, shot.target.z);
+
+        let radius = 1.4;
+        let offsetY = 0;
+        for (let pass = 0; pass < 6; pass++) {
+            camera.radius = radius;
+            camera.targetScreenOffset.y = offsetY;
+            const b = attractTableBounds(camera, points);
+            if (!isFinite(b.y0) || !isFinite(b.y1)) break;
+            const centreY = (b.y0 + b.y1) / 2;
+            offsetY -= (bandCentre - centreY) * 2 * radius * tanHalfFov;
+            const halfY = (b.y1 - b.y0) / 2;
+            const halfX = Math.max(Math.abs(b.x0 - 0.5), Math.abs(b.x1 - 0.5));
+            const need = Math.max(halfY / bandHalfY, halfX / bandHalfX);
+            if (!(need > 0) || !isFinite(need)) break;
+            radius *= need / shot.fill;
+        }
+
+        camera.alpha = savedAlpha; camera.beta = savedBeta; camera.radius = savedRadius;
+        camera.target.copyFrom(savedTarget);
+        camera.targetScreenOffset.copyFrom(savedOffset);
+        return { radius, offsetY };
+    }
+
+    // Solved radii, cached per render size - the solve is cheap but there is no reason to redo it
+    // 60 times a second when it only ever changes on resize.
+    function makeAttractFraming(camera) {
+        let key = '';
+        let radii = [];
+        let heroRadius = 1.5;
+        return function framing() {
+            const engine = camera.getScene().getEngine();
+            const scene = camera.getScene();
+            const next = engine.getRenderWidth() + 'x' + engine.getRenderHeight() + '/' + attractPointCount(scene);
+            if (next !== key) {
+                key = next;
+                const points = attractFramePoints(scene);
+                radii = ATTRACT_SHOTS.map((shot) => solveAttractFraming(camera, shot, points));
+                heroRadius = solveAttractFraming(camera, ATTRACT_HERO_SHOT, points);
+            }
+            return { radii, heroRadius };
+        };
+    }
+
+    // Smootherstep, not smoothstep: zero first AND second derivative at both ends. The camera
+    // therefore starts and stops with no perceptible acceleration step, which is what keeps a
+    // move this size from registering as a lurch.
+    function smootherStep(t) {
+        return t * t * t * (t * (t * 6 - 15) + 10);
+    }
+
+    // Drives one continuous loop through ATTRACT_SHOTS. Advances a single clock rather than
+    // integrating camera state, so it cannot accumulate drift over a long idle on the menu.
+    function updateAttractCamera(camera, elapsedMs, framing) {
+        const { radii } = framing();
+        const span = ATTRACT_DWELL_MS + ATTRACT_MOVE_MS;
+        const cycle = span * ATTRACT_SHOTS.length;
+        const t = ((elapsedMs % cycle) + cycle) % cycle;
+        const index = Math.floor(t / span);
+        const local = t - index * span;
+        const nextIndex = (index + 1) % ATTRACT_SHOTS.length;
+        const from = ATTRACT_SHOTS[index];
+        const to = ATTRACT_SHOTS[nextIndex];
+        // Hold for the whole dwell, then ease across - k is exactly 0 until the move begins, so
+        // the camera is genuinely stationary at each framing rather than creeping through it.
+        const k = local <= ATTRACT_DWELL_MS ? 0 : smootherStep((local - ATTRACT_DWELL_MS) / ATTRACT_MOVE_MS);
+        const mix = (a, b) => a + (b - a) * k;
+        camera.alpha = ATTRACT_FRONT_ALPHA + mix(from.dAlpha, to.dAlpha);
+        camera.beta = mix(from.beta, to.beta);
+        camera.radius = mix(radii[index].radius, radii[nextIndex].radius);
+        camera.targetScreenOffset.y = mix(radii[index].offsetY, radii[nextIndex].offsetY);
+        camera.target.set(
+            mix(from.target.x, to.target.x),
+            mix(from.target.y, to.target.y),
+            mix(from.target.z, to.target.z)
+        );
+    }
+
+    // The reduced-motion pose. Re-applied rather than set once, so the framing still adapts if the
+    // window is resized or a phone is rotated - a held shot must stay correctly composed, and
+    // holding still is not the same as never updating.
+    function applyAttractHero(camera, framing) {
+        const { heroRadius } = framing();
+        camera.alpha = ATTRACT_FRONT_ALPHA + ATTRACT_HERO_SHOT.dAlpha;
+        camera.beta = ATTRACT_HERO_SHOT.beta;
+        camera.radius = heroRadius.radius;
+        camera.targetScreenOffset.y = heroRadius.offsetY;
+        camera.target.set(ATTRACT_HERO_SHOT.target.x, ATTRACT_HERO_SHOT.target.y, ATTRACT_HERO_SHOT.target.z);
+    }
+
     function buildAttractCamera(scene) {
+        const opening = window.SPIRITBALL_reducedMotion ? ATTRACT_HERO_SHOT : ATTRACT_SHOTS[0];
         const camera = new BABYLON.ArcRotateCamera(
             'attractCamera',
-            -Math.PI / 2,
-            Math.PI / 3.2,
-            1.4,
-            new BABYLON.Vector3(0, 0.05, 0),
+            ATTRACT_FRONT_ALPHA + opening.dAlpha,
+            opening.beta,
+            1.4, // placeholder - replaced immediately below by the solved radius for this viewport
+            new BABYLON.Vector3(opening.target.x, opening.target.y, opening.target.z),
             scene
         );
         camera.minZ = 0.01;
         camera.fov = BABYLON.Tools.ToRadians(50);
+        camera.framing = makeAttractFraming(camera);
+        if (window.SPIRITBALL_reducedMotion) applyAttractHero(camera, camera.framing);
+        else updateAttractCamera(camera, 0, camera.framing);
         return camera;
     }
 
@@ -4949,6 +5247,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }
 
         let attractModeActive = true;
+        // Own clock rather than reading the render loop's, so the cycle always starts at the
+        // first shot regardless of how long boot took.
+        let attractElapsedMs = 0;
         function endAttractMode() {
             if (!attractModeActive) return;
             attractModeActive = false;
@@ -7830,6 +8131,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             window.__flipperDebug = {
                 leftFlipper, rightFlipper, FLIPPER_SWEEP_RAD, FLIPPER_LENGTH_M, mainBall, scene,
                 isBallInPlay() { return ballInPlay; },
+                // Attract-camera introspection, for qa/attract-camera.js. Scrubbing the cycle
+                // clock is the only way to inspect a specific framing: the shots are 13.5s apart,
+                // so waiting for them in real time would make that suite minutes long. The timing
+                // is published rather than duplicated in the test, so the two cannot drift apart.
+                attract: {
+                    dwellMs: ATTRACT_DWELL_MS,
+                    moveMs: ATTRACT_MOVE_MS,
+                    shotNames: ATTRACT_SHOTS.map((shot) => shot.name),
+                    camera: attractCamera,
+                    seek(ms) {
+                        attractElapsedMs = ms;
+                        updateAttractCamera(attractCamera, ms, attractCamera.framing);
+                    }
+                },
                 // Exposes the SAME per-frame stepping function the real render loop calls every
                 // tick (see engine.runRenderLoop() below) - not a second/competing implementation.
                 // Lets a test drive many small, controlled-deltaMs steps back-to-back (e.g.
@@ -8155,7 +8470,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             updateRollingSound(mainBall.aggregate.body, ballInPlay && !isPaused);
 
             if (attractModeActive) {
-                attractCamera.alpha += deltaMs * 0.00015; // slow continuous orbit
+                // Under prefers-reduced-motion the attract camera never moves at all: it was
+                // built directly on ATTRACT_HERO_SHOT and simply stays there. Everything else
+                // about the title screen still works - this is a held hero framing, not a
+                // disabled feature.
+                if (window.SPIRITBALL_reducedMotion) {
+                    applyAttractHero(attractCamera, attractCamera.framing);
+                } else {
+                    attractElapsedMs += deltaMs;
+                    updateAttractCamera(attractCamera, attractElapsedMs, attractCamera.framing);
+                }
             } else {
                 updateCameraEffects(deltaMs);
             }
