@@ -1281,84 +1281,327 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // look wrong, and re-authoring a proper equirectangular version wasn't worth doing sight-
     // unseen in a sandbox that can't render the result either way.
     //
-    // Depth/variety pass (user-requested - "varied star sizes and brightness, sparse brighter
-    // stars, extremely subtle cosmic depth... no distracting fast animation"): still exactly one
-    // texture on the one existing skybox sphere - no second background layer, no extra meshes.
-    // Three drawing passes, in back-to-front order, all baked once into the DynamicTexture at
-    // startup (this whole function costs nothing per rendered frame - only its one-time canvas
-    // fill cost, same as before):
-    //   1. The original dark-purple-to-near-black gradient, unchanged.
-    //   2. A handful of large, extremely low-alpha (0.03-0.06) soft radial blobs in muted cosmic
-    //      hues - "depth" in the sense of faint nebula haze behind the stars, deliberately far too
-    //      dim to read as shapes or compete with any foreground geometry.
-    //   3. Two star tiers instead of one uniform scatter: many small dim stars (the bulk of the
-    //      field, alpha 0.12-0.55) plus a much smaller handful of larger, brighter stars (alpha
-    //      0.75-1.0, with a soft halo drawn under each) that read as the "sparse brighter stars"
-    //      the sky should have, and a light warm/cool tint on some of them for variety without
-    //      turning gaudy.
-    // Star/blob counts scale with highFidelity like every other decorative count in this file
-    // (particle systems, etc.) - detected locally rather than threaded in as a parameter, the same
-    // "cheap and stateless, re-read here" pattern buildObstacles() already uses for its own dev-
-    // mode flag, so this stays a self-contained drop-in and main()'s buildSkybox() call site needs
-    // no change.
+    // Starfield upgrade pass (user-requested - four star classes, non-uniform distribution,
+    // clustering, large intentional voids, subtle nebula, deterministic seed, "should look like
+    // SPACE, not glitter"). Still exactly ONE DynamicTexture on the ONE existing skybox sphere:
+    // no extra meshes, no particle field, no external image, nothing per-frame. The entire cost
+    // is a single canvas bake at startup, same as before - only the contents changed.
+    //
+    // The previous field was a uniform scatter of two tiers at 512 square. Three things made it
+    // read as glitter rather than sky, and each is addressed below rather than tuned around:
+    //   - UNIFORM (u,v) IS NOT UNIFORM ON A SPHERE. It piles stars into the poles, where an entire
+    //     texture row collapses to a single point. Stars are now drawn from the correct
+    //     inverse-CDF, so density is even in solid angle.
+    //   - EVEN SPACING IS THE ONE THING A REAL SKY NEVER HAS. Stars now come from a density field
+    //     (a tilted galactic band times two octaves of periodic value noise, gamma-shaped hard),
+    //     which produces clustering and large genuinely-empty regions from the same mechanism.
+    //   - A SUB-PIXEL arc() IS A GREY SMUDGE, NOT A STAR. The faint majority are now hard 1px
+    //     fillRects; only stars big enough to have a shape are drawn as circles.
+    // Plus a resolution and aspect change that is doing more work than any of the tuning (see the
+    // width/height comment), and a seeded PRNG so the sky stops being different every reload.
+    //
+    // Everything scales with highFidelity like every other decorative count in this file, detected
+    // locally rather than threaded in as a parameter - the same "cheap and stateless, re-read
+    // here" pattern buildObstacles() uses - so main()'s buildSkybox() call site needs no change.
+    // Deterministic seed. The sky is a place, not a lottery: the same field every reload means a
+    // player recognises their cabinet's backdrop, screenshots stay comparable across runs, and
+    // this file's own visual testing is repeatable at all. Any 32-bit constant works; this one is
+    // just "SPIRITBALL" squinted at in hex.
+    const STARFIELD_SEED = 0x5B17BA11;
+
+    // mulberry32 - 4 lines, no dependency, statistically fine for scattering dots and, unlike
+    // Math.random(), seedable. Every random draw in createStarfieldTexture() comes from here.
+    function makeSeededRandom(seed) {
+        let a = seed >>> 0;
+        return function next() {
+            a = (a + 0x6D2B79F5) >>> 0;
+            let t = Math.imul(a ^ (a >>> 15), 1 | a);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
+    // Approximate sRGB for a stellar spectral class, hottest (blue) to coolest (orange-red). Real
+    // temperature ordering, not a decorative palette - it is what stops the coloured stars reading
+    // as confetti: an eye that has ever looked up knows blue-white and amber belong in a sky and
+    // green and magenta do not.
+    const STAR_TEMPERATURE_COLORS = [
+        '155,176,255', // O/B - hot blue, genuinely rare
+        '202,215,255', // A   - blue-white
+        '248,247,255', // F   - white
+        '255,244,234', // G   - yellow-white, our own sun
+        '255,214,170', // K   - orange
+        '255,184,140'  // M   - cool orange-red
+    ];
+
     function createStarfieldTexture(scene) {
         const highFidelity = detectHighFidelity();
-        const size = 512;
-        const texture = new BABYLON.DynamicTexture('starfieldTex', size, scene, false);
+
+        // 2:1, not square. A UV sphere is an equirectangular projection: u spans 2*PI of longitude
+        // and v spans PI of latitude, so a square texture spends half its pixels over-sampling the
+        // vertical axis. At 2:1 the same byte budget buys twice the horizontal resolution, which
+        // is the axis that matters - the camera's ~40 degree FOV crops roughly a ninth of the
+        // circumference, so the old 512-square gave about 57 texture pixels across a 390px-wide
+        // phone screen. Every star was therefore a blurry ~7px smear of a 1px dot, which is most
+        // of why the old field read as glitter rather than as sky. 2048x1024 is 8.4MB of VRAM on
+        // the high tier (1024x512 and 2.1MB on the low one, still 2x the old horizontal density
+        // for near-identical memory).
+        const width = highFidelity ? 2048 : 1024;
+        const height = width / 2;
+        // Mipmaps stay OFF (the constructor's generateMipMaps argument). This texture is
+        // MAGNIFIED, not minified - see the FOV maths above - so a mip chain would cost 33% more
+        // memory to supply levels that are never sampled, and any level that did get sampled would
+        // average the dim single-pixel stars straight out of existence.
+        const texture = new BABYLON.DynamicTexture('starfieldTex', { width, height }, scene, false);
         const ctx = texture.getContext();
+        const rand = makeSeededRandom(STARFIELD_SEED);
 
-        const gradient = ctx.createLinearGradient(0, 0, 0, size);
-        gradient.addColorStop(0, '#1a0033'); // CONFIG.colors.background
-        gradient.addColorStop(1, '#05000f');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, size, size);
+        // -------------------------------------------------------------------------------------
+        // Where stars are ALLOWED to be. Three multiplied fields, evaluated per candidate:
+        //
+        //   1. Sphere-area correction. Uniform (u, v) is NOT uniform on a sphere - it piles stars
+        //      into the poles, where a whole texture row collapses to a point. v is drawn as
+        //      acos(1-2r)/PI instead, the standard inverse-CDF for uniform sphere sampling, so
+        //      density is even in solid angle rather than in texture space.
+        //   2. A galactic band. One broad, tilted great circle of raised density, because the
+        //      single strongest "this is space" cue available is that stars are not scattered
+        //      evenly - they run in a band, with the sky away from it comparatively empty.
+        //   3. Two octaves of periodic value noise, gamma-shaped hard. This is what produces
+        //      clustering AND the large intentional voids in one mechanism: after pow(n, 2.2) a
+        //      good half of the sky sits near zero density and simply gets no stars.
+        //
+        // The lattice wraps in x so the field is seamless across the u=0 meridian, which matters
+        // because the whole texture wraps around the sphere.
+        // -------------------------------------------------------------------------------------
+        const GX = 48, GY = 24;
+        const lattice = new Float32Array(GX * GY);
+        for (let i = 0; i < lattice.length; i++) lattice[i] = rand();
+        function latticeAt(gx, gy) {
+            const x = ((gx % GX) + GX) % GX;
+            const y = Math.min(GY - 1, Math.max(0, gy));
+            return lattice[y * GX + x];
+        }
+        function valueNoise(u, v, freq) {
+            const fx = u * GX * freq, fy = v * GY * freq;
+            const x0 = Math.floor(fx), y0 = Math.floor(fy);
+            const tx = fx - x0, ty = fy - y0;
+            const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty); // smoothstep
+            const a = latticeAt(x0, y0), b = latticeAt(x0 + 1, y0);
+            const c = latticeAt(x0, y0 + 1), d = latticeAt(x0 + 1, y0 + 1);
+            return (a + (b - a) * sx) * (1 - sy) + (c + (d - c) * sx) * sy;
+        }
+        // Latitude of the band's centreline at a given longitude - one sine, so the band reads as
+        // a great circle crossing the sky at an angle rather than a stripe painted round the
+        // equator.
+        function bandCenter(u) {
+            return 0.5 + 0.17 * Math.sin(u * Math.PI * 2 + 1.1);
+        }
+        function bandWeight(u, v) {
+            const d = (v - bandCenter(u)) / 0.19;
+            return Math.exp(-d * d * 1.5);
+        }
+        function density(u, v) {
+            const n = 0.62 * valueNoise(u, v, 1) + 0.38 * valueNoise(u, v, 2.7);
+            const clustered = Math.pow(n, 2.2);
+            return Math.min(1, clustered * (0.26 + 1.15 * bandWeight(u, v)));
+        }
+        // Rejection sampling against that field. Bounded attempts so a pathological seed can never
+        // spin here; a candidate that never lands simply yields one fewer star.
+        function sampleStar() {
+            for (let k = 0; k < 24; k++) {
+                const u = rand();
+                const v = Math.acos(1 - 2 * rand()) / Math.PI;
+                if (rand() < density(u, v)) return { u, v, x: u * width, y: v * height };
+            }
+            return null;
+        }
 
-        // Faint nebula haze - a few big, soft, near-invisible tinted blobs for cosmic depth. Kept
-        // to 3 regardless of tier (each is one cheap radial-gradient fill, not worth gating).
-        const nebulaHues = ['70,50,140', '30,90,100', '110,40,90'];
-        nebulaHues.forEach((rgb) => {
-            const x = Math.random() * size;
-            const y = Math.random() * size;
-            const r = size * (0.25 + Math.random() * 0.2);
-            const blob = ctx.createRadialGradient(x, y, 0, x, y, r);
-            blob.addColorStop(0, 'rgba(' + rgb + ',0.06)');
+        // Anything with a halo has to be drawn twice near the seam, or its glow is sliced in half
+        // at the u=0 meridian - invisible in a texture viewer, obvious as a vertical scar on the
+        // sphere.
+        function drawWrapped(x, reach, paint) {
+            paint(x);
+            if (x < reach) paint(x + width);
+            else if (x > width - reach) paint(x - width);
+        }
+
+        // A circle in texture space is an ellipse on the sphere: at latitude theta a fixed du
+        // covers only sin(theta) of the arc it covers at the equator, so a star near a pole is
+        // squeezed horizontally. Drawing it 1/sin(theta) wider cancels that out, and it is only
+        // applied to the classes big enough for the distortion to be visible - a 1px dot cannot
+        // look squashed.
+        // Clamped at 2.5x rather than at the mathematically-correct limit. The correction is a
+        // small-angle approximation, and close to a pole a star wide enough to need more than
+        // 2.5x is also wide enough to span real longitude and wrap around the pole rather than
+        // stay a disc - a first attempt clamped at 6.25x and put two obvious horizontal smears
+        // along the top edge of the texture. Under-correcting leaves a slightly oval star in a
+        // region the sphere sampling already keeps nearly empty; over-correcting draws a streak.
+        function poleStretch(v) {
+            return 1 / Math.max(0.4, Math.sin(v * Math.PI));
+        }
+
+        // -------------------------------------------------------------------------------------
+        // 1. BASE. Near-black, with the faintest possible warm lift along the band - the diffuse
+        //    glow of stars too dim to resolve individually. Kept far below the table's own
+        //    lighting: this is the darkest surface in the scene by a wide margin, and every alpha
+        //    in this function was chosen to keep it that way.
+        // -------------------------------------------------------------------------------------
+        const base = ctx.createLinearGradient(0, 0, 0, height);
+        base.addColorStop(0, '#120026');
+        base.addColorStop(0.5, '#080018');
+        base.addColorStop(1, '#03000b');
+        ctx.fillStyle = base;
+        ctx.fillRect(0, 0, width, height);
+
+        // Unresolved galactic glow, painted as a run of soft blobs along the band's own
+        // centreline rather than one rectangle, so its edges are irregular the way a real one is.
+        for (let i = 0; i < 26; i++) {
+            const u = i / 26 + (rand() - 0.5) * 0.02;
+            const cx = u * width;
+            const cy = (bandCenter(u) + (rand() - 0.5) * 0.06) * height;
+            const r = height * (0.12 + rand() * 0.13);
+            const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+            glow.addColorStop(0, 'rgba(120, 130, 190, 0.038)');
+            glow.addColorStop(1, 'rgba(120, 130, 190, 0)');
+            ctx.fillStyle = glow;
+            drawWrapped(cx, r, (px) => ctx.fillRect(px - r, cy - r, r * 2, r * 2));
+        }
+
+        // -------------------------------------------------------------------------------------
+        // 2. NEBULA HAZE + DUST LANES. Colour first, then darkness on top of it. The dust is the
+        //    half that actually sells it: real nebulosity is cut through by opaque lanes, and
+        //    subtracting light in large soft shapes is what keeps the field from looking like an
+        //    evenly-sprinkled screen. Both are anchored to the band, not scattered at random.
+        // -------------------------------------------------------------------------------------
+        const nebulaHues = ['92,64,168', '38,104,132', '134,52,110', '70,86,170'];
+        const nebulaCount = highFidelity ? 7 : 4;
+        for (let i = 0; i < nebulaCount; i++) {
+            const u = rand();
+            const cx = u * width;
+            const cy = (bandCenter(u) + (rand() - 0.5) * 0.34) * height;
+            const r = height * (0.16 + rand() * 0.22);
+            const rgb = nebulaHues[Math.floor(rand() * nebulaHues.length)];
+            const blob = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+            blob.addColorStop(0, 'rgba(' + rgb + ',0.055)');
+            blob.addColorStop(0.55, 'rgba(' + rgb + ',0.022)');
             blob.addColorStop(1, 'rgba(' + rgb + ',0)');
             ctx.fillStyle = blob;
-            ctx.fillRect(0, 0, size, size);
-        });
+            drawWrapped(cx, r, (px) => ctx.fillRect(px - r, cy - r, r * 2, r * 2));
+        }
+        const dustCount = highFidelity ? 6 : 3;
+        for (let i = 0; i < dustCount; i++) {
+            const u = rand();
+            const cx = u * width;
+            const cy = (bandCenter(u) + (rand() - 0.5) * 0.16) * height;
+            const r = height * (0.09 + rand() * 0.16);
+            const dust = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+            dust.addColorStop(0, 'rgba(2, 0, 8, 0.5)');
+            dust.addColorStop(1, 'rgba(2, 0, 8, 0)');
+            ctx.fillStyle = dust;
+            drawWrapped(cx, r, (px) => ctx.fillRect(px - r, cy - r, r * 2, r * 2));
+        }
 
-        // Dim stars - the bulk of the field.
-        const dimCount = highFidelity ? 260 : 150;
-        for (let i = 0; i < dimCount; i++) {
-            const x = Math.random() * size;
-            const y = Math.random() * size;
-            const r = Math.random() * 0.9 + 0.2;
-            ctx.fillStyle = 'rgba(255,255,255,' + (0.12 + Math.random() * 0.43).toFixed(2) + ')';
+        // -------------------------------------------------------------------------------------
+        // 3. STARS, in four classes. Counts are per-pixel-area constants so they hold at either
+        //    resolution, and the population is deliberately pyramid-shaped: the overwhelming
+        //    majority are barely-there pixels, and each brighter class is roughly an order of
+        //    magnitude rarer than the one below it. That ratio is the difference between a sky
+        //    and a sprinkle of glitter - if the bright stars are common enough to notice as a
+        //    group, the illusion is gone.
+        // -------------------------------------------------------------------------------------
+        const areaScale = (width * height) / (2048 * 1024);
+        // Star RADII are in texture pixels, so they have to scale with the texture or the same
+        // star subtends twice the angle on the low tier as on the high one. That is not a subtle
+        // difference: the low tier is also magnified twice as hard on screen (half the texture
+        // across the same FOV), so leaving radii absolute made its bright stars land at roughly
+        // 17 screen px against the high tier's 8. Scaled here, both tiers draw the same sky at
+        // different sample rates rather than two different skies. The class-1 field stars are the
+        // exception - one pixel is the smallest thing a canvas can draw, so on the low tier they
+        // are unavoidably twice the angular size, which is simply what a coarser sky costs.
+        const px = width / 2048;
+
+        // Class 1 - the field. Single pixels via fillRect on integer coordinates, NOT arc(): a
+        // sub-pixel arc is antialiased into a soft grey smudge across four pixels, which is
+        // exactly the mush the old field was made of. A hard 1px dot at low alpha is what reads
+        // as a distant star.
+        const fieldCount = Math.round((highFidelity ? 4200 : 2600) * areaScale);
+        for (let i = 0; i < fieldCount; i++) {
+            const s = sampleStar();
+            if (!s) continue;
+            const alpha = 0.05 + rand() * rand() * 0.20; // squared -> most sit near the floor
+            ctx.fillStyle = 'rgba(255,253,247,' + alpha.toFixed(3) + ')';
+            ctx.fillRect(Math.floor(s.x), Math.floor(s.y), 1, 1);
+        }
+
+        // Class 2 - resolvable but unremarkable. Still small, still no halo.
+        const mediumCount = Math.round((highFidelity ? 620 : 380) * areaScale);
+        for (let i = 0; i < mediumCount; i++) {
+            const s = sampleStar();
+            if (!s) continue;
+            const r = (0.55 + rand() * 0.75) * px;
+            ctx.fillStyle = 'rgba(255,252,244,' + (0.22 + rand() * 0.3).toFixed(3) + ')';
             ctx.beginPath();
-            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
             ctx.fill();
         }
 
-        // Sparse bright stars - noticeably fewer, bigger, and with a soft halo so they pop gently
-        // against the dim field instead of just being "bigger dots."
-        const brightCount = highFidelity ? 16 : 8;
+        // Class 3 - the sky's punctuation. Rare enough to be individually noticeable, each with a
+        // soft halo so it reads as bright rather than merely large.
+        const brightCount = Math.round((highFidelity ? 74 : 40) * areaScale);
         for (let i = 0; i < brightCount; i++) {
-            const x = Math.random() * size;
-            const y = Math.random() * size;
-            const r = Math.random() * 1 + 1.3;
-            const roll = Math.random();
-            const tint = roll < 0.25 ? '190,225,255' : roll < 0.45 ? '255,240,215' : '255,255,255'; // mostly white, occasionally a soft cool or warm tint
+            const s = sampleStar();
+            if (!s) continue;
+            const r = (1.1 + rand() * 1.0) * px;
+            const sx = poleStretch(s.v);
+            const reach = r * 5 * sx;
+            drawWrapped(s.x, reach, (px) => {
+                const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 5);
+                halo.addColorStop(0, 'rgba(255,255,255,0.16)');
+                halo.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.save();
+                ctx.translate(px, s.y);
+                ctx.scale(sx, 1);
+                ctx.fillStyle = halo;
+                ctx.fillRect(-r * 5, -r * 5, r * 10, r * 10);
+                ctx.fillStyle = 'rgba(255,255,255,' + (0.7 + rand() * 0.3).toFixed(3) + ')';
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+        }
 
-            const halo = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
-            halo.addColorStop(0, 'rgba(' + tint + ',0.18)');
-            halo.addColorStop(1, 'rgba(' + tint + ',0)');
-            ctx.fillStyle = halo;
-            ctx.fillRect(x - r * 4, y - r * 4, r * 8, r * 8);
-
-            ctx.fillStyle = 'rgba(' + tint + ',' + (0.75 + Math.random() * 0.25).toFixed(2) + ')';
-            ctx.beginPath();
-            ctx.arc(x, y, r, 0, Math.PI * 2);
-            ctx.fill();
+        // Class 4 - the handful with visible colour. Weighted toward the middle of the
+        // temperature ramp, so blue giants and red dwarfs are the exception rather than half the
+        // set, and given a wider, tinted halo since these are the only stars whose colour has to
+        // survive being magnified across the screen.
+        const coloredCount = Math.round((highFidelity ? 13 : 7) * areaScale);
+        for (let i = 0; i < coloredCount; i++) {
+            const s = sampleStar();
+            if (!s) continue;
+            // Average of two rolls: triangular, centred on the white/yellow classes.
+            const idx = Math.min(STAR_TEMPERATURE_COLORS.length - 1,
+                Math.floor(((rand() + rand()) / 2) * STAR_TEMPERATURE_COLORS.length));
+            const rgb = STAR_TEMPERATURE_COLORS[idx];
+            const r = (1.4 + rand() * 1.2) * px;
+            const sx = poleStretch(s.v);
+            const reach = r * 7 * sx;
+            drawWrapped(s.x, reach, (px) => {
+                const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 7);
+                halo.addColorStop(0, 'rgba(' + rgb + ',0.24)');
+                halo.addColorStop(0.4, 'rgba(' + rgb + ',0.07)');
+                halo.addColorStop(1, 'rgba(' + rgb + ',0)');
+                ctx.save();
+                ctx.translate(px, s.y);
+                ctx.scale(sx, 1);
+                ctx.fillStyle = halo;
+                ctx.fillRect(-r * 7, -r * 7, r * 14, r * 14);
+                ctx.fillStyle = 'rgba(' + rgb + ',0.95)';
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
         }
 
         texture.update();
