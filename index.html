@@ -524,9 +524,22 @@
         @media (max-width: 480px) {
             #mission-hud, #effects-hud { font-size: 11px; }
             #mission-hud {
+                /* Horizontal padding 10 -> 6, and the gap tightened, purely to give back width.
+                   #player-hud grew 8-9px when the score gained its recessed display window
+                   (measured: 212 -> 221px at 360-412, 179 -> 187 at 320; its own padding and gap
+                   are unchanged, the growth is all inside the panel). These two are corner-
+                   anchored on the same row, so that came straight out of the gap between them: at
+                   390px the mission panel's right edge ended up sitting on top of the SCORE
+                   legend, and 412px - previously clear - began overlapping.
+
+                   Padding, not max-width: the box is CONTENT-sized for every normal mission name
+                   (measured 118px wide against a 118px cap), so lowering the cap changes nothing
+                   until a name is long enough to hit it - a first attempt at 108px moved the
+                   overlap by exactly 0px. Padding shrinks the box whatever the content, and costs
+                   no characters. */
                 max-width: 118px;
-                padding: 5px 10px;
-                gap: 5px;
+                padding: 5px 6px;
+                gap: 4px;
             }
             #effects-hud {
                 top: calc(max(8px, env(safe-area-inset-top)) + 40px + 6px);
