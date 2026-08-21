@@ -78,7 +78,11 @@
             background: rgba(8, 0, 20, 0.82);
             border: 1px solid rgba(0, 255, 255, 0.55);
             border-radius: 10px;
-            padding: 6px 14px 7px;
+            /* Scoreboard typography pass: 6px/7px -> 4px, absorbing the score window's own
+               vertical padding so adding a recessed display costs the panel no height. The panel
+               footprint is deliberately unchanged by this pass - #effects-hud sits directly below
+               this corner at a fixed offset, so a taller panel would eat into it. */
+            padding: 4px 14px 4px;
             box-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
             color: #00ffff;
             /* Fixed max-width room for an 8-digit score at the largest step below, so the panel's
@@ -97,49 +101,170 @@
             align-self: stretch;
             width: 1px;
             background: rgba(0, 255, 255, 0.3);
+            /* Scoreboard typography pass: the score's display window is now an opaque surface, and
+               the existing "strong" score pulse scales it 1.16 from its centre - enough to reach
+               the 12px gap and momentarily paint over this rule. Lifting the divider a layer keeps
+               it drawn on top for those ~60ms instead of changing the pulse (which is deliberately
+               tuned elsewhere) or widening the gap (which would change the panel's footprint). */
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Scoreboard typography pass (user-requested - the readout "still reads too much like
+           ordinary webpage monospace text"; sizing, position and information architecture are
+           deliberately untouched, this is a face/treatment change only).
+           =================================================================================
+           FONT STACK. The whole page inherits 'Courier New', monospace (see body). Courier is a
+           TYPEWRITER face - slab serifs, wide sidebearings, a soft round bowl on the zero - and
+           that is precisely what makes the score read as body copy rather than as an instrument.
+           No webfont is loaded: this project has consistently refused a second CDN dependency for
+           cosmetic fonts (see .screen-overlay's own comment for the same call), so the stack below
+           is entirely faces that already ship with an OS, ordered by how close each is to real
+           scoreboard hardware, and every entry simply falls through if absent:
+             Bahnschrift          Windows 10+. Microsoft's cut of DIN 1451 - the German engineering
+                                  standard used on instrument panels and road signage, and the
+                                  single closest thing to an instrumentation face that ships with
+                                  any OS. Variable, so font-stretch below genuinely condenses it.
+             DIN Condensed /      macOS and iOS ship real DIN cuts under these names.
+             DIN Alternate
+             Roboto Condensed     Android, and most Linux desktops with the Roboto package.
+             Arial Narrow         The near-universal narrow grotesque on Windows and macOS - not
+                                  as technical as DIN, but far closer than Courier.
+             Liberation Sans      Metric-compatible narrow cuts on Linux distributions.
+             Narrow / Nimbus
+             Sans Narrow
+             then technical MONOSPACES (Consolas, SF Mono, Menlo, Roboto Mono, DejaVu Sans Mono,
+             Liberation Mono) for platforms with no condensed face at all. These are geometric,
+             flat-terminalled and tabular by construction - still an instrument, just an
+             uncondensed one - and are what this stack resolves to in the CI sandbox, which is
+             where the screenshots for this pass were judged.
+           Condensed leads deliberately: a scoreboard's job is many digits in a fixed window, and
+           narrow digits are what let an 8-digit score stay legible at 19px on a 320px phone.
+           Widths differ across platforms, which is fine - the panel is auto-width, tabular figures
+           keep the digits themselves aligned, and monospace (the widest outcome) is what is
+           already shipping today, so nothing can overflow further than it does now.
+
+           LABELS get the opposite treatment on purpose: a plain, unmodified UI grotesque, small,
+           heavily letterspaced, in the panel's cyan rather than the digits' near-white. The two
+           strings then differ in face, case, tracking, colour AND surface, so "SCORE" reads as a
+           legend silkscreened onto the cabinet and the digits read as the lit display behind it.
+           None of that distinction is made by dimming the label below its current contrast -
+           accessibility is preserved by making the digits louder, not the label quieter.
+
+           TREATMENT. The digits sit in a recessed display window (darker than the panel itself,
+           1px inner bezel, inset top shadow, a faint light-catch along the bottom edge) carrying a
+           very low-contrast 3px dot grid - a dot-matrix panel read at arm's length, not a CRT
+           scanline, which is the cliche this was explicitly meant to avoid. The glyphs themselves
+           get a 1px micro-bevel (light above, dark below) so each stroke looks lit from within its
+           own segment, plus a single 1px cyan edge. Every shadow here has a blur radius of 1px or
+           0: the old 2px cyan bloom is gone, because the one element that has to be read at speed
+           is the one that can least afford soft edges.
+
+           LIVES stays deliberately quiet - same face for family resemblance, but no display
+           window, no bevel, no lit edge, and a dimmer fill. One lit readout per panel is what
+           makes it read as a scoreboard; two competing ones is what makes it read as a web page.
+           =================================================================================
+           font-synthesis is left at its default: several of the condensed faces above ship in a
+           single weight, and a synthesised bold on a narrow face is still the right call here
+           (the alternative is the score silently rendering at Regular on macOS). */
+        #player-hud {
+            --hud-digit-font:
+                'Bahnschrift', 'DIN Condensed', 'DIN Alternate', 'Roboto Condensed',
+                'Arial Narrow', 'Liberation Sans Narrow', 'Nimbus Sans Narrow',
+                'Consolas', 'SF Mono', 'Menlo', 'Roboto Mono', 'DejaVu Sans Mono',
+                'Liberation Mono', ui-monospace, monospace;
+            --hud-label-font:
+                system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial,
+                'Liberation Sans', 'DejaVu Sans', sans-serif;
+            /* The score window's inner padding, shared with the SCORE legend's own indent so the
+               legend starts over the first DIGIT rather than over the window's outer bezel. One
+               variable rather than two hand-synced numbers per breakpoint. */
+            --hud-well-pad: 6px;
         }
 
         #player-hud .hud-label {
-            color: rgba(150, 245, 255, 0.75);
+            color: rgba(150, 245, 255, 0.78);
             display: block;
+            font-family: var(--hud-label-font);
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.1em;
+            /* Wide tracking is most of what separates a legend from a readout - the digits below
+               go the other way (negative) in the same panel. */
+            letter-spacing: 0.16em;
             text-shadow: none;
         }
 
         #player-hud .hud-value {
             display: block;
+            font-family: var(--hud-digit-font);
             font-weight: 800;
-            font-variant-numeric: tabular-nums;
-            font-feature-settings: 'tnum' 1;
-            letter-spacing: 0.02em;
+            font-stretch: 87.5%; /* no-op unless the resolved family actually has a narrower cut */
+            font-variant-numeric: tabular-nums lining-nums;
+            /* 'zero' off, explicitly: several of the monospace fallbacks at the tail of the stack
+               (Consolas, Menlo) ship a slashed or dotted zero, which is a code-editor convention -
+               a real score reel has a plain oval. Only helps where the plain zero is the default
+               glyph and the slash is the alternate, but it costs nothing where it isn't. */
+            font-feature-settings: 'tnum' 1, 'lnum' 1, 'zero' 0;
+            /* Slightly tighter than the metric default, as a real score reel is - but only
+               slightly: tabular figures add this to every advance equally, so it stays a uniform
+               digit pitch rather than optical kerning. */
+            letter-spacing: -0.015em;
             line-height: 1.05;
+            font-variant-ligatures: none;
         }
 
-        #player-hud #hud-score-block .hud-label { font-size: 10px; margin-bottom: 1px; }
+        #player-hud #hud-score-block .hud-label {
+            font-size: 10px;
+            margin-bottom: 2px;
+            text-indent: var(--hud-well-pad); /* see --hud-well-pad - aligns SCORE over the digits */
+        }
         #player-hud #hud-score {
             font-size: 30px;
-            color: #eafeff;
-            text-shadow: 0 0 2px rgba(0, 255, 255, 0.7);
+            color: #dffcff;
+            /* The recessed display window. Darker than #player-hud's own fill so it reads as a
+               cut-out in the panel rather than a highlight painted on it. */
+            padding: 1px var(--hud-well-pad) 3px;
+            border-radius: 5px;
+            background-color: rgba(2, 6, 12, 0.92);
+            /* Dot-matrix panel texture. 3px pitch and ~4% alpha: present as a surface at reading
+               distance, invisible as a pattern, and coarse enough not to alias into moire at
+               DPR 1. Sits behind the glyphs, never over them, so it cannot soften an edge. */
+            background-image: radial-gradient(circle at 50% 50%,
+                rgba(130, 245, 255, 0.045) 0.5px, rgba(130, 245, 255, 0) 0.75px);
+            background-size: 3px 3px;
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.85),          /* the recess itself */
+                inset 0 0 0 1px rgba(0, 255, 255, 0.14),      /* thin bezel around the window */
+                inset 0 -1px 0 rgba(150, 255, 255, 0.10);     /* light catching the bottom lip */
+            text-shadow:
+                0 -1px 0 rgba(255, 255, 255, 0.3),            /* inner highlight along each stroke */
+                0 1px 0 rgba(0, 26, 38, 0.9),                 /* grounds the glyph in the well */
+                0 0 1px rgba(120, 250, 255, 0.5);             /* lit edge - 1px, not a bloom */
         }
 
         #player-hud #hud-lives-block { align-items: flex-start; }
-        #player-hud #hud-lives-block .hud-label { font-size: 9px; margin-bottom: 1px; }
+        #player-hud #hud-lives-block .hud-label { font-size: 9px; margin-bottom: 2px; }
         #player-hud #hud-lives {
             font-size: 18px;
-            color: #7dfff0;
-            text-shadow: 0 0 2px rgba(0, 255, 204, 0.7);
+            /* Secondary by construction: no window, no bevel, no lit edge, and a fill pulled well
+               back from the score's near-white so the eye lands on the score first every time. */
+            color: rgba(125, 236, 224, 0.88);
+            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.8);
         }
 
         @media (max-width: 480px) {
             #player-hud {
                 top: max(8px, env(safe-area-inset-top));
                 right: calc(max(16px, env(safe-area-inset-right)) + 40px + 6px);
-                padding: 5px 10px 6px;
+                padding: 3px 10px 4px; /* same height-neutral trade as the base rule above */
                 gap: 9px;
             }
             #player-hud #hud-score-block .hud-label { font-size: 9px; }
-            #player-hud #hud-score { font-size: 23px; }
+            /* Font sizes are untouched at every step (this pass changes the face, not the
+               scale) - only the display window's own padding tightens, so the recess stays
+               proportional to the digits instead of eating the panel on a phone. */
+            #player-hud { --hud-well-pad: 5px; }
+            #player-hud #hud-score { font-size: 23px; padding: 1px var(--hud-well-pad) 2px; border-radius: 4px; }
             #player-hud #hud-lives-block .hud-label { font-size: 8px; }
             #player-hud #hud-lives { font-size: 15px; }
         }
@@ -147,9 +272,18 @@
         /* Narrowest phones (iPhone SE/320px and similar) - one more step down so an 8-digit
            score still fits without wrapping or crowding the divider/lives block. */
         @media (max-width: 340px) {
-            #player-hud { gap: 7px; padding: 5px 8px 6px; }
-            #player-hud #hud-score { font-size: 19px; }
+            #player-hud { gap: 7px; padding: 3px 8px 4px; }
+            #player-hud { --hud-well-pad: 4px; }
+            #player-hud #hud-score { font-size: 19px; padding: 1px var(--hud-well-pad) 2px; border-radius: 3px; }
             #player-hud #hud-lives { font-size: 13px; }
+            /* At 19px the 1px bevel is a meaningful fraction of the stroke weight, so the
+               under-shadow goes and the highlight halves - the digits stay crisp instead of
+               turning into a 1px-thick outline of themselves. */
+            #player-hud #hud-score {
+                text-shadow:
+                    0 -1px 0 rgba(255, 255, 255, 0.16),
+                    0 0 1px rgba(120, 250, 255, 0.5);
+            }
         }
 
         /* Restrained score/lives HUD feedback (user-requested - "brief subtle brightness/scale
@@ -1066,6 +1200,19 @@
            of this stylesheet deliberately - every rule it overrides shares the same selector
            specificity as what it's overriding, so it has to come later in source order to
            actually win the cascade regardless of which selector it targets. */
+        /* Windows High Contrast / forced-colors strips author colours but NOT box-shadow or
+           background-image, which would leave the score's display window and dot grid painted
+           over a system-coloured panel. Everything decorative comes off; the readout stays. */
+        @media (forced-colors: active) {
+            #player-hud #hud-score {
+                background-image: none;
+                box-shadow: none;
+                text-shadow: none;
+                border: 1px solid currentColor;
+            }
+            #player-hud #hud-lives { text-shadow: none; }
+        }
+
         @media (prefers-reduced-motion: reduce) {
             .launch-btn.ready { animation: none; }
             .rotate-icon { animation: none; }
