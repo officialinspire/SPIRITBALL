@@ -161,14 +161,31 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         if (isMobileDevice && isLandscape) {
             if (rotateOverlay) rotateOverlay.style.display = 'flex';
             if (mobileControls) mobileControls.style.display = 'none';
+            document.documentElement.dataset.touchControls = 'off';
             return;
         }
 
         if (rotateOverlay) rotateOverlay.style.display = 'none';
-        if (mobileControls) {
-            const shouldShow = isMobileDevice || window.innerHeight > window.innerWidth || window.innerWidth <= 767;
-            mobileControls.style.display = shouldShow ? 'block' : 'none';
-        }
+        const shouldShow = isMobileDevice || window.innerHeight > window.innerWidth || window.innerWidth <= 767;
+        if (mobileControls) mobileControls.style.display = shouldShow ? 'block' : 'none';
+        // Publish the decision so CSS can agree with it. The title screen's control hint used to
+        // pick its wording from `(hover: none) and (pointer: coarse)`, which is a different
+        // question than the one asked here - a 390px-wide desktop window is coarse-pointer=false
+        // but small-and-portrait=true, so the screen showed on-screen flipper zones and a "TAP to
+        // start" button while the hint underneath it said "SPACE LAUNCH / ESC PAUSE". The hint
+        // should describe the controls the player can actually see, which is exactly shouldShow.
+        // Presentational only: nothing reads this attribute except the hint's CSS.
+        document.documentElement.dataset.touchControls = shouldShow ? 'on' : 'off';
+    }
+
+    // Do the on-screen flipper zones and launch button exist right now? This is the question the
+    // player-facing prompts actually care about, and it is NOT the same as isMobileDevice:
+    // updateMobileControlsVisibility() also shows the controls for any portrait or <=767px
+    // viewport. A portrait tablet (no mobile UA, 820px wide) got the controls but was told to
+    // "PRESS SPACE TO START" - it has no space bar. Reads the attribute that function publishes
+    // so there is exactly one definition of the answer.
+    function touchControlsActive() {
+        return document.documentElement.dataset.touchControls === 'on';
     }
 
     // Requires a user gesture, so this can't happen automatically on page load - called from
@@ -7350,9 +7367,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         // --- Menu/title screen: shown until the first launch input, translucent so the idle
         // attract-mode camera (10-*.md) is visible behind it, matching the doc's explicit spec. ---
-        document.getElementById('menu-highscore').textContent = 'HIGH SCORE: ' + backglass.state.highScore;
+        // Title-screen presentation pass: the "HIGH SCORE" legend is now a static sibling element
+        // in index.html, so this writes the VALUE only - the two are styled as legend-over-value,
+        // the same grammar #player-hud and the backglass already use.
+        document.getElementById('menu-highscore').textContent = String(backglass.state.highScore);
         document.getElementById('menu-start-instructions').textContent =
-            isMobileDevice ? 'TAP ⚡ TO START' : 'PRESS SPACE TO START';
+            touchControlsActive() ? 'TAP ⚡ TO START' : 'PRESS SPACE TO START';
         menuOverlay.style.display = 'flex';
 
         function hideMenuScreen() {
@@ -7585,7 +7605,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // point in a session, but keeping its text in sync here is cheap and means it can
             // never go stale if a future path (or a dev/debug route) does bring it back.
             const menuHighScoreEl = document.getElementById('menu-highscore');
-            if (menuHighScoreEl) menuHighScoreEl.textContent = 'HIGH SCORE: ' + backglass.state.highScore;
+            if (menuHighScoreEl) menuHighScoreEl.textContent = String(backglass.state.highScore);
             backglass.redraw();
             resetBallToPlunger();
             isPaused = false;
@@ -7715,7 +7735,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             });
 
             document.getElementById('gameover-restart-instructions').textContent =
-                isMobileDevice ? 'TAP ⚡ TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
+                touchControlsActive() ? 'TAP ⚡ TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
             gameOverOverlay.style.display = 'flex';
         }
 

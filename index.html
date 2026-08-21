@@ -229,7 +229,11 @@
            font-synthesis is left at its default: several of the condensed faces above ship in a
            single weight, and a synthesised bold on a narrow face is still the right call here
            (the alternative is the score silently rendering at Regular on macOS). */
-        #player-hud {
+        /* Shared with the title screen (see #menu-overlay) - hoisted from #player-hud to :root so
+           the two surfaces resolve the identical stack instead of duplicating thirteen family
+           names. Custom properties inherit, so #player-hud's own var() references below are
+           unchanged in value. */
+        :root {
             --hud-digit-font:
                 'Bahnschrift', 'DIN Condensed', 'DIN Alternate', 'Roboto Condensed',
                 'Arial Narrow', 'Liberation Sans Narrow', 'Nimbus Sans Narrow',
@@ -238,6 +242,9 @@
             --hud-label-font:
                 system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial,
                 'Liberation Sans', 'DejaVu Sans', sans-serif;
+        }
+
+        #player-hud {
             /* The score window's inner padding, shared with the SCORE legend's own indent so the
                legend starts over the first DIGIT rather than over the window's outer bezel. One
                variable rather than two hand-synced numbers per breakpoint. */
@@ -984,13 +991,264 @@
             color: #ffffff;
         }
 
-        /* Menu screen is deliberately translucent (not opaque) so the idle attract-mode orbit
-           camera (10-*.md) is visible behind it through the canvas, per the doc's explicit
-           instruction - every other overlay here uses a solid dark background since gameplay
-           isn't meant to show through them. */
+        /* ==========================================================================
+           TITLE SCREEN (user-requested - "premium indie arcade title screen, not webpage modal
+           ... reduce the feeling of one generic rectangular dialog card floating over the game
+           ... allow the 3D scene to breathe"). Presentation only: the overlay's own show/hide,
+           its click-to-start handler, and the attract camera are all untouched.
+
+           WHAT WAS ACTUALLY WRONG. It was not the styling of the card, it was the card. A
+           420px-wide bordered rectangle centred on the screen sat directly over the cabinet - the
+           one thing a title screen is supposed to be showing off - and its 2px cyan border drew a
+           hard box around the whole composition. Every element inside it was also centre-stacked
+           in one column, so "hero title", "subtitle", "high score" and "the thing to press" all
+           read as four lines of the same paragraph.
+
+           WHAT REPLACES IT. No container at all. The content splits into a marquee anchored to
+           the top and an action block anchored to the bottom, with the middle band left empty for
+           the table, and the scrim is graded rather than flat - near-opaque at the top and bottom
+           edges where the text lives, and thinned to 18% through the middle so the cabinet reads
+           through it. That is the difference between a modal over a game and a title screen with
+           a game behind it.
+
+           HIERARCHY comes from four different axes at once rather than from size alone: the hero
+           is huge, tightly-set and near-white; the subtitle is tiny, hugely letterspaced and
+           dim; the high score borrows the legend-over-value grammar and the amber register the
+           backglass already uses for exactly this number; and the call to action is the only
+           FILLED element on the screen, which is what makes it unmistakably the thing to press.
+           ========================================================================== */
         #menu-overlay {
+            justify-content: space-between;
+            /* Graded, not flat. The old 0.55 -> 0.80 wash dimmed the whole scene uniformly to
+               make one card legible; this keeps the top and bottom dark enough to carry text and
+               lets the middle stay open. */
+            background: linear-gradient(to bottom,
+                rgba(4, 0, 14, 0.92) 0%,
+                rgba(4, 0, 14, 0.64) 20%,
+                rgba(4, 0, 14, 0.18) 38%,
+                rgba(4, 0, 14, 0.18) 54%,
+                rgba(4, 0, 14, 0.72) 79%,
+                rgba(4, 0, 14, 0.94) 100%);
+            /* Top padding clears #player-hud, which is a fixed top-right element and is NOT part
+               of this overlay, so nothing about the flex layout keeps them apart. The floor is
+               set from the TALLEST case rather than the narrowest: the HUD's bottom edge sits at
+               52px on a phone but 71px on desktop, and a first pass at 62px cleared the phone and
+               then collided at 1280x600, where the short-viewport rule below had trimmed the
+               padding further. 78px clears every combination measured. */
+            padding: max(9vh, 78px) 20px max(4vh, 24px);
+            /* The overlay is the click-to-start target and covers the screen; nothing inside it
+               should ever swallow that click or show a text cursor over a title. */
+            user-select: none;
+        }
+
+        #menu-overlay .title-actions {
+            width: 100%;
+            max-width: 640px;
+        }
+        /* The marquee gets its own, wider cap. At 640 the title overflowed its container on
+           desktop - 104px of a monospace fallback is 787px of glyphs - which the viewport-level
+           overflow check missed because the clipping was inside the block, not off-screen. */
+        #menu-overlay .title-marquee {
+            width: 100%;
+            max-width: min(900px, 100%);
+        }
+
+        #menu-overlay h1 {
+            font-family: var(--hud-digit-font);
+            /* 11vw, not the 13.5 this started at: measured overflow at 390px, where the last L
+               was clipped off the right edge. The stack's LAST resort is a monospace, which is
+               the widest thing it can resolve to, so the ceiling has to fit that case - ten
+               characters at 0.602em advance plus 0.155em tracking is 7.57em, and 350px of usable
+               width at a 390px viewport allows 46px. On a machine that has one of the condensed
+               faces the title simply sits a little narrower, which costs nothing. */
+            font-size: clamp(34px, 11vw, 96px);
+            font-weight: 800;
+            /* Wide tracking is what turns a word into a marquee. text-indent puts the trailing
+               letter-space back on the left so the line stays optically centred. */
+            letter-spacing: 0.155em;
+            text-indent: 0.155em;
+            line-height: 0.95;
+            margin: 0;
+            color: #eafcff;
+            /* Crisp core, soft halo - the same discipline as the HUD, but a hero mark can carry
+               an outer glow the score readouts deliberately cannot: the 2px shadow keeps every
+               edge hard and only the 20px/44px terms bloom.
+
+               Every term here must be BLURRED. Chromium paints a `background-clip: text` fill as
+               the element's background, i.e. underneath the text layer, so text-shadow lands on
+               top of it rather than behind it. A hard unblurred term is a glyph-shaped opaque
+               shape and it covers the sheen completely - this stack used to open with
+               `0 1px 0 rgba(0,24,34,.9)` for edge contrast and the title rendered as a dark
+               outline with a 1px bright rim. Blurred terms only feather the edges, so they
+               coexist with the gradient; the scrim behind the marquee supplies the contrast the
+               dark term was there for. */
+            text-shadow:
+                0 0 2px rgba(190, 255, 255, 0.85),
+                0 0 20px rgba(0, 225, 255, 0.34),
+                0 0 44px rgba(150, 60, 255, 0.22);
+        }
+
+        /* Top-lit metal sheen on the hero. Guarded, because an unsupported background-clip would
+           leave the title fully transparent - the single worst failure this file could ship - and
+           the plain `color` above is a complete fallback on its own. */
+        @supports (-webkit-background-clip: text) or (background-clip: text) {
+            #menu-overlay h1 {
+                /* Top-lit ramp: white crown, cyan base. The spread has to be wide enough to
+                   read as a sheen at 34px and still not dim the base of the glyph at 96px -
+                   #6fdcf6 is the darkest stop that stays clearly brighter than the subtitle. */
+                background: linear-gradient(180deg, #ffffff 0%, #d8f6ff 52%, #6fdcf6 100%);
+                -webkit-background-clip: text;
+                background-clip: text;
+                -webkit-text-fill-color: transparent;
+                color: transparent;
+            }
+        }
+
+        /* Hairline rule with a centre diamond - an arcade marquee convention, and a cheap way to
+           bind the hero and subtitle into one block without drawing a box around them. */
+        #menu-overlay .title-rule {
+            display: flex;
+            align-items: center;
             justify-content: center;
-            background: linear-gradient(rgba(5, 1, 15, 0.55), rgba(5, 1, 15, 0.8));
+            gap: 10px;
+            margin: 14px auto 12px;
+            max-width: min(420px, 78%);
+        }
+        #menu-overlay .title-rule i {
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, rgba(0, 255, 255, 0), rgba(0, 255, 255, 0.45));
+        }
+        #menu-overlay .title-rule i:last-child {
+            background: linear-gradient(90deg, rgba(0, 255, 255, 0.45), rgba(0, 255, 255, 0));
+        }
+        #menu-overlay .title-rule b {
+            width: 5px;
+            height: 5px;
+            transform: rotate(45deg);
+            background: rgba(120, 245, 255, 0.8);
+            box-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
+        }
+
+        #menu-overlay .title-sub {
+            font-family: var(--hud-label-font);
+            font-weight: 700;
+            font-size: clamp(10px, 2.9vw, 13px);
+            letter-spacing: 0.36em;
+            text-indent: 0.36em;
+            color: rgba(150, 245, 255, 0.74);
+            margin: 0;
+        }
+
+        /* --- bottom action block ------------------------------------------------------- */
+        #menu-overlay .title-score {
+            margin: 0 0 clamp(16px, 3.5vh, 28px);
+            line-height: 1.1;
+        }
+        #menu-overlay .title-score-label {
+            display: block;
+            font-family: var(--hud-label-font);
+            font-weight: 700;
+            font-size: clamp(10px, 2.7vw, 12px);
+            letter-spacing: 0.24em;
+            text-indent: 0.24em;
+            color: rgba(150, 245, 255, 0.72);
+            margin-bottom: 3px;
+        }
+        #menu-overlay .title-score-value {
+            display: block;
+            font-family: var(--hud-digit-font);
+            font-weight: 800;
+            font-size: clamp(30px, 8.4vw, 46px);
+            font-variant-numeric: tabular-nums lining-nums;
+            letter-spacing: -0.015em;
+            /* Amber, not cyan: this is the same number the backglass shows, in the same register,
+               so a player reads the two as one fact rather than two. */
+            color: #ffc849;
+            text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7), 0 0 14px rgba(255, 170, 40, 0.32);
+        }
+
+        /* The only filled element on the screen. An outlined pill reads as one more label among
+           labels; a solid one reads as a button, which is the entire job of this line. Dark text
+           on a bright fill also survives the busy playfield behind it far better than glowing
+           green-on-transparent did. */
+        #menu-overlay #menu-start-instructions {
+            font-family: var(--hud-label-font);
+            font-weight: 800;
+            font-size: clamp(14px, 4vw, 19px);
+            letter-spacing: 0.13em;
+            text-indent: 0.13em;
+            color: #04211a;
+            background: linear-gradient(180deg, #8effcd 0%, #23e39a 55%, #12c383 100%);
+            border: 0;
+            border-radius: 999px;
+            padding: 14px 34px;
+            text-shadow: none;
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.55),
+                inset 0 -1px 0 rgba(0, 60, 40, 0.35),
+                0 0 0 1px rgba(0, 255, 160, 0.35),
+                0 8px 26px rgba(0, 255, 150, 0.26);
+            animation: title-cta-breathe 2.6s ease-in-out infinite;
+        }
+
+        /* Breathes on the GLOW only. The old treatment reused .pulse-text, which fades opacity to
+           0.4 - acceptable on thin outlined text, but on a filled pill it visibly blinks the one
+           thing the player is trying to read. */
+        @keyframes title-cta-breathe {
+            0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), inset 0 -1px 0 rgba(0,60,40,0.35),
+                                   0 0 0 1px rgba(0,255,160,0.35), 0 8px 26px rgba(0,255,150,0.26); }
+            50%      { box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), inset 0 -1px 0 rgba(0,60,40,0.35),
+                                   0 0 0 1px rgba(0,255,160,0.5),  0 8px 34px rgba(0,255,150,0.44); }
+        }
+
+        #menu-overlay .title-hint {
+            font-family: var(--hud-label-font);
+            font-weight: 600;
+            font-size: clamp(9px, 2.5vw, 11px);
+            letter-spacing: 0.16em;
+            line-height: 1.9;
+            color: rgba(160, 210, 235, 0.5);
+            margin: clamp(14px, 3vh, 22px) 0 0;
+        }
+        #menu-overlay .title-hint span {
+            display: block;
+            /* Wrapping is fine, a lone orphan word is not - the desktop hint breaks after "ESC"
+               at 320px otherwise. Ignored where unsupported, which just restores the plain wrap. */
+            text-wrap: balance;
+        }
+        /* Platform split. The media query is the pre-JS default - it is the best guess available
+           before any script runs - and [data-touch-controls] overrides it the moment the game has
+           actually decided, so the hint always names the controls the player can see. See
+           updateMobileControlsVisibility() in babylon-game.js for why the two can disagree.
+
+           Every one of these selectors carries the `span` type deliberately. Without it
+           `#menu-overlay .hint-touch` (id + class) loses to `#menu-overlay .title-hint span`
+           (id + class + type) directly above, and the hide never applies - which is exactly what
+           happened first time round: both platform lines rendered at once. */
+        #menu-overlay .title-hint span.hint-touch { display: none; }
+        @media (hover: none) and (pointer: coarse) {
+            #menu-overlay .title-hint span.hint-desktop { display: none; }
+            #menu-overlay .title-hint span.hint-touch { display: block; }
+        }
+        html[data-touch-controls="on"] #menu-overlay .title-hint span.hint-desktop { display: none; }
+        html[data-touch-controls="on"] #menu-overlay .title-hint span.hint-touch { display: block; }
+        html[data-touch-controls="off"] #menu-overlay .title-hint span.hint-desktop { display: block; }
+        html[data-touch-controls="off"] #menu-overlay .title-hint span.hint-touch { display: none; }
+
+        /* Shortest supported viewports (iPhone SE and similar in landscape-ish crops): the marquee
+           gives up its rule and some tracking before anything is allowed to scroll or collide. */
+        /* Narrowest widths: the hint gives up tracking before it gives up a second line. */
+        @media (max-width: 380px) {
+            #menu-overlay .title-hint { letter-spacing: 0.08em; }
+        }
+
+        @media (max-height: 620px) {
+            /* Deliberately NOT trimmed below the base floor - see it for why. Only the marquee's
+               internal spacing gives way on a short viewport. */
+            #menu-overlay { padding-top: 78px; }
+            #menu-overlay .title-rule { margin: 9px auto 8px; }
+            #menu-overlay .title-hint { line-height: 1.7; }
         }
 
         #pause-overlay, #controls-overlay, #gameover-overlay {
@@ -1292,6 +1550,10 @@
             .launch-btn.ready { animation: none; }
             .rotate-icon { animation: none; }
             .screen-overlay .pulse-text, #loading-panel h1 { animation: none; }
+            /* Title-screen call to action - the glow breathe stops, and unlike .pulse-text it
+               needs no static replacement: its resting state is the full-strength pill, which is
+               already the readable one. */
+            #menu-overlay #menu-start-instructions { animation: none; }
             /* Belt-and-suspenders alongside pulseScoreHud()/pulseLivesHud()'s own
                window.SPIRITBALL_reducedMotion check (babylon-game.js) - those already skip adding
                the class at all, but this guarantees the same outcome even if a class somehow ends
@@ -1457,11 +1719,27 @@
     <!-- Menu/title screen (Stage 12) - shown until the first launch input, translucent so the
          idle attract-mode orbit camera (10-*.md) is visible behind it. -->
     <div id="menu-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="menu-overlay-heading">
-        <div class="overlay-card">
-            <h1 id="menu-overlay-heading" class="pulse-text">SPIRITBALL</h1>
-            <p class="tagline">DMT Vision Quest Pinball</p>
-            <p class="highscore-line" id="menu-highscore">HIGH SCORE: 0</p>
-            <p class="start-instructions pulse-text" id="menu-start-instructions">PRESS SPACE TO START</p>
+        <!-- Title-screen presentation pass (user-requested). No dialog card: the content is split
+             into a top marquee and a bottom action block so the middle of the screen - where the
+             cabinet actually is - stays clear. #menu-highscore and #menu-start-instructions are
+             still plain text leaves, because babylon-game.js writes them with textContent and
+             would wipe any children. -->
+        <div class="title-marquee">
+            <h1 id="menu-overlay-heading">SPIRITBALL</h1>
+            <div class="title-rule" aria-hidden="true"><i></i><b></b><i></i></div>
+            <p class="title-sub">DMT VISION QUEST PINBALL</p>
+        </div>
+        <div class="title-actions">
+            <p class="title-score">
+                <span class="title-score-label">HIGH SCORE</span>
+                <span class="title-score-value" id="menu-highscore">0</span>
+            </p>
+            <p class="start-instructions" id="menu-start-instructions">PRESS SPACE TO START</p>
+            <p class="title-hint">
+                <span class="hint-desktop">&#8592; &#8594; FLIPPERS &nbsp;&middot;&nbsp; SPACE LAUNCH &nbsp;&middot;&nbsp; ESC PAUSE</span>
+                <span class="hint-touch">SIDE ZONES FLIP &nbsp;&middot;&nbsp; HOLD &#9889; TO LAUNCH</span>
+                <span class="hint-sound">SOUND &#8594; PAUSE &#8594; CONTROLS</span>
+            </p>
         </div>
     </div>
 
