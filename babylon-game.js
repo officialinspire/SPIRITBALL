@@ -16,7 +16,7 @@
 //          implementation note)
 // Stage 10: camera shake/punch/flash juice + an idle attract-mode orbit camera
 //           (babylon-prompts/10-*.md - see that file's implementation note)
-// Stage 11: real mobile touch controls (arcade edge zones + launch button, ported from
+// Stage 11: real mobile touch controls (arcade corner buttons + launch button, ported from
 //           archive/release-prompts/14-*.md), Havok/WASM-SIMD compatibility detection with an honest
 //           fallback message, and performance-tier gating (babylon-prompts/11-*.md - see that
 //           file's implementation note)
@@ -5325,7 +5325,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // button, fullscreen/orientation-lock request, and resize handling - see the "Mobile
         // controls" block near handleLaunchRelease() below (Stage 11, babylon-prompts/11-*.md).
         // (Stage 4's original tap-left/right-half-of-canvas stopgap has been fully replaced by
-        // the real ported arcade-style edge zones there, not left running alongside them.)
+        // the real arcade-style corner buttons there, not left running alongside them.)
 
         const statusLeftFlipper = document.getElementById('status-left-flipper');
         const statusRightFlipper = document.getElementById('status-right-flipper');
@@ -5729,9 +5729,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // --- Mobile controls (Stage 11, babylon-prompts/11-*.md; touch input audit, user-requested) ---
         //
         // DOM elements/CSS ported from InputManager.setupMobileControls() in ../index.js
-        // (archive/release-prompts/14-*.md) - full-height arcade-style edge zones (tap ANYWHERE
-        // along the side, not a small button) plus a discrete round launch button - unchanged by
-        // this audit (the doc explicitly asks to preserve them). The EVENT WIRING below replaces
+        // (archive/release-prompts/14-*.md). Those were originally full-height edge zones (tap
+        // ANYWHERE along the side); they are now compact bottom-corner arcade buttons, because
+        // "anywhere along the side" meant an ordinary two-handed grip on the phone, or a tap at
+        // the top of the table, silently held a flipper - see index.html's .flipper-zone comment
+        // for that hit-area fix. Only the hitbox geometry changed there: these are still the same
+        // two elements with the same ids, wiring, and flipper physics. The EVENT WIRING below replaces
         // the original direct touchstart/touchend/touchcancel-per-element approach with an
         // identifier-tracked model, for a handful of real gaps that approach had:
         //
@@ -7757,7 +7760,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const rowsEl = document.getElementById('controls-rows');
             rowsEl.innerHTML = '';
             const rows = isMobileDevice ? [
-                ['◀ / ▶ ZONES', 'Left / Right Flippers'],
+                ['◀ / ▶ BUTTONS', 'Left / Right Flippers'],
                 ['⚡ BUTTON', 'Hold to Charge, Release to Launch'],
                 ['⏸ BUTTON', 'Pause / Resume']
             ] : [

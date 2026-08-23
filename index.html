@@ -705,6 +705,25 @@
             opacity: 1;
         }
 
+        /* Touch hit-area fix (user-reported bug): this element used to be a full-viewport-HEIGHT,
+           32%-wide edge strip (top:0; bottom:0; width:32%) with the visible round control merely
+           parked at its bottom via a large padding-bottom. The consequence was that a touch
+           anywhere down either side of the playfield - the top corners, mid-table, nowhere near
+           the button the player can actually see - fired that flipper, and a two-thumb grip on the
+           sides of the phone held both flippers down permanently.
+
+           The hitbox is now the visible arcade button itself: a compact bottom-corner pad whose
+           box IS the control. Everything above it - the entire playfield - is back to
+           pointer-events:none (inherited from #mobile-controls), so unrelated touches can never
+           reach a flipper. Sized well past the 56-72px minimum usable touch target (the clamp
+           floor alone is 72px, growing to 104px on larger screens) and deliberately a little
+           larger than the .flipper-zone-icon inside it, so the pad carries normal touch slop
+           around the visible circle rather than demanding a pixel-perfect hit.
+
+           Left and right are separate elements with separate listeners exactly as before, so they
+           stay fully independent and simultaneous two-thumb presses still work; #launch-btn is
+           its own element in the bottom centre, untouched and still independent. Nothing here
+           changes flipper physics or motion - only which pixels count as "the button". */
         .flipper-zone {
             /* Control-feedback polish (user-requested - "immediate subtle pressed-state
                reaction... release visual immediately on release"): shortened from 0.12s. This only
@@ -716,14 +735,18 @@
                to read as immediate rather than a fade. */
             transition: opacity 0.06s ease-out;
             position: absolute;
-            top: 0;
-            bottom: 0;
-            width: 32%;
-            max-width: 220px;
+            /* Same bottom baseline as .launch-btn below (identical expression), so the three
+               controls read as one row of arcade buttons, and the same safe-area handling the
+               strip had: never under a home indicator / gesture bar. */
+            bottom: max(28px, calc(env(safe-area-inset-bottom) + 14px));
+            width: clamp(72px, 21vw, 104px);
+            height: clamp(72px, 21vw, 104px);
+            border-radius: 50%;
+            box-sizing: border-box;
             pointer-events: auto;
             display: flex;
-            align-items: flex-end;
-            padding-bottom: max(140px, calc(env(safe-area-inset-bottom) + 120px));
+            align-items: center;
+            justify-content: center;
             user-select: none;
             -webkit-user-select: none;
             -webkit-touch-callout: none;
@@ -734,24 +757,29 @@
             -webkit-tap-highlight-color: transparent;
         }
 
+        /* Horizontal inset keeps the same max(fixed, safe-area-inset) shape the strip used, so a
+           notch/rounded corner in landscape-ish or gesture-inset devices still pushes the button
+           inward rather than under the bezel. */
         .flipper-zone.left {
-            left: 0;
-            justify-content: flex-start;
-            padding-left: max(14px, env(safe-area-inset-left));
-            background: linear-gradient(to right, rgba(0, 255, 255, 0.10), transparent 70%);
-            border-radius: 0 24px 24px 0;
+            left: max(16px, calc(env(safe-area-inset-left) + 12px));
         }
 
         .flipper-zone.right {
-            right: 0;
-            justify-content: flex-end;
-            padding-right: max(14px, env(safe-area-inset-right));
-            background: linear-gradient(to left, rgba(0, 255, 255, 0.10), transparent 70%);
-            border-radius: 24px 0 0 24px;
+            right: max(16px, calc(env(safe-area-inset-right) + 12px));
         }
 
-        .flipper-zone.left.pressed { background: linear-gradient(to right, rgba(255, 0, 255, 0.28), transparent 70%); }
-        .flipper-zone.right.pressed { background: linear-gradient(to left, rgba(255, 0, 255, 0.28), transparent 70%); }
+        /* The resting/pressed tint that used to wash across the whole edge strip, re-aimed as a
+           halo around the compact button - same colours, same "cyan at rest, magenta on press"
+           read, now confined to the area that is actually pressable. */
+        .flipper-zone.left,
+        .flipper-zone.right {
+            background: radial-gradient(circle at center, rgba(0, 255, 255, 0.14), transparent 72%);
+        }
+
+        .flipper-zone.left.pressed,
+        .flipper-zone.right.pressed {
+            background: radial-gradient(circle at center, rgba(255, 0, 255, 0.34), transparent 72%);
+        }
 
         .flipper-zone-icon {
             display: flex;
@@ -945,9 +973,18 @@
             50% { transform: rotate(-90deg); }
         }
 
+        /* Narrow phones: pull the two flipper buttons a little closer to their edges so the gap
+           between them and the centre .launch-btn stays comfortable at ~320px, where all three
+           controls are sitting at their clamp() floors and the row is at its tightest. Position
+           only - the 72px minimum touch target is untouched. (Previously this block shrank the
+           old edge strip's padding-bottom, which no longer exists.) */
         @media (max-width: 360px) {
-            .flipper-zone {
-                padding-bottom: max(110px, calc(env(safe-area-inset-bottom) + 96px));
+            .flipper-zone.left {
+                left: max(10px, calc(env(safe-area-inset-left) + 8px));
+            }
+
+            .flipper-zone.right {
+                right: max(10px, calc(env(safe-area-inset-right) + 8px));
             }
         }
 
@@ -1831,8 +1868,9 @@
         <div class="row"><label><input type="checkbox" id="toggle-particles" checked> Particle effects</label></div>
 
         <div class="row" style="color:#888; font-size:11px; margin-top:4px;">
-            Controls: LEFT/RIGHT arrow keys or SPACE (desktop); tap/hold the left/right edge zones
-            for flippers, hold the round LAUNCH button to charge/fire the plunger (mobile).
+            Controls: LEFT/RIGHT arrow keys or SPACE (desktop); tap/hold the round &#9664; / &#9654;
+            buttons in the bottom corners for flippers, hold the round LAUNCH button to charge/fire
+            the plunger (mobile).
         </div>
         <button id="drop-btn">DROP TEST BALL (random pos)</button>
         <button id="clear-btn">CLEAR EXTRA TEST BALLS</button>
@@ -1900,7 +1938,7 @@
             </button>
             <p class="title-hint">
                 <span class="hint-desktop">&#8592; &#8594; FLIPPERS &nbsp;&middot;&nbsp; SPACE LAUNCH &nbsp;&middot;&nbsp; ESC PAUSE</span>
-                <span class="hint-touch">SIDE ZONES FLIP &nbsp;&middot;&nbsp; HOLD &#9889; TO LAUNCH</span>
+                <span class="hint-touch">&#9664; &#9654; BUTTONS FLIP &nbsp;&middot;&nbsp; HOLD &#9889; TO LAUNCH</span>
                 <span class="hint-sound">SOUND &#8594; PAUSE &#8594; CONTROLS</span>
             </p>
         </div>
