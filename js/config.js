@@ -148,7 +148,43 @@ export const BALL_MASS_KG = 0.08;
 // 2% -> 12%, with scoring-object contacts per ball unchanged (~2.0) and the drain rate slightly
 // UP (81% -> 88%), i.e. livelier circulation without becoming floaty. 0.50 was also measured and
 // was worse on every metric, so this is not simply "bouncier is better".
-export const BALL_RESTITUTION = 0.45;
+//
+// Ball-movement tuning pass (user-requested - "a lively steel pinball rolling across a polished
+// machine"): 0.45 -> 0.55. This is the ONLY constant that pass changed; the measurement rig that
+// justified it is qa/ball-movement.js, which reports every number quoted here.
+//
+// Why this constant and not the other three candidates:
+//   - Rolling decay and downhill acceleration were measured FIRST and are already essentially
+//     ideal: 0.717 m/s^2 downhill against a theoretical maximum of 0.7317 for a rolling solid
+//     sphere at 6 degrees (98.0%), and 97.5% gravity-corrected speed retention per second of
+//     free rolling. There was nothing for BALL_FRICTION or TABLE_TILT_DEGREES to recover there.
+//   - The ball's angularDamping is 0.1 (a Havok/Babylon body default, never set anywhere in this
+//     repo). Zeroing it was measured and is deliberately NOT done: it pushes free-roll retention
+//     to 99.9%/s, which is the "floaty/frictionless" failure mode this pass was asked to avoid.
+//     That default damping is what makes the ball lose energy GRADUALLY, so it stays.
+//   - Restitution was the one lever that moved the two symptoms that were actually wrong.
+//
+// Measured, before -> after (identical deterministic rig, physics stepped at a fixed 1/60):
+//   head-on rebound off the outer wall  33-40%  -> 40-46% of incoming speed
+//     (the rig fires three speeds at the wall and reports whichever land a clean head-on
+//      impact, so a given run may print a narrower range than this - the floor is what moved)
+//   average speed over a whole ball     0.445   -> 0.595 m/s   (+34%)
+//   frames spent below 0.1 m/s          12.5%   -> 0.0%        (the "sticky" feel, gone)
+//   downhill acceleration               0.717   -> 0.717 m/s^2 (unchanged, already ideal)
+//   free-roll retention                 97.5%/s -> 97.5%/s     (unchanged, still loses energy)
+//   airborne frames                     0.0%    -> 0.0%        (superball guard: no floor hopping)
+//
+// KNOWN TENSION, recorded rather than hidden: this partly reverses the previous pass's finding
+// just above. A flipperless ball now drains in ~2.05s instead of ~2.90s, and that pass rejected
+// 0.50 for exactly that reason. The two passes measured different things and both are right -
+// that one scored "shots reaching the upper third" and drain RATE, this one scored rebound
+// retention and time spent nearly stationary. Some of the shorter ball life is dead time being
+// removed rather than difficulty being added: the 0.45 ball spent 12.5% of every ball under
+// 0.1 m/s, which is where the "heavy/sluggish" feel came from. If ball life turns out to matter
+// more than liveliness in playtest, BALL_FRICTION 0.08 -> 0.05 was also measured and buys a
+// similar speed gain (avg 0.642 m/s) for a smaller drain cost (~2.35s) - but it does nothing for
+// rebound, which is why it is not the one chosen here.
+export const BALL_RESTITUTION = 0.55;
 export const BALL_FRICTION = 0.08;
 
 // Converted from CONFIG.ballMaxVelocity: 1800 (px/s) in ../index.js, using the same PX_TO_M
