@@ -78,7 +78,7 @@ import {
     POWERUP_RADIUS_M, POWERUP_POS, POWERUP_SPAWN_INTERVAL_MS, POWERUP_ACTIVE_DURATION_MS,
     POWERUP_MULTIPLIER, POWERUP_MULTIPLIER_DURATION_MS, SLINGSHOT_SIZE_M, SLINGSHOTS,
     SLINGSHOT_KICK_SPEED_MS, SLINGSHOT_KICK_UPTABLE_BIAS_MS, SLINGSHOT_RESTITUTION, REENTRY_LANE_RADIUS_M, REENTRY_LANES,
-    LANE_Z_TOP_M, LANE_Z_BOTTOM_M, LANE_DIVIDER_X_M, LANE_TRIGGER_Z_M,
+    LANE_Z_TOP_M, LANE_Z_BOTTOM_M, LANE_DIVIDER_X_M, LANE_TRIGGER_Z_M, INLANE_GUIDE_BOTTOM_Z_M,
     INLANE_TRIGGER_X_M, OUTLANE_TRIGGER_X_M, LANE_TRIGGER_WIDTH_M, LANE_TRIGGER_DEPTH_M,
     INLANE_GUIDE_TOP_X_M, INLANE_GUIDE_BOTTOM_X_M, SIDE_LANES, ORBIT_RAIL_BOTTOM_Z_M,
     ORBIT_RAIL_TOP_Z_M, ORBIT_ENTRANCE_Z_M, ORBIT_COMPLETION_Z_M, ORBIT_TRIGGER_WIDTH_M,
@@ -961,9 +961,24 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // residue rather than zero: fully unlit walls read as flat black silhouettes against the
         // dark space background at this camera angle (verified via screenshot), which loses the
         // wall's own presence entirely rather than looking appropriately "structural."
-        wallMat.metallic = 0.72;
-        wallMat.roughness = 0.3;
-        wallMat.emissiveColor = COLOR_WALL.scale(0.07);
+        // Cabinet/perimeter pass (user-requested): metallic comes DOWN from 0.72, which is the
+        // opposite of the direction the last hierarchy pass moved it, and for a reason that only
+        // applies now. A metal's albedo is its specular tint, not a diffuse colour, so at 0.72
+        // with no environment texture (see this material's own comment above for why there isn't
+        // one) almost nothing of an albedo TEXTURE survives - and the crown highlight and dark
+        // base band that createCabinetRailTexture() draws are the whole point of the pass. 0.45
+        // keeps a clearly metallic response under the three direct lights while letting the
+        // profile read. Roughness up a touch to match.
+        wallMat.metallic = 0.45;
+        wallMat.roughness = 0.36;
+        // 0.07 -> 0.045: a flat emissive lifts every band equally, including the dark base band
+        // whose entire job is to be dark. Still non-zero for the reason the comment above gives -
+        // fully unlit walls read as flat black silhouettes against the space background.
+        wallMat.emissiveColor = COLOR_WALL.scale(0.045);
+        // White, because createCabinetRailTexture() bakes COLOR_WALL into the texture - see that
+        // function's comment.
+        wallMat.albedoColor = new BABYLON.Color3(1, 1, 1);
+        wallMat.albedoTexture = createCabinetRailTexture(scene, COLOR_WALL);
         // Cabinet/table artwork skin slot (visual-architecture pass, user-requested) - shared by
         // every structural boundary wall below. No-op until assets/skins/cabinet/cabinet-rails.png
         // actually exists (see SKINS.md) - the chrome look above stays exactly as-is either way.
@@ -1045,6 +1060,94 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             return mesh;
         });
 
+        // ===================================
+        // Cabinet shell
+        // ===================================
+        // Built here, off wallDefs, because these walls are the source of truth for where the
+        // machine's perimeter actually is - every piece below is derived from a wall's own
+        // footprint or from TABLE_WIDTH_M/TABLE_LENGTH_M, never from a hand-copied number that
+        // could drift out of step with the collider.
+        //
+        // Nothing here gets a PhysicsAggregate. Not one collision dimension changes.
+
+        // One chrome for every rail on the machine. Looked up by name from buildObstacles() too
+        // (it runs after this), so the side rails, the lockdown bar and all seven wall crowns are
+        // literally the same material instance rather than three near-matches - which is what
+        // "consistent material treatment" has to mean if it is to mean anything.
+        const cabinetMetalMat = new BABYLON.PBRMaterial('cabinetMetalMat', scene);
+        // Worth knowing before tuning this: with metallic near 1 and no environment texture (see
+        // wallMat's comment above for why this project deliberately has none), albedo is the
+        // specular tint and almost nothing else, so it barely moves the result. Sweeping 0.38 vs
+        // 0.60 against the same frame shifted the wall crown's measured luminance by 4 units out
+        // of 255 - the rails' presence comes from roughness and from their silhouette against the
+        // dark background, not from this number. Set for a polished-chrome tint and left there.
+        cabinetMetalMat.albedoColor = new BABYLON.Color3(0.56, 0.62, 0.68);
+        cabinetMetalMat.metallic = 0.88;
+        cabinetMetalMat.roughness = 0.18;
+        cabinetMetalMat.emissiveColor = new BABYLON.Color3(0.03, 0.04, 0.05); // the same "don't read as flat black against space" allowance wallMat gets
+
+        // The cabinet body itself - matte, unlit, deliberately the least interesting surface on
+        // the machine. Its whole job is to be a large dark mass BELOW the playfield so the table
+        // has an underside; without it the playfield is a 20mm plate with nothing under it, which
+        // is the single biggest reason the machine reads as a floating tray.
+        const cabinetBodyMat = new BABYLON.PBRMaterial('cabinetBodyMat', scene);
+        cabinetBodyMat.albedoColor = new BABYLON.Color3(0.055, 0.055, 0.075);
+        cabinetBodyMat.metallic = 0.15;
+        cabinetBodyMat.roughness = 0.82;
+
+        // A polished crown along the top edge of every structural wall, sized from that wall's own
+        // box and overhanging it by 1.5mm on each side so it reads as a capping rail rather than
+        // as more wall. All seven get one - the two side walls, the top wall, both slants and both
+        // mid-table guides - which is what ties the perimeter and the interior rails into one
+        // piece of hardware instead of two unrelated sets of blue slabs.
+        wallDefs.forEach((def) => {
+            const cap = BABYLON.MeshBuilder.CreateBox(def.name + 'Crown', {
+                width: def.w * PX_TO_M + 0.003,
+                height: 0.0045,
+                depth: def.h * PX_TO_M + 0.003
+            }, scene);
+            cap.position.set(toWorldX(def.x), WALL_HEIGHT_M + 0.00225, toWorldZ(def.y));
+            cap.rotation.y = toWorldRotationY(def.rot);
+            cap.material = cabinetMetalMat;
+            cap.isPickable = false;
+        });
+
+        // The cabinet body, and a proud moulding around the playfield's edge.
+        //
+        // The body runs the machine's full length - from just past the top wall down to in front
+        // of the apron at z -0.62 - so the front of the cabinet has a face rather than an edge,
+        // and its top sits flush under the playfield slab (which spans y -0.02 to 0).
+        //
+        // The moulding deliberately wraps the PLAYFIELD footprint only, not the body's. A moulding
+        // is a trim line for an edge, and the only edge it has to trim is the playfield's; run
+        // around the whole shell it would instead draw a bright line 21cm out in front of the
+        // playfield, across the dark ball-trough area where the apron sits, marking nothing.
+        const cabShellFrontZ = -0.665;
+        const cabShellBackZ = TABLE_LENGTH_M / 2 + 0.018;
+        const cabShellDepth = cabShellBackZ - cabShellFrontZ;
+        const cabShellCentreZ = (cabShellBackZ + cabShellFrontZ) / 2;
+
+        const cabinetBody = BABYLON.MeshBuilder.CreateBox('cabinetBody', {
+            width: TABLE_WIDTH_M + 0.004,
+            height: 0.09,
+            depth: cabShellDepth
+        }, scene);
+        cabinetBody.position.set(0, -0.065, cabShellCentreZ);
+        cabinetBody.material = cabinetBodyMat;
+        cabinetBody.isPickable = false;
+
+        const cabinetLip = BABYLON.MeshBuilder.CreateBox('cabinetLip', {
+            width: TABLE_WIDTH_M + 0.016,
+            height: 0.008,
+            depth: TABLE_LENGTH_M + 0.016
+        }, scene);
+        cabinetLip.position.set(0, -0.024, 0);
+        // Same chrome as the rails, not a second near-match: on a real machine the side rail IS
+        // the cabinet's top moulding, and one bright horizontal line at the playfield's edge is
+        // also the cleanest possible separation between the playfield art and everything below it.
+        cabinetLip.material = cabinetMetalMat;
+        cabinetLip.isPickable = false;
+
         // ---------------------------------------------------------------------------------
         // REAL BUG FIX, not just a visual pass: Stages 2-6 never built an actual playfield floor.
         // The wall boxes above only span Y=[0, WALL_HEIGHT_M] (0 to 0.04) - there was nothing
@@ -1118,8 +1221,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }, scene);
         floor.position.set(0, -0.15, 0);
         const floorMat = new BABYLON.StandardMaterial('floorMat', scene);
-        floorMat.diffuseColor = new BABYLON.Color3(0.3, 0, 0.1);
-        floorMat.alpha = 0.5;
+        // Dimmed hard in the hierarchy pass. This is a diagnostic plane, not scenery - but it is
+        // not dev-gated, and measured from the gameplay camera it was the third heaviest element
+        // in the frame (29,528 visible pixels at p90 58), a translucent red sheet hanging under
+        // and well outside the cabinet. It still catches an escaped ball and is still visible
+        // enough to find one; it just stops competing for attention with the table.
+        floorMat.diffuseColor = new BABYLON.Color3(0.12, 0, 0.05);
+        floorMat.alpha = 0.18;
         floor.material = floorMat;
         new BABYLON.PhysicsAggregate(floor, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.1, friction: 0.8 }, scene);
 
@@ -2716,6 +2824,462 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return texture;
     }
 
+    // The ball's surface markings. Audit finding (user-requested angular-motion pass): the ball's
+    // PHYSICS rotation was already correct and already reaching the renderer - measured
+    // omega*r/v = 0.998 in free roll, and the mesh quaternion genuinely turning 13.8 revolutions
+    // in 1.5s - but none of it was VISIBLE, because the ball was a uniform sphere: one flat albedo
+    // colour, one flat emissive colour, no texture. A featureless sphere looks identical at every
+    // orientation, so a correctly rolling ball read as a sliding one.
+    //
+    // This is deliberately NOT faked rotation. Nothing here spins anything; it only gives the real,
+    // Havok-driven rotation something to show. Meridian stripes are the shape that does that for
+    // both axes that matter here: they sweep sideways when the ball yaws, and converge/part at the
+    // poles when it rolls, so travel and spin are both legible. Kept as one procedural
+    // DynamicTexture in the same style as createParticleTexture() above - no asset to ship.
+    //
+    // Brightness is preserved on purpose. The lighting pass that set emissiveColor documents the
+    // ball as the top of the visual hierarchy ("highest motion readability"), so the stripes are a
+    // modest tint rather than dark bands: the orb still reads as the brightest thing on the board,
+    // it just no longer reads as featureless.
+    function createBallTexture(scene) {
+        const w = 256, h = 128;
+        const texture = new BABYLON.DynamicTexture('ballTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        // Three meridians, evenly spaced so no orientation looks like any other, drawn with soft
+        // edges so they read as markings on a polished ball rather than painted-on stripes.
+        for (let i = 0; i < 3; i++) {
+            const cx = (i + 0.5) * (w / 3);
+            const grad = ctx.createLinearGradient(cx - 12, 0, cx + 12, 0);
+            grad.addColorStop(0, 'rgba(120,190,205,0)');
+            grad.addColorStop(0.5, 'rgba(120,190,205,0.85)');
+            grad.addColorStop(1, 'rgba(120,190,205,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(cx - 12, 0, 24, h);
+        }
+        // One polar cap, so rotation about the vertical axis is still legible when a meridian
+        // happens to be facing the camera.
+        const cap = ctx.createRadialGradient(w / 2, 0, 0, w / 2, 0, h * 0.28);
+        cap.addColorStop(0, 'rgba(120,190,205,0.8)');
+        cap.addColorStop(1, 'rgba(120,190,205,0)');
+        ctx.fillStyle = cap;
+        ctx.fillRect(0, 0, w, h * 0.3);
+        texture.update();
+        return texture;
+    }
+
+    // Moulded pop-bumper cap face. Turned concentric rings plus faint radial spokes: the shapes a
+    // real cap is moulded with, and - more usefully here - shapes that catch the light differently
+    // as the cap is viewed from different angles, so the cap reads as a solid moulded object
+    // instead of a flat pale disc. Overridden wholesale by SKIN_MANIFEST.bumperCap when that
+    // artwork exists (applySkinTexture() runs after this and reassigns albedoTexture), so this is
+    // strictly the fallback look, never something a skin has to fight.
+    function createBumperCapTexture(scene) {
+        const size = 128;
+        const texture = new BABYLON.DynamicTexture('bumperCapTex', { width: size, height: size }, scene, true);
+        const ctx = texture.getContext();
+        const c = size / 2;
+        ctx.fillStyle = '#f2f2f7';
+        ctx.fillRect(0, 0, size, size);
+        // radial spokes first, so the rings read as sitting on top of them
+        ctx.strokeStyle = 'rgba(150,152,168,0.30)';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 12; i++) {
+            const a = (i / 12) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(c + Math.cos(a) * c * 0.22, c + Math.sin(a) * c * 0.22);
+            ctx.lineTo(c + Math.cos(a) * c * 0.92, c + Math.sin(a) * c * 0.92);
+            ctx.stroke();
+        }
+        for (const [r, a, w] of [[0.90, 0.35, 3], [0.66, 0.22, 2], [0.44, 0.30, 2], [0.24, 0.40, 3]]) {
+            ctx.beginPath();
+            ctx.arc(c, c, c * r, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(120,124,145,' + a + ')';
+            ctx.lineWidth = w;
+            ctx.stroke();
+        }
+        // a soft highlight off-centre, so the cap has a consistent moulded sheen
+        const gloss = ctx.createRadialGradient(c * 0.72, c * 0.66, 0, c * 0.72, c * 0.66, c * 0.85);
+        // 0.85 -> 0.45 (hierarchy pass): this highlight is what actually pinned the caps at 255,
+        // not the material tint under it. The moulded sheen still reads, it just stops clipping.
+        gloss.addColorStop(0, 'rgba(255,255,255,0.45)');
+        gloss.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gloss;
+        ctx.beginPath();
+        ctx.arc(c, c, c * 0.95, 0, Math.PI * 2);
+        ctx.fill();
+        texture.update();
+        return texture;
+    }
+
+    // Saturn's atmosphere. The centrepiece was a single flat gold colour on a smooth sphere, which
+    // at this size (SATURN_RADIUS_M is more than double any bumper) is the one object on the board
+    // where a featureless surface is most obvious - it read as a plastic ball, not a planet.
+    //
+    // Bands are generated from two summed sines over latitude rather than a hand-listed table, so
+    // the zones vary in width and brightness the way a real gas giant's do instead of looking like
+    // painted stripes, and the values stay adjustable as one curve. Sphere UVs in Babylon are
+    // equirectangular (v = latitude), so a row of this texture is a line of latitude - bands drawn
+    // as horizontal rows come out as bands around the planet.
+    //
+    // The gold is baked in here, so saturnMat's albedoColor goes to white; leaving the tint on the
+    // material as well would multiply it twice and crush every band into the same dark amber.
+    function createSaturnBandTexture(scene) {
+        const w = 256, h = 128;
+        const texture = new BABYLON.DynamicTexture('saturnBandTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        // Deep amber -> pale cream, the two ends of a gas giant's belt/zone range.
+        const deep = [0.44, 0.25, 0.05], pale = [1.00, 0.86, 0.60];
+        for (let y = 0; y < h; y++) {
+            const lat = (y / h) * 2 - 1; // -1 pole .. +1 pole
+            let t = 0.5 + 0.34 * Math.sin(lat * 11.5) + 0.16 * Math.sin(lat * 23.0 + 1.7);
+            t = Math.max(0, Math.min(1, t));
+            // Limb/polar darkening - the poles of a banded planet are always dimmer than its
+            // equator, and without it the bands alone still read as a flat cylinder.
+            const polar = 1 - 0.5 * Math.pow(Math.abs(lat), 2.6);
+            const c = deep.map((d, i) => Math.round((d + (pale[i] - d) * t) * polar * 255));
+            ctx.fillStyle = 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+            ctx.fillRect(0, y, w, 1);
+        }
+        // Two storm ovals riding in the bands. Purely so the planet is not perfectly
+        // rotationally uniform - the detail that stops a banded sphere reading as a lathe turning.
+        for (const [cx, cy, rx, ry, a] of [[0.30, 0.62, 0.075, 0.035, 0.30], [0.72, 0.41, 0.045, 0.022, 0.22]]) {
+            const g = ctx.createRadialGradient(cx * w, cy * h, 0, cx * w, cy * h, rx * w);
+            g.addColorStop(0, 'rgba(255,236,200,' + a + ')');
+            g.addColorStop(1, 'rgba(255,236,200,0)');
+            ctx.save();
+            ctx.translate(cx * w, cy * h);
+            ctx.scale(1, (ry * h) / (rx * w));
+            ctx.translate(-cx * w, -cy * h);
+            ctx.fillStyle = g;
+            ctx.fillRect((cx - rx) * w, (cy - rx) * w, rx * 2 * w, rx * 2 * w);
+            ctx.restore();
+        }
+        texture.update();
+        return texture;
+    }
+
+    // Saturn's ring plane. Two things this fixes.
+    //
+    // First: the rings were one flat gold colour with no internal structure. Real ring systems are
+    // concentric ringlets separated by divisions, and that structure is most of what makes a ring
+    // read as a ring rather than a hoop.
+    //
+    // Second, and less obvious: updateSaturnRotation() has always spun both rings about their own
+    // axes, and that rotation has never been visible, because a uniform torus is rotationally
+    // symmetric - spinning it produces an identical image every frame. The faint azimuthal
+    // variation below is what finally gives that existing animation something to show. (Same class
+    // of problem, and the same fix, as the featureless ball whose real physics rotation was
+    // invisible - see createBallTexture().)
+    //
+    // Babylon's torus UVs run u around the ring and v around the tube, so `rad` below - folded so
+    // that v and 1-v map to the same value - is a genuine radial coordinate across the ribbon,
+    // identical on the ring's top and bottom faces.
+    function createSaturnRingTexture(scene) {
+        const w = 192, h = 64;
+        const texture = new BABYLON.DynamicTexture('saturnRingTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        for (let y = 0; y < h; y++) {
+            const v = y / h;
+            const rad = Math.abs(v - 0.5) * 2; // 1 = outer edge of the ribbon, 0 = inner edge
+            // Concentric ringlets, plus one wide dark division at rad ~0.55 (a Cassini stand-in)
+            // and a soft fade at the very outer edge so the ring does not end on a hard line.
+            let b = 0.62 + 0.26 * Math.sin(rad * 26.0) + 0.12 * Math.sin(rad * 61.0 + 0.9);
+            b *= 1 - 0.72 * Math.exp(-Math.pow((rad - 0.55) / 0.055, 2));
+            b *= 1 - 0.55 * Math.pow(Math.max(0, (rad - 0.86) / 0.14), 2);
+            for (let x = 0; x < w; x++) {
+                const u = x / w;
+                // Faint density variation around the ring - the "spokes" that make the spin read.
+                const spoke = 1 + 0.11 * Math.sin(u * Math.PI * 2 * 3) + 0.07 * Math.sin(u * Math.PI * 2 * 7 + 2.1);
+                const k = Math.max(0, Math.min(1, b * spoke));
+                const c = [Math.round((0.30 + 0.70 * k) * 255), Math.round((0.20 + 0.62 * k) * 255), Math.round((0.06 + 0.34 * k) * 255)];
+                ctx.fillStyle = 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+                ctx.fillRect(x, y, 1, 1);
+            }
+        }
+        texture.update();
+        return texture;
+    }
+
+    // Cabinet rail face - the wall texture that gives the table's perimeter an actual profile.
+    //
+    // Every structural wall (topWall, the two side walls, the two slants, the two mid-table
+    // guides) is one flat colour on a plain box, which is most of why the machine reads as a
+    // tray rather than as a cabinet: a real side wall has a polished top edge catching light, a
+    // body, and a dark shadow line where it meets the playfield.
+    //
+    // Bands run in V only, with no vertical striations, and that is deliberate: these boxes have
+    // wildly different aspect ratios (topWall's face is roughly 12:1, a guide's is 3:1), so
+    // anything varying along U would stretch differently on every wall and break the "consistent
+    // material treatment" this exists to provide. Horizontal bands look identical on all seven.
+    //
+    // The cabinetRails skin slot in js/skins.js declares kind:'albedo' and targets exactly this
+    // material, so real artwork replaces this wholesale (applySkinTexture() runs after it is
+    // assigned). The caller sets albedoColor to white for the usual reason - albedoTexture is
+    // multiplied by it, and keeping the cyan tint would square it.
+    function createCabinetRailTexture(scene, color) {
+        const w = 32, h = 128;
+        const texture = new BABYLON.DynamicTexture('cabinetRailTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        const mix = (t) => [color.r + (1 - color.r) * t, color.g + (1 - color.g) * t, color.b + (1 - color.b) * t];
+        const dim = (k) => [color.r * k, color.g * k, color.b * k];
+        for (let y = 0; y < h; y++) {
+            const v = y / h; // 0 at the top of the wall face, 1 where it meets the playfield
+            let rgb;
+            if (v < 0.055) rgb = mix(0.85);          // polished crown - the edge highlight
+            else if (v < 0.13) rgb = mix(0.45);      // its fall-off
+            else if (v < 0.70) {
+                // Wall body, darkening gently downward the way a lit vertical face actually does.
+                rgb = dim(1.0 - 0.32 * ((v - 0.13) / 0.57));
+            } else if (v < 0.86) rgb = dim(0.42);    // lower body, in shadow
+            else rgb = dim(0.10);                    // dark base band: the shadow line that keeps
+                                                     // playfield art from running straight into the wall
+            // Fine horizontal machining lines. Also V-only, so they survive any wall's aspect.
+            const k = 1 + 0.055 * Math.sin(v * Math.PI * 2 * 34);
+            ctx.fillStyle = 'rgb(' + rgb.map((c) => Math.round(Math.max(0, Math.min(1, c * k)) * 255)).join(',') + ')';
+            ctx.fillRect(0, y, w, 1);
+        }
+        texture.update();
+        return texture;
+    }
+
+    // Slingshot lit plastic. The wide lozenge of illuminated plastic mounted on top of a real
+    // slingshot's housing - the part that actually flashes when the kicker fires, and the single
+    // clearest "this is a mechanism" cue the fixture has.
+    //
+    // Rectangular rather than the round lens createInsertLensTexture() draws: this maps onto a box
+    // face that is two and a half times wider than it is deep, so a circular design would render
+    // as a stretched ellipse. Drawn in the plastic's own aspect instead.
+    //
+    // This one IS an albedoTexture, unlike the round lane inserts, because that is what the
+    // obstacleDecalSlingshot slot in js/skins.js declares (kind:'albedo') - so a real artwork file
+    // replaces this wholesale on the same property. The caller sets albedoColor to white for the
+    // usual reason: albedoTexture is multiplied by it, and leaving the magenta tint on as well
+    // would square it.
+    function createSlingshotPlasticTexture(scene) {
+        const w = 160, h = 64;
+        const texture = new BABYLON.DynamicTexture('slingshotPlasticTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        const round = (x, y, rw, rh, r) => {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + rw, y, x + rw, y + rh, r);
+            ctx.arcTo(x + rw, y + rh, x, y + rh, r);
+            ctx.arcTo(x, y + rh, x, y, r);
+            ctx.arcTo(x, y, x + rw, y, r);
+            ctx.closePath();
+        };
+        // Dark moulded surround, so the lit lozenge inside it has an edge to read against.
+        ctx.fillStyle = '#140416';
+        ctx.fillRect(0, 0, w, h);
+        // Lit field - magenta, the slingshots' existing identity colour on this board.
+        const field = ctx.createLinearGradient(0, 0, 0, h);
+        field.addColorStop(0.00, '#ff9bff');
+        field.addColorStop(0.45, '#f13cf1');
+        field.addColorStop(1.00, '#8a1090');
+        ctx.fillStyle = field;
+        round(7, 7, w - 14, h - 14, 12);
+        ctx.fill();
+        // Bright printed border plus a dark hairline inside it - the same two-line treatment the
+        // mission-target faces use, for the same reason: the hairline is what stops the bright
+        // border bleeding into the lit field at a distance.
+        ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+        ctx.lineWidth = 5;
+        round(11, 11, w - 22, h - 22, 10);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        ctx.lineWidth = 2;
+        round(16, 16, w - 32, h - 32, 7);
+        ctx.stroke();
+        // Three chevrons pointing along the plastic - a kicker throws the ball sideways, and this
+        // is the legend real slingshot plastics use to say so.
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 3; i++) {
+            const cx = w * 0.5 + (i - 1) * 26;
+            ctx.beginPath();
+            ctx.moveTo(cx - 8, h * 0.32);
+            ctx.lineTo(cx + 8, h * 0.5);
+            ctx.lineTo(cx - 8, h * 0.68);
+            ctx.stroke();
+        }
+        texture.update();
+        return texture;
+    }
+
+    // Playfield insert lens face. A real backlit insert is a small moulded lens sitting in a
+    // routed hole: unlit it is dark plastic, lit it is a bright translucent lozenge with a printed
+    // legend and a hard edge where the plastic ends. The old inserts were flat single-colour discs
+    // at full emissive, which under the scene's GlowLayer bloomed into shapeless coloured haze -
+    // the "oversized generic glow" this pass exists to remove. Everything that fixes that is here:
+    // the lit field stops well inside the lens rim (so the bloom has a boundary instead of running
+    // off the edge), it sits at roughly half brightness rather than full (so the bright rim ring
+    // and legend are what actually read), and the area outside the lens emits nothing at all.
+    //
+    // Greyscale on purpose. This is an emissiveTexture, so it is multiplied by the material's
+    // emissiveColor - which is the ONLY thing the lamp system ever writes (createLampSystem()).
+    // Keeping the texture colourless means it modulates brightness and shape while every lamp's
+    // identity colour and its off/dim/lit/blink state still come from exactly where they came from
+    // before, untouched. Same reason it is an emissiveTexture and not an albedoTexture: the
+    // laneInsert* skin slots in js/skins.js are declared kind:'emissive', so a real artwork file
+    // replaces this wholesale on the same property (applySkinTexture() runs after this is
+    // assigned) rather than fighting it.
+    //
+    // legend: 'up'/'down' draws a lane arrow pointing up-table/down-table (canvas -Y maps to +Z on
+    // a cylinder cap - verified by rendering a UV probe, not assumed); null draws concentric rings
+    // for the indicators that mark a state rather than a direction.
+    function createInsertLensTexture(scene, name, legend) {
+        const size = 128, c = size / 2;
+        const texture = new BABYLON.DynamicTexture('insertLensTex' + name, { width: size, height: size }, scene, true);
+        const ctx = texture.getContext();
+        // Black, not transparent: the lens rim and everything outside it must emit nothing, and
+        // black in an emissive texture is exactly "no light from here".
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, size, size);
+
+        // Lit field, stopped at 0.86 of the cap radius so a dark moulded margin always frames it.
+        const lit = 0.86;
+        const field = ctx.createRadialGradient(c, c, 0, c, c, c * lit);
+        field.addColorStop(0.00, 'rgba(255,255,255,0.74)');
+        field.addColorStop(0.60, 'rgba(255,255,255,0.58)');
+        field.addColorStop(1.00, 'rgba(255,255,255,0.36)');
+        ctx.fillStyle = field;
+        ctx.beginPath();
+        ctx.arc(c, c, c * lit, 0, Math.PI * 2);
+        ctx.fill();
+
+        // The lens edge, brightest thing on the insert. This single hard ring is what makes a lit
+        // insert read as a crisp object rather than a glow: the eye locks onto the boundary.
+        ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.arc(c, c, c * (lit - 0.04), 0, Math.PI * 2);
+        ctx.stroke();
+
+        if (legend === 'up' || legend === 'down') {
+            // Classic notched lane arrow. dir flips it along the table's Z axis.
+            const dir = legend === 'down' ? 1 : -1;
+            ctx.fillStyle = 'rgba(255,255,255,0.98)';
+            ctx.beginPath();
+            ctx.moveTo(c, c + dir * 34);
+            ctx.lineTo(c + 26, c - dir * 6);
+            ctx.lineTo(c + 10, c - dir * 6);
+            ctx.lineTo(c + 10, c - dir * 30);
+            ctx.lineTo(c - 10, c - dir * 30);
+            ctx.lineTo(c - 10, c - dir * 6);
+            ctx.lineTo(c - 26, c - dir * 6);
+            ctx.closePath();
+            ctx.fill();
+        } else {
+            // Two concentric rings - the "this is a state lamp, not a shot" legend.
+            ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+            ctx.lineWidth = 5;
+            for (const r of [0.52, 0.28]) {
+                ctx.beginPath();
+                ctx.arc(c, c, c * r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        texture.update();
+        return texture;
+    }
+
+    // Mission drop-target face. A real illuminated drop target is a translucent plastic plate with
+    // a bright printed border, a number, and a lamp behind it - the border and the number are what
+    // make a bank of them readable at a glance, and are exactly what a single flat colour can't
+    // give. Same procedural DynamicTexture approach as createBumperCapTexture() above, for the
+    // same reason: no asset to ship, and it stays the FALLBACK - SKIN_MANIFEST.missionTargetFace[i]
+    // reassigns albedoTexture wholesale when real artwork exists (applySkinTexture() runs after
+    // this), so custom art never has to fight a baked-in border.
+    //
+    // Deliberately only an albedoTexture, never an emissiveTexture: a skin only ever replaces
+    // albedoTexture, so a procedural emissive layer would keep glowing this border through
+    // whatever art was dropped on top. The material's flat emissiveColor supplies the "lit plastic"
+    // glow instead, which custom art inherits correctly.
+    function createTargetFaceTexture(scene, color, number) {
+        const w = 128, h = 136;
+        const texture = new BABYLON.DynamicTexture('targetFaceTex' + number, { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        // The chakra colour is baked in here, so the material's own albedoColor is set to white by
+        // the caller - otherwise the tint would be applied twice (texture x albedoColor) and every
+        // target would read as a muddy near-black plate.
+        //
+        // Lighter shades mix toward WHITE rather than scaling the colour up, which matters because
+        // the chakra palette is deliberately saturated: HEX_CHAKRA[1] is 0xff1493 and [2] is
+        // 0xffff00, so multiplying by anything >1 just clamps and every "brighter" stop comes out
+        // as the identical flat colour - a gradient that renders as no gradient at all. Mixing
+        // toward white is the only way to get real luminance range out of a channel already at 1.
+        const rgb = (r, g, b, a) => 'rgba(' + Math.round(r * 255) + ',' + Math.round(g * 255) + ',' + Math.round(b * 255) + ',' + a + ')';
+        const lighten = (t, a) => rgb(color.r + (1 - color.r) * t, color.g + (1 - color.g) * t, color.b + (1 - color.b) * t, a === undefined ? 1 : a);
+        const shade = (s2, a) => rgb(color.r * s2, color.g * s2, color.b * s2, a === undefined ? 1 : a);
+        const roundRect = (x, y, rw, rh, r) => {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + rw, y, x + rw, y + rh, r);
+            ctx.arcTo(x + rw, y + rh, x, y + rh, r);
+            ctx.arcTo(x, y + rh, x, y, r);
+            ctx.arcTo(x, y, x + rw, y, r);
+            ctx.closePath();
+        };
+
+        // Dark moulded rim right at the plate's edge. Drawn first, as the base layer everything
+        // else sits inside: without it the bright border below has nothing to read against on its
+        // outer side, and against the dark playfield the plate's silhouette dissolves.
+        ctx.fillStyle = shade(0.16);
+        ctx.fillRect(0, 0, w, h);
+
+        // Plate body: brightest just under the top edge and deepening downward, the way a plate lit
+        // from a lamp behind its upper half actually falls off. Kept deliberately short of white
+        // at its brightest stop so the printed border below still stands out against it.
+        const body = ctx.createLinearGradient(0, 0, 0, h);
+        body.addColorStop(0.00, lighten(0.06));
+        body.addColorStop(0.32, lighten(0.34));
+        body.addColorStop(1.00, shade(0.30));
+        ctx.fillStyle = body;
+        roundRect(7, 7, w - 14, h - 14, 8);
+        ctx.fill();
+
+        // Printed border: a bright ring, then a dark hairline just inside it. The dark line is what
+        // stops the bright ring from bleeding into the plate body at a distance, which is the whole
+        // reason real target art draws one - and here it also survives the material's flat emissive
+        // glow, which lifts every channel equally and so preserves dark-on-light contrast better
+        // than light-on-light.
+        ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+        ctx.lineWidth = 6;
+        roundRect(11, 11, w - 22, h - 22, 7);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 3;
+        roundRect(16, 16, w - 32, h - 32, 5);
+        ctx.stroke();
+
+        // Bank number. Real drop-target banks are numbered so the player can tell which one is
+        // still standing without reading its colour - the single most useful mark to put here.
+        ctx.fillStyle = 'rgba(255,255,255,0.97)';
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 5;
+        ctx.font = 'bold 66px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeText(String(number), w / 2, h * 0.52);
+        ctx.fillText(String(number), w / 2, h * 0.52);
+
+        // Moulded-plastic sheen across the top third - the highlight a curved plastic face catches,
+        // and a cue that reads as depth even when the plate is only ~30px tall on screen.
+        const gloss = ctx.createLinearGradient(0, 0, 0, h * 0.40);
+        gloss.addColorStop(0, 'rgba(255,255,255,0.22)');
+        gloss.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gloss;
+        roundRect(7, 7, w - 14, h * 0.40, 8);
+        ctx.fill();
+
+        texture.update();
+        return texture;
+    }
+
     // Ball trail: emitter attached directly to the ball mesh (particles spawn at its current
     // position every frame automatically), additive-blended for a luminous (not opaque) look -
     // direct port of setupParticles()'s follow-the-ball ballTrail emitter, kept as the one and
@@ -3418,6 +3982,76 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return strip;
     }
 
+    // ===================================
+    // Playfield inserts (lane/shot indicator lamps)
+    // ===================================
+    // Every rollover lamp on this board - inlane, outlane, orbit entrance/completion, skill-shot
+    // lanes, kickback, ball save - was the same thing: one flat cylinder of height 0.003 floating
+    // at y=0.011. That is 11mm above a playfield whose surface is y=0, i.e. most of a ball radius
+    // (BALL_DIAMETER_M/2 = 0.0135) up in the air, so they read as glowing pucks resting ON the
+    // table rather than lamps set INTO it - and a ball rolling over one passed straight through it,
+    // since none of these have (or should have) a collider.
+    //
+    // These two heights put the lens just proud of the lane floor tints (which top out at 0.0017,
+    // see addLaneFloorTint above) instead. The lens top lands at 0.0036 - about an eighth of a ball
+    // diameter, down from nearly a half - so the insert now sits in the playfield surface, and what
+    // little of it a ball overlaps is underneath the ball where no camera angle can see it.
+    const INSERT_COLLAR_Y_M = 0.0024, INSERT_COLLAR_H_M = 0.0012;
+    const INSERT_LENS_Y_M = 0.00285, INSERT_LENS_H_M = 0.0015;
+
+    // One insert = a dark plastic collar with a chamfered lens sitting in it. The collar is the
+    // other half of the anti-glow work (the lens texture is the first, see
+    // createInsertLensTexture): an unlit ring of genuinely dark plastic around the lens gives the
+    // bloom a hard outer boundary and gives the "off" state something to be, instead of the lamp
+    // simply being a dimmer version of itself.
+    //
+    // Returns the LENS, because that is the mesh the lamp system registers - registerLamp() reads
+    // mesh.material, so the returned mesh must be the one carrying lampMat. Neither mesh ever gets
+    // a collider; the lane's real trigger volume is built separately and is untouched by this.
+    function addPlayfieldInsert(scene, name, lampMat, collarMat, diameter, x, z) {
+        const collar = BABYLON.MeshBuilder.CreateCylinder(name + 'Collar', {
+            diameter: diameter * 1.45,
+            height: INSERT_COLLAR_H_M,
+            tessellation: 20
+        }, scene);
+        collar.position.set(x, INSERT_COLLAR_Y_M, z);
+        collar.material = collarMat;
+
+        // diameterTop < diameterBottom gives the lens a chamfered edge, which is both what a
+        // moulded insert actually looks like and a surface angled to catch the playfield lights -
+        // a highlight that a perfectly flat disc could never pick up.
+        const lens = BABYLON.MeshBuilder.CreateCylinder(name, {
+            diameterTop: diameter * 0.84,
+            diameterBottom: diameter,
+            height: INSERT_LENS_H_M,
+            tessellation: 20
+        }, scene);
+        lens.position.set(x, INSERT_LENS_Y_M, z);
+        lens.material = lampMat;
+        return lens;
+    }
+
+    // The unlit look, applied to every insert lamp material. Two things change from what these
+    // materials used to be:
+    //
+    // albedoColor was <identity colour> * 0.3 - a saturated dark tint, so an "off" insert was
+    // still an obviously coloured disc. A real unlit insert is near-black plastic that only hints
+    // at its colour; that is what this mixes, and it is what makes lit vs. unlit read as ON vs.
+    // OFF rather than bright vs. less bright.
+    //
+    // metallic 0.2 -> 0.04 and roughness 0.4 -> 0.55, because these are plastic lenses, not
+    // painted metal discs. The old values gave them a metal sheen that fought the backlit read.
+    //
+    // emissiveColor is deliberately NOT touched here - it belongs to the lamp system and nothing
+    // else may write it (see createLampSystem()). The texture assigned here is multiplied by
+    // whatever state that system has the lamp in, so off/dim/lit/blink behave exactly as before.
+    function styleInsertLampMat(mat, color, lensTexture) {
+        mat.albedoColor = new BABYLON.Color3(0.042, 0.042, 0.05).add(color.scale(0.09));
+        mat.metallic = 0.04;
+        mat.roughness = 0.55;
+        mat.emissiveTexture = lensTexture;
+    }
+
     // Obstacle visual-polish pass (user-requested - "readable height differences... make the
     // table read like a designed pinball machine"): a round counterpart to addLaneFloorTint()
     // above, for the board's floating spherical features (Saturn, comet) rather than a lane
@@ -3472,6 +4106,25 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // itself glowing.
         railCapMat.emissiveColor = new BABYLON.Color3(0.02, 0.05, 0.065);
 
+        // Shared dark-plastic collar for every playfield insert (see addPlayfieldInsert above).
+        // Deliberately NOT housingMat: that one is dark METAL (metallic 0.8) and every insert
+        // collar rendered in it would pick up a chrome sheen, which is the opposite of the matte
+        // routed-plastic edge that makes a lit lens read as lit. One instance, all 13 inserts.
+        const insertCollarMat = new BABYLON.PBRMaterial('insertCollarMat', scene);
+        insertCollarMat.albedoColor = new BABYLON.Color3(0.045, 0.045, 0.055);
+        insertCollarMat.metallic = 0.12;
+        insertCollarMat.roughness = 0.62;
+
+        // Three lens faces, shared by every insert that wants each - not one texture per lamp.
+        // 13 inserts x a 128px DynamicTexture would be ~830KB of GPU memory to say three things;
+        // sharing costs 3 textures and nothing else, because the only per-lamp state (colour,
+        // brightness) lives in each material's own emissiveColor, never in the texture.
+        const insertLensTextures = {
+            down: createInsertLensTexture(scene, 'ArrowDown', 'down'),
+            up: createInsertLensTexture(scene, 'ArrowUp', 'up'),
+            ring: createInsertLensTexture(scene, 'Ring', null)
+        };
+
         // Shared floor-tint materials for addLaneFloorTint() above - one per lane family (inlane,
         // outlane, orbit), each reused by both mirrored sides, matching the lamp identities those
         // lanes already use elsewhere (COLOR_LANE_LAMP/COLOR_OUTLANE_LAMP/COLOR_ORBIT_LAMP) so the
@@ -3484,7 +4137,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const mat = new BABYLON.PBRMaterial(name, scene);
             mat.albedoColor = new BABYLON.Color3(0, 0, 0);
             mat.disableLighting = true;
-            mat.emissiveColor = color.scale(0.55);
+            // Insert-polish pass (user-requested - "reduce oversized generic glow, favour crisp
+            // illuminated surfaces"): these strips are the largest emissive areas anywhere near
+            // the lanes - the outlane's is 55mm x 58mm, the orbit's runs most of the rail - and at
+            // 0.55 the scene GlowLayer turned each of them into a soft coloured slab that drowned
+            // the small, precise insert lenses sitting on top of them. 0.24 keeps the lane's
+            // colour identity as a floor TINT, which is all it was ever meant to be, and hands the
+            // "this is a light" job back to the inserts. Their alpha and geometry are unchanged.
+            // 0.24 -> 0.14 (hierarchy pass). Measured from the gameplay camera these strips
+            // were at p90 130 across 23,887 pixels - above the perimeter walls (124), above the
+            // slingshots (123) and the flippers (119), and above an unlit lane insert (93). Floor
+            // tint is tier-5 playfield art; it cannot outrank the hardware standing on it.
+            mat.emissiveColor = color.scale(0.14);
             mat.alpha = alpha;
             mat.backFaceCulling = false;
             return mat;
@@ -3496,13 +4160,40 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
         // identity, not one shared color - each bumper is its own emissive-glass PBR material so
         // it can be individually recolored/pulsed on hit (pulseMesh() in main()).
+        // Perceptual-luminance balance for the bumper palette (visual-hierarchy pass). Returns 1
+        // for any colour already at or below the ceiling, so it only ever darkens - never brightens
+        // a colour past what its material scale asked for. 0.42 is the ceiling that puts the yellow
+        // bumper level with its neighbours without dulling the dim ones; it is a luminance, in the
+        // same 0-1 space as the Color3 channels it is computed from.
+        const BUMPER_LUM_CEILING = 0.42;
+        const bumperLumBalance = (color) => {
+            const lum = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+            return lum > BUMPER_LUM_CEILING ? BUMPER_LUM_CEILING / lum : 1;
+        };
+
         const bumperMats = COLOR_BUMPERS.map((color, i) => {
             const mat = new BABYLON.PBRMaterial('bumperMat' + i, scene);
-            mat.albedoColor = color;
+            // Albedo, not just emissive, and that distinction is the finding. HEX_BUMPERS is a
+            // fully-saturated palette, so a bumper dome clipped to 255 under the scene's three
+            // direct lights before its emissive was added at all - cutting only the glow moved the
+            // cluster's p90 by two units out of 255.
+            //
+            // The per-colour balance is the other half, and it fixes a latent problem rather than
+            // just trimming one: these four colours are nowhere near equally bright. Measured from
+            // the gameplay camera at an identical material scale, the yellow bumper sat at a median
+            // of 242 while the magenta one sat at 101 - because perceptual luminance weights green
+            // at 0.72 and blue at 0.07, so 0xffff00 carries 0.93 of full luminance and 0xff00ff
+            // only 0.28. One flat multiplier can only ever be right for one of them. bumperLumBalance()
+            // pulls each colour down to a shared luminance ceiling and leaves the already-dim ones
+            // alone, so the cluster reads as one tier instead of one blazing bumper and three quiet
+            // ones - and nothing in it clips.
+            mat.albedoColor = color.scale(0.75 * bumperLumBalance(color));
             mat.metallic = 0.2;
             mat.roughness = 0.3;
             mat.alpha = 0.88; // "glass-or-crystal-like... moderate transparency" per the doc
-            mat.emissiveColor = color.scale(0.6);
+            // 0.6 -> 0.42, same hierarchy pass as the lamp rings above and for the same measured
+            // reason: the bumper domes were clipping to 255 from the gameplay camera.
+            mat.emissiveColor = color.scale(0.40 * bumperLumBalance(color));
             return mat;
         });
 
@@ -3515,15 +4206,74 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // on why hit-flash is scale-only for extra meshes) - flashing this shared instance would
         // bleed into every other bumper's cap at once.
         const bumperCapMat = new BABYLON.PBRMaterial('bumperCapMat', scene);
-        bumperCapMat.albedoColor = new BABYLON.Color3(0.86, 0.86, 0.92);
-        bumperCapMat.metallic = 0.1;
-        bumperCapMat.roughness = 0.18;
-        bumperCapMat.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.07);
+        // 0.88 -> 0.66 (hierarchy pass): measured, the caps were the single brightest surface in
+        // the frame after the ball, clipping to 255 across their whole visible face. Still clearly
+        // the pale plastic of the fixture, just no longer competing with the ball.
+        bumperCapMat.albedoColor = new BABYLON.Color3(0.54, 0.54, 0.58);
+        // Plastic, deliberately: near-zero metallic and a tighter roughness than the machined
+        // metal of the housing below it (bumperBaseMat, 0.95/0.3). That gap is the whole point -
+        // a real pop bumper is a moulded plastic cap sitting in a metal fixture, and giving the
+        // two the same shading is what made the old fixture read as one undifferentiated blob.
+        bumperCapMat.metallic = 0.04;
+        bumperCapMat.roughness = 0.12;
+        bumperCapMat.emissiveColor = new BABYLON.Color3(0.06, 0.06, 0.08);
+        // Procedural moulded-cap face, so the UNSKINNED cap is attractive on its own rather than a
+        // blank dome: concentric turned rings plus faint radial spokes, the moulding marks a real
+        // cap carries. One 128px DynamicTexture shared by all four caps (same shared-instance
+        // design as the material itself), built once at load - no per-frame cost.
+        bumperCapMat.albedoTexture = createBumperCapTexture(scene);
         // Bumper cap skin slot (visual-architecture pass, user-requested) - one shared texture
         // for all 4 caps, matching this material's own existing shared-instance design above.
         // No-op until assets/skins/bumpers/bumper-cap.png actually exists (see SKINS.md); the
         // glossy off-white plastic look stays the fallback either way.
         applySkinTexture(scene, bumperCapMat, SKIN_MANIFEST.bumperCap);
+
+        // Machined-metal fixture, distinct from the shared obstacleHousingMat every other rail and
+        // post uses (0.8 metallic / 0.35 rough). Pushing this harder and smoother is what creates
+        // the metal-against-plastic contrast with bumperCapMat above; sharing housingMat is what
+        // previously made the bumper base read as just another dark rail offcut. One instance for
+        // all four fixtures.
+        const bumperBaseMat = new BABYLON.PBRMaterial('bumperBaseMat', scene);
+        bumperBaseMat.albedoColor = new BABYLON.Color3(0.16, 0.16, 0.20);
+        bumperBaseMat.metallic = 0.95;
+        bumperBaseMat.roughness = 0.30;
+
+        // Boss-only anodised trim. The boss bumper was previously distinguishable ONLY by being
+        // 1.5x bigger, which reads as "nearer the camera" rather than "more important" - this warm
+        // gold band is the same trick real machines use to mark their jackpot bumper, and it reads
+        // instantly at a glance because nothing else on the board is this colour.
+        const bumperTrimMat = new BABYLON.PBRMaterial('bumperTrimMat', scene);
+        // Hierarchy pass: a 0.92 gold on a 0.9-metallic band measured p90 249 - the fourth
+        // brightest surface on the board, brighter than every tier-2 insert, for a 423-pixel
+        // decorative band. Albedo is the lever here; a mid-pass attempt to soften the specular by
+        // RAISING roughness to 0.34 was measured to make it worse (p90 230 -> 239, a broader hot
+        // streak rather than a tighter one), so roughness stays where it was.
+        bumperTrimMat.albedoColor = new BABYLON.Color3(0.30, 0.23, 0.08);
+        bumperTrimMat.metallic = 0.9;
+        bumperTrimMat.roughness = 0.22;
+        bumperTrimMat.emissiveColor = new BABYLON.Color3(0.22, 0.15, 0.03); // cut alongside the albedo above, same pass
+
+        // The lamp ring, one per bumper so it can flash with its own body on a hit. Brighter and
+        // markedly more translucent than the body it rings (alpha 0.55 vs 0.88, emissive 1.15x vs
+        // 0.6x), because the old ring shared the body's material outright and simply vanished into
+        // the dome's own glow - a lit ring has to out-glow what it sits on to read as a lamp at all.
+        const bumperLampMats = COLOR_BUMPERS.map((color, i) => {
+            const mat = new BABYLON.PBRMaterial('bumperLampMat' + i, scene);
+            mat.albedoColor = color.scale(0.85 * bumperLumBalance(color)); // same saturated-palette clipping and the same per-colour balance as the domes - see bumperMats above
+            mat.metallic = 0.0;
+            mat.roughness = 0.45;
+            mat.alpha = 0.55;
+            // Visual-hierarchy pass (user-requested). 1.15 made this the brightest material
+            // anywhere on the board - above the BALL's own 0.7 - and it showed: measured from the
+            // gameplay camera the bumper cluster sat at p90 246 across 14,363 pixels against a
+            // ball at 253 across 553. A tier-3 feature was tying the one object the player has to
+            // track, over twenty-six times the screen area. 0.62 puts the cluster clearly below
+            // the ball and below the tier-2 targets while still reading as a lit ring.
+            // pulseBumperLamp()'s x2.1 hit flash is untouched and still peaks at 1.30, so a struck
+            // bumper is if anything MORE distinct now that its resting state is not already there.
+            mat.emissiveColor = color.scale(0.62 * bumperLumBalance(color));
+            return mat;
+        });
 
         // Pop-bumper silhouette (visual-upgrade pass, user-requested): the collider stays the
         // exact same sphere it always was (shape, size, position, physics aggregate, and the
@@ -3564,40 +4314,65 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const rig = new BABYLON.TransformNode('bumper' + i + 'Rig', scene);
             rig.position.set(pos.x, 0, pos.z);
 
-            const base = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Base', {
-                diameterTop: radius * 2.6,
-                diameterBottom: radius * 2.9,
-                height: radius * 0.35,
-                tessellation: 20
+            // One moulded fixture, lathed from a real profile, replacing the two stacked
+            // cylinders that used to stand in for it. The profile carries a skirt, a chamfer, a
+            // step ledge for the lamp ring to sit on, and a tapered neck - the dimensional
+            // shoulders a cast pop-bumper body actually has, and the reason it now catches light
+            // at several distinct angles instead of reading as one flat disc. This is FEWER meshes
+            // than before (one lathe instead of base + riser), so the upgrade costs less to draw
+            // than what it replaces; tessellation stays at 16, in this file's cheap-primitives
+            // budget. Profile radii are multiples of this bumper's own radius, so the boss's whole
+            // fixture scales with it exactly as before.
+            // NOTE these are RADII, not diameters. The cylinders this replaced were specified as
+            // diameters (diameterBottom: radius * 2.9), so the equivalent profile radius is half
+            // that - 1.45. Reading those numbers across directly builds a fixture twice as wide as
+            // the one it replaces, which swallows the playfield.
+            const profile = [
+                [1.47, 0.00], [1.47, 0.10], [1.31, 0.22], [1.32, 0.32],
+                [1.13, 0.42], [1.10, 0.56], [0.86, 0.74], [0.75, 0.88],
+                [0.59, 0.95], [0.43, 0.99]
+            ].map(([rx, ry]) => new BABYLON.Vector3(radius * rx, radius * ry, 0));
+            // closed:false - 'closed' joins the profile's last point back to its first, which here
+            // would sweep a solid diagonal skirt from the neck back down to the outer rim. The
+            // open top is covered by the dome (the profile ends well inside it) and the open
+            // bottom sits on the playfield.
+            const base = BABYLON.MeshBuilder.CreateLathe('bumper' + i + 'Base', {
+                shape: profile,
+                tessellation: 16,
+                closed: false
             }, scene);
             base.parent = rig;
-            base.position.y = radius * 0.18;
-            base.material = housingMat;
+            base.material = bumperBaseMat;
 
-            const riser = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Riser', {
-                diameterTop: radius * 1.7,
-                diameterBottom: radius * 2.2,
-                height: radius * 0.5,
-                tessellation: 20
-            }, scene);
-            riser.parent = rig;
-            riser.position.y = radius * 0.55;
-            riser.material = housingMat;
-
+            // Lamp ring, seated on the profile's step ledge rather than floating on the dome.
             const collar = BABYLON.MeshBuilder.CreateTorus('bumper' + i + 'Collar', {
-                diameter: radius * 2.15,
-                thickness: radius * 0.14,
-                tessellation: 20
+                diameter: radius * 2.5,
+                thickness: radius * 0.17,
+                tessellation: 18
             }, scene);
             collar.parent = rig;
-            collar.position.y = radius * 0.85;
-            collar.material = colorMat; // shares the body's own material/color - reads as one glowing fixture, not a mismatched add-on, and flashes together with the body on hit (see pulseMesh())
+            collar.position.y = radius * 0.50;
+            collar.material = bumperLampMats[i % bumperLampMats.length];
+
+            // Boss only: one extra gold band low on the skirt. A single 14-segment torus on one
+            // bumper - the cheapest possible way to say "this one is different" without touching
+            // its collider, radius, kick or score.
+            if (isBoss) {
+                const trim = BABYLON.MeshBuilder.CreateTorus('bumper' + i + 'Trim', {
+                    diameter: radius * 2.92,
+                    thickness: radius * 0.11,
+                    tessellation: 14
+                }, scene);
+                trim.parent = rig;
+                trim.position.y = radius * 0.16;
+                trim.material = bumperTrimMat;
+            }
 
             // Flattened sphere, not a hemisphere primitive - simpler geometry, and sinking its
             // equator slightly below the body's own peak hides the seam between the two so the
             // cap reads as continuous with the dome beneath it rather than a disc stuck on top.
-            const cap = BABYLON.MeshBuilder.CreateSphere('bumper' + i + 'Cap', { diameter: radius * 1.3, segments: 12 }, scene);
-            cap.scaling.y = 0.55;
+            const cap = BABYLON.MeshBuilder.CreateSphere('bumper' + i + 'Cap', { diameter: radius * 1.34, segments: 12 }, scene);
+            cap.scaling.y = 0.58;
             cap.parent = rig;
             cap.position.y = radius * 1.85;
             cap.material = bumperCapMat;
@@ -3605,24 +4380,50 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // Decorative insert/icon: a single glyph tinted to this bumper's own color, reusing
             // createLabelPlane()'s DynamicTexture/emissiveTexture pattern instead of a bespoke
             // one - see this block's own comment for why that keeps a future textured-skin pass
-            // to a one-line change. createLabelPlane() places its plane at a fixed low playfield
-            // height tilted to face this game's fixed camera; overriding .position.y afterward
-            // lifts that same already-camera-tuned tilt up to the cap's face instead.
-            const insert = createLabelPlane(scene, '●', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: 30, planeSize: radius * 1.5 });
+            // to a one-line change. The boss gets its own glyph, a second cue that costs nothing.
+            const insert = createLabelPlane(scene, isBoss ? '\u2605' : '\u25c9', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: isBoss ? 34 : 30, planeSize: radius * 1.5 });
             insert.position.y = radius * 2.05;
+            // Hierarchy pass: pure decoration on a tier-3 fixture, so it is stepped down with the
+            // rest of the bumper. Deliberately not quoting a measured number for this one - the
+            // glyph plane is mostly transparent, so what a per-object luminance pass reads inside
+            // its silhouette is mostly the bumper cap behind it, not the glyph. Texture level
+            // rather than a redraw, because createLabelPlane() is shared with the shot LABELS
+            // (L ORBIT, SKILL SHOT, TARGETS), which are gameplay information and keep theirs.
+            if (insert.material && insert.material.emissiveTexture) insert.material.emissiveTexture.level = 0.4;
 
-            mesh.metadata = { kind: 'bumper', boss: isBoss, capMesh: cap, insertMesh: insert };
+            // bodyMat/lampMat are carried so the hit reaction can flash exactly these two
+            // per-bumper materials and nothing else - notably NOT the shared cap material,
+            // which would bleed one bumper's flash onto all four at once.
+            mesh.metadata = { kind: 'bumper', boss: isBoss, capMesh: cap, insertMesh: insert,
+                              bodyMat: colorMat, lampMat: bumperLampMats[i % bumperLampMats.length] };
         });
 
         // CONFIG.colors.chakra (7 colors) - each mission target gets its own chakra color
         // (targets 0-2 use chakra[0-2]: violet, pink, yellow) instead of one shared color.
         const targetMats = COLOR_CHAKRA.map((color, i) => {
             const mat = new BABYLON.PBRMaterial('targetMat' + i, scene);
-            mat.albedoColor = color;
+            // White, NOT the chakra colour, because createTargetFaceTexture() below bakes that
+            // colour into the albedo texture. albedoTexture is multiplied by albedoColor, so
+            // leaving the tint here as well would square it and turn every plate near-black. This
+            // also matches what applySkinTexture() itself does when real artwork loads (it resets
+            // albedoColor to white for exactly the same reason), so the procedural and skinned
+            // paths now agree instead of one of them being a special case.
+            mat.albedoColor = new BABYLON.Color3(1, 1, 1);
+            mat.albedoTexture = createTargetFaceTexture(scene, color, i + 1);
             mat.metallic = 0.15;
             mat.roughness = 0.25;
             mat.alpha = 0.85;
-            mat.emissiveColor = color.scale(0.55);
+            // The plate's "lit from behind" glow. Flat (no emissive texture) on purpose - see
+            // createTargetFaceTexture()'s own comment for why that's what keeps a skin clean.
+            //
+            // Cut from 0.55 because that was measured (screenshot, gameplay camera) to clip the
+            // plate to a flat saturated block: a uniform 0.55 added to an already-saturated chakra
+            // colour pushes both live channels past 1 before the scene's GlowLayer even blooms it,
+            // so every bit of albedo variation - border, number, gradient - was crushed out. 0.30
+            // leaves headroom for the face texture to actually show while keeping the plate
+            // clearly self-lit, which is the point of an illuminated drop target. The lamp
+            // material below is unchanged and still carries the bank's bright/locked state.
+            mat.emissiveColor = color.scale(0.30);
             return mat;
         });
 
@@ -3644,6 +4445,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // bank only has 3) would mean two targets fighting over the same texture slot if
             // that ever happened - guarded for by only ever touching THIS target's own material
             // instance, never a shared one, same as the rest of this loop already assumes.
+            //
+            // Ordering matters and is deliberate: the procedural face texture is assigned to the
+            // material ABOVE, so this call cleanly replaces it when a skin exists rather than
+            // racing it. Nothing in this decorative block touches the box's dimensions or the
+            // aggregate below, so custom art can never alter the physics.
             applySkinTexture(scene, mesh.material, SKIN_MANIFEST.missionTargetFace[i]);
             mesh.metadata = { kind: 'missionTarget', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
@@ -3655,30 +4461,62 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // fully decoupled from wherever the flag mesh currently is mid-animation.
             aggregate.shape.isTrigger = true;
 
-            // Drop-target read: a darker backing panel just behind the flag (a real drop target's
-            // mounting bracket) plus a small indicator lamp at its base, matching the classic
-            // pinball rollover-lane light motif - both purely decorative, no physics.
-            const backing = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Backing', {
-                width: TARGET_RADIUS_M * 2.4,
-                height: 0.034,
-                depth: 0.004
-            }, scene);
-            backing.position.set(pos.x, 0.015, pos.z + 0.006);
-            backing.material = housingMat;
+            // --- Drop-target fixture (visual-only). ---------------------------------------
+            // What a real drop target actually is: a plate that slides in a slot between two
+            // posts, with a lamp behind it. The previous look was two flat panels stacked behind
+            // the plate, which gave a border but no depth and - more importantly - nothing to see
+            // once the plate dropped, so raised vs. dropped read as "flag present / flag gone".
+            //
+            // Everything below is unparented and static on purpose. The drop animation only moves
+            // the face mesh's position.y (updateDropTargetBank() in main()), so leaving the
+            // hardware behind is both correct - a real target's mounting bracket doesn't sink with
+            // the plate - and what creates the dropped-state read: the lit slot behind the plate
+            // is revealed. That means zero changes to the animation, the collider, or the scoring.
+            //
+            // Mesh budget, measured in-scene rather than estimated: the 2 flat panels per target
+            // become 5 (slot wall, 2 posts, front lip, backlight), all untextured 12-triangle
+            // boxes on materials that already existed. Whole-scene cost of this pass: 200 -> 209
+            // meshes, 78512 -> 78620 triangles (+0.14%), 102 -> 102 materials, 57 -> 57 physics
+            // bodies.
 
-            // Mounting-bracket trim frame (obstacle visual-polish pass, user-requested - "trim...
-            // contrasting materials"): a slightly larger, thinner panel directly behind the
-            // backing, peeking out as a border on all sides - reuses railCapMat (the same
-            // polished-trim material every guide rail's bevel cap already shares) so the target
-            // bank's hardware reads as the same "trim language" as the rest of the board's
-            // fixtures, not a one-off.
-            const frame = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Frame', {
-                width: TARGET_RADIUS_M * 2.7,
-                height: 0.038,
+            // Slot back wall - the dark recess the plate slides into. Sits behind the plate's own
+            // back face (z +0.008 vs. the plate's +0.004), never intersecting it.
+            const backPanel = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Housing', {
+                width: TARGET_RADIUS_M * 3.1,
+                height: 0.034,
                 depth: 0.003
             }, scene);
-            frame.position.set(pos.x, 0.015, pos.z + 0.009);
-            frame.material = railCapMat;
+            backPanel.position.set(pos.x, 0.017, pos.z + 0.0095);
+            backPanel.material = housingMat;
+
+            // The two guide posts the plate runs between. Deep enough (0.020) to span from just in
+            // front of the plate back to the slot wall, so they read as a real channel rather than
+            // trim stuck on the front - that depth is what makes the fixture look moulded. Their
+            // inner faces land exactly on the plate's edges (x +/-0.014 = TARGET_RADIUS_M) so they
+            // frame it without ever clipping through it. railCapMat is the same polished-trim
+            // material every guide rail's bevel cap uses, keeping the bank in the board's existing
+            // hardware language instead of introducing a one-off metal.
+            [-1, 1].forEach((side) => {
+                const post = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Post' + (side < 0 ? 'L' : 'R'), {
+                    width: 0.006,
+                    height: 0.032,
+                    depth: 0.020
+                }, scene);
+                post.position.set(pos.x + side * 0.017, 0.016, pos.z + 0.001);
+                post.material = railCapMat;
+            });
+
+            // Front lip at the mouth of the slot. Low enough to only overlap the plate's bottom
+            // few millimetres, so a raised plate looks like it emerges from the fixture - and once
+            // the plate drops, this is the edge that keeps the empty slot reading as a slot rather
+            // than a hole in the playfield.
+            const lip = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Lip', {
+                width: 0.040,
+                height: 0.0035,
+                depth: 0.005
+            }, scene);
+            lip.position.set(pos.x, 0.00175, pos.z - 0.0070);
+            lip.material = railCapMat;
 
             // Its own cloned material (not shared with the flag's targetMats[i] like before) so
             // the lamp can independently show the target's raised/dropped state - matching the
@@ -3690,10 +4528,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             lampMat.metallic = 0.2;
             lampMat.roughness = 0.4;
             lampMat.emissiveColor = lampColor.scale(0.9);
-            const lamp = BABYLON.MeshBuilder.CreateSphere('missionTarget' + i + 'Lamp', {
-                diameter: TARGET_RADIUS_M * 0.6
+
+            // Backlight panel inside the slot, deliberately sized just UNDER the plate (0.026 wide
+            // x 0.028 tall vs. the plate's 0.028 x 0.030) so a raised plate hides it completely
+            // from every angle the playfield camera can reach, and a dropped plate reveals it. It
+            // shares the indicator lamp's material instance, so it inherits that lamp's state for
+            // free: full brightness while the target stands, the lamp system's dimmer LOCKED level
+            // once it's been knocked down. No new state, no new update hook.
+            const slotGlow = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'SlotGlow', {
+                width: 0.026,
+                height: 0.028,
+                depth: 0.0012
             }, scene);
-            lamp.position.set(pos.x, 0.004, pos.z);
+            slotGlow.position.set(pos.x, 0.015, pos.z + 0.0065);
+            slotGlow.material = lampMat;
+
+            // Indicator lamp, now in FRONT of the fixture rather than buried inside the plate's own
+            // box where it was previously invisible while the target stood. Flattened the same way
+            // the pop-bumper cap is, so it reads as an inset playfield insert rather than a bead.
+            const lamp = BABYLON.MeshBuilder.CreateSphere('missionTarget' + i + 'Lamp', {
+                diameter: TARGET_RADIUS_M * 0.85
+            }, scene);
+            lamp.scaling.y = 0.5;
+            lamp.position.set(pos.x, 0.0035, pos.z - 0.014);
             lamp.material = lampMat;
             missionTargetMeshes.push(mesh);
             missionTargetLamps.push(lamp);
@@ -3723,10 +4580,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 height: 0.006,
                 depth: 0.01
             }, scene);
-            header.position.set(bankCenterX, 0.034, bankCenterZ);
+            // Nudged up-table (+14mm in z) as part of the drop-target fixture pass. At its old
+            // z it sat directly over the bank centreline at y 0.031-0.037, i.e. immediately above
+            // plates that top out at 0.030 - from the playfield camera's downward angle that put
+            // a solid dark bar across the upper third of every target face, occluding exactly the
+            // border and number the faces now carry. Moved just behind the new slot back walls
+            // (which end at z +0.011) it reads as the rail the three housings mount to, which is
+            // what it was always meant to be. Decorative only - no collider, no gameplay effect.
+            const bankHeaderZ = bankCenterZ + 0.014;
+            header.position.set(bankCenterX, 0.034, bankHeaderZ);
             header.rotation.y = bankRotationY;
             header.material = housingMat;
-            addRailBevel(scene, 'missionTargetHeaderCap', railCapMat, bankLength, 0.01, bankCenterX, 0.037, bankCenterZ, bankRotationY);
+            addRailBevel(scene, 'missionTargetHeaderCap', railCapMat, bankLength, 0.01, bankCenterX, 0.037, bankHeaderZ, bankRotationY);
         }
 
         // ===================================
@@ -3738,10 +4603,27 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // now finally belong to an object actually named and shaped like Saturn.
         // ===================================
         const saturnMat = new BABYLON.PBRMaterial('saturnMat', scene);
-        saturnMat.albedoColor = COLOR_SATURN;
-        saturnMat.metallic = 0.5;
-        saturnMat.roughness = 0.3;
-        saturnMat.emissiveColor = COLOR_SATURN.scale(0.35);
+        // White, not COLOR_SATURN: createSaturnBandTexture() bakes the gold into the albedo
+        // texture, and albedoTexture is multiplied by albedoColor - keeping the tint here as well
+        // would square it and flatten every band back into one dark amber. Same reasoning, and the
+        // same resulting look, as the mission-target plates.
+        // 1.0 -> 0.82 (hierarchy pass). saturnBandTex is multiplied by this, so it scales the
+        // whole banded body evenly and keeps every band's relationship intact - which trimming the
+        // texture itself would not. Saturn measured p90 245 across 10,618 pixels, level with a
+        // ball occupying 553.
+        saturnMat.albedoColor = new BABYLON.Color3(0.52, 0.52, 0.52);
+        saturnMat.albedoTexture = createSaturnBandTexture(scene);
+        // Metallic 0.5 -> 0.06: a gas giant is not a metal ball, and at 0.5 the body picked up a
+        // broad specular sheen that washed the new banding straight back out. Roughness up to
+        // match - a diffuse atmosphere, lit rather than polished.
+        saturnMat.metallic = 0.06;
+        saturnMat.roughness = 0.62;
+        // Emissive 0.35 -> 0.18. The bands and the rim shell below now carry Saturn's presence, so
+        // the flat self-glow that used to do all that work can come down - which also protects the
+        // rule that the BALL stays the brightest, easiest-to-track thing on the board (ballMat's
+        // own emissive is 0.7 of cyan; see its comment). Measured, not guessed: at 0.35 Saturn's
+        // peak emissive channel was half the ball's while covering ~20x the screen area.
+        saturnMat.emissiveColor = COLOR_SATURN.scale(0.13); // 0.18 -> 0.13, hierarchy pass - see saturnRimMat below
         const saturnMesh = BABYLON.MeshBuilder.CreateSphere('saturn', { diameter: SATURN_RADIUS_M * 2 }, scene);
         saturnMesh.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
         saturnMesh.material = saturnMat;
@@ -3750,19 +4632,115 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // just a decorative backdrop piece.
         new BABYLON.PhysicsAggregate(saturnMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
 
+        // Atmospheric limb - a warm halo hugging Saturn's silhouette, so the planet ends in air
+        // rather than at a hard edge.
+        //
+        // This is a camera-facing plane with an explicit radial-alpha texture, NOT the more obvious
+        // Fresnel-opacity shell. That was the first attempt and it was measured, in isolation, to
+        // fail: Babylon's opacity Fresnel does fade toward the centre, but even at power 3.4 the
+        // bright region covered the outer ~60% of the disc rather than a limb, and the result was a
+        // uniform warm veil that erased the new banding underneath completely. A gradient drawn
+        // here is exact, costs two triangles, and cannot drift.
+        //
+        // The halo's inner edge starts at the planet's own silhouette and glows OUTWARD, which also
+        // sidesteps a depth problem: a glow band lying inside the silhouette sits at the same depth
+        // as the limb it is drawn over.
+        const saturnRimSize = SATURN_RADIUS_M * 2 * 1.34;
+        const saturnRimTex = (() => {
+            const size = 128, c = size / 2;
+            const tex = new BABYLON.DynamicTexture('saturnRimTex', { width: size, height: size }, scene, true);
+            const ctx = tex.getContext();
+            const img = ctx.createImageData(size, size);
+            // Planet silhouette lands at this fraction of the plane's half-size.
+            const body = 1 / 1.34;
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const dx = (x + 0.5 - c) / c, dy = (y + 0.5 - c) / c;
+                    const r = Math.sqrt(dx * dx + dy * dy);
+                    let a = 0;
+                    if (r >= body && r <= 1) {
+                        const t = (r - body) / (1 - body); // 0 at the limb, 1 at the plane's edge
+                        a = Math.pow(1 - t, 2.1) * (1 - Math.pow(1 - Math.min(1, t / 0.10), 2)); // rises fast off the limb, then falls away
+                    }
+                    const o = (y * size + x) * 4;
+                    img.data[o] = 255; img.data[o + 1] = 205; img.data[o + 2] = 128;
+                    img.data[o + 3] = Math.round(Math.max(0, Math.min(1, a)) * 255);
+                }
+            }
+            ctx.putImageData(img, 0, 0);
+            tex.update();
+            tex.hasAlpha = true;
+            return tex;
+        })();
+        const saturnRimMat = new BABYLON.StandardMaterial('saturnRimMat', scene);
+        saturnRimMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        saturnRimMat.specularColor = new BABYLON.Color3(0, 0, 0);
+        // 0.8 -> 0.5 (hierarchy pass): Saturn measured p90 245 across 10,618 pixels from the
+        // gameplay camera, level with the ball. The limb is the brightest part of it, so it takes
+        // most of the cut. The texture still carries the colour and the falloff.
+        saturnRimMat.emissiveColor = new BABYLON.Color3(0.62, 0.62, 0.62); // restored toward its original tint now that texture.level above is doing the dimming
+        saturnRimMat.emissiveTexture = saturnRimTex;
+        // Hierarchy pass: dropping saturnRimMat.emissiveColor from 0.8 all the way to 0.24 moved
+        // this limb's measured p90 by only 8 units, because on a StandardMaterial the emissive
+        // TEXTURE carries its own brightness and the colour barely scales it. texture.level is the
+        // control that actually does - it multiplies the sampled texel directly. Measured, not
+        // assumed: this is the difference between the limb sitting above every tier-2 target and
+        // sitting with the rest of tier 3.
+        saturnRimTex.level = 0.55;
+        saturnRimMat.opacityTexture = saturnRimTex;
+        saturnRimMat.disableLighting = true;
+        saturnRimMat.disableDepthWrite = true; // never let a transparent halo occlude the rings crossing behind it
+        saturnRimMat.backFaceCulling = false;
+        const saturnRim = BABYLON.MeshBuilder.CreatePlane('saturnRim', { size: saturnRimSize }, scene);
+        saturnRim.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
+        saturnRim.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL; // the camera shakes and punches; a fixed plane would shear
+        saturnRim.material = saturnRimMat;
+        saturnRim.isPickable = false;
+        // Excluded from the scene GlowLayer in main(). This halo IS the glow, already shaped
+        // exactly as intended; letting GlowLayer blur it again just re-creates the oversized soft
+        // haze the recent insert pass spent its time removing. Same treatment, for the same
+        // reason, the skybox and backglass already get.
+
+        // Ring plane. Structure comes from createSaturnRingTexture() (ringlets, a dark division,
+        // faint spokes); this material's job is to stop the rings looking like painted plastic.
+        // Metallic drops to 0.10 and the emissive falls from 0.35 to a textured 0.26, so the ring
+        // is a lit band of ice and rock rather than a glowing hoop, and alpha 0.82 lets the
+        // planet and the starfield show faintly through it the way a real ring plane does.
         const saturnRingMat = new BABYLON.PBRMaterial('saturnRingMat', scene);
-        saturnRingMat.albedoColor = COLOR_SATURN_RING;
-        saturnRingMat.metallic = 0.6;
-        saturnRingMat.roughness = 0.25;
-        saturnRingMat.emissiveColor = COLOR_SATURN_RING.scale(0.35);
+        const saturnRingTex = createSaturnRingTexture(scene);
+        saturnRingMat.albedoColor = new BABYLON.Color3(1, 1, 1); // texture carries the colour - see saturnMat's own comment
+        saturnRingMat.albedoTexture = saturnRingTex;
+        saturnRingMat.metallic = 0.10;
+        saturnRingMat.roughness = 0.55;
+        // Emissive is TEXTURED, unlike the body's: the divisions have to stay dark, and a flat
+        // emissive would light them back up and erase the structure the texture just added.
+        saturnRingMat.emissiveTexture = saturnRingTex;
+        saturnRingMat.emissiveColor = COLOR_SATURN_RING.scale(0.17); // 0.22 -> 0.17, hierarchy pass
+        saturnRingMat.alpha = 0.82;
+
+        // scaling.y flattens the torus tube into a ribbon before any rotation is applied (Babylon
+        // composes scale, then rotation, then translation), turning a doughnut into a ring plane.
+        // This is most of why the old rings read as two hoops around a ball.
+        //
+        // The tilt also changes, and it fixes a real defect: at the old Math.PI/2.3 (78 degrees)
+        // the ring plane stood almost vertical, so ring1 spanned y -0.038 to 0.128 - measured, not
+        // estimated - i.e. it passed 38mm THROUGH the playfield. The gameplay camera looks down at
+        // Saturn from only 16 degrees (also measured), so the ring needs real tilt of its own to
+        // open into a readable ellipse from that view. 0.545 rad (31 degrees) is as far as it can
+        // go before the ring's lowest point reaches the playfield again - swept in-browser, not
+        // derived: 0.52 puts ring1's world minimum at y 0.0027 and 0.58 puts it at -0.0015, so
+        // this sits just inside the limit while opening the ellipse as wide as the table allows.
+        const RING_TILT_RAD = 0.545;
         const saturnRing1 = BABYLON.MeshBuilder.CreateTorus('saturnRing1', {
             diameter: SATURN_RADIUS_M * 3.5,
             thickness: SATURN_RADIUS_M * 0.22,
             tessellation: 32
         }, scene);
         saturnRing1.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
-        saturnRing1.rotation.x = Math.PI / 2.3; // tilted, not flat, so it reads as a ring from the fixed camera angle
+        saturnRing1.scaling.y = 0.16;
+        saturnRing1.rotation.x = RING_TILT_RAD;
         saturnRing1.material = saturnRingMat;
+        saturnRing1.isPickable = false;
         // No physics body - purely decorative, would otherwise double the ball's Saturn hit
         // detection (same reasoning as every other obstacle's decorative ring in this file).
 
@@ -3772,8 +4750,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             tessellation: 32
         }, scene);
         saturnRing2.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
-        saturnRing2.rotation.x = Math.PI / 2.5;
+        saturnRing2.scaling.y = 0.22;
+        // Coplanar with ring1, not offset: an offset made the two read as two crossing hoops, the
+        // exact silhouette this pass is trying to get away from. updateSaturnRotation() already
+        // turns them at different speeds and in opposite directions, and now that the ring texture
+        // carries spokes that counter-rotation is visible - which is what sells a ring SYSTEM.
+        saturnRing2.rotation.x = RING_TILT_RAD;
         saturnRing2.material = saturnRingMat;
+        saturnRing2.isPickable = false;
         // Rotated opposite to ring1 each frame (see updateSaturnRotation()) - two rings turning
         // against each other reads as a much more alive, "spinning" system than one ring alone.
         const saturnRings = [saturnRing1, saturnRing2];
@@ -3784,10 +4768,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // as a highlight, not a lighting artifact" treatment the bumper cluster's caps already
         // established. Purely decorative, embedded slightly into the body to hide the seam.
         const saturnCapMat = new BABYLON.PBRMaterial('saturnCapMat', scene);
-        saturnCapMat.albedoColor = new BABYLON.Color3(1, 0.95, 0.82);
-        saturnCapMat.metallic = 0.15;
-        saturnCapMat.roughness = 0.2;
-        saturnCapMat.emissiveColor = COLOR_SATURN.scale(0.85);
+        // Roughness up from 0.2 and metallic down from 0.15: against the old flat-gold body a
+        // glossy cap read as a highlight, but against the banded atmosphere it caught the point
+        // lights as a blown white smear at the pole. Matte cream sits in the bands instead of on
+        // top of them. Geometry, position and the skin slot below are unchanged.
+        saturnCapMat.albedoColor = new BABYLON.Color3(0.72, 0.67, 0.55); // hierarchy pass - a near-white cap on the board's largest feature clipped alongside the body
+        saturnCapMat.metallic = 0.08;
+        saturnCapMat.roughness = 0.48;
+        // 0.85 -> 0.45. At 0.85 this small cap's peak emissive channel was BRIGHTER than the ball's
+        // own (0.7), which put a fixed board decoration above the one object the player has to
+        // track continuously. 0.45 keeps it clearly the highlight of Saturn's pole without
+        // competing. Purely the resting brightness - nothing about the skin slot below changes.
+        saturnCapMat.emissiveColor = COLOR_SATURN.scale(0.22); // 0.45 -> 0.22 across the hierarchy pass - this cap sits at Saturn's brightest point
         // Obstacle decal skin slot (visual-architecture pass, user-requested). No-op until
         // assets/skins/obstacles/obstacle-decal-saturn.png actually exists (see SKINS.md); this
         // highlight cap's neutral-warm material stays the fallback either way.
@@ -3813,43 +4805,125 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // sharing Saturn's gold/orange colors, and nudged to sit clear of Saturn's new footprint.
         // ===================================
         const cometMat = new BABYLON.PBRMaterial('cometMat', scene);
-        cometMat.albedoColor = COLOR_COMET;
-        cometMat.metallic = 0.4;
-        cometMat.roughness = 0.25;
-        cometMat.emissiveColor = COLOR_COMET.scale(0.4);
+        // Pale, desaturated ice rather than the neon cyan it shared with the ball. Two reasons:
+        // a comet nucleus is dirty ice and rock, not a glowing orb, and COLOR_COMET is close
+        // enough to COLOR_EYEBALL (the ball's own emissive) that a saturated cyan sphere on the
+        // board competes with the one object the player must never lose track of.
+        cometMat.albedoColor = COLOR_COMET.scale(0.34).add(new BABYLON.Color3(0.12, 0.15, 0.18));
+        // metallic 0.4 -> 0.0 with a low roughness: ice is a dielectric that reflects sharply, not
+        // a metal. This is what makes the facets below catch light as crystal rather than chrome.
+        cometMat.metallic = 0.0;
+        cometMat.roughness = 0.14;
+        // 0.4 -> 0.20, the "restrained glow" half of this. The nucleus is lit, not a lamp; the
+        // tail below carries the comet's brightness, which is where a comet's light belongs.
+        cometMat.emissiveColor = COLOR_COMET.scale(0.14); // 0.20 -> 0.14, hierarchy pass - the comet measured p90 222, above every tier-2 target
         // Obstacle decal skin slot (visual-architecture pass, user-requested) - applied to the
         // comet's own material, not its collider: this only ever swaps a texture property on an
         // existing PBRMaterial, the mesh/shape/physics/metadata below are entirely unaffected.
         // No-op until assets/skins/obstacles/obstacle-decal-comet.png actually exists (see
         // SKINS.md); the icy-cyan procedural material stays the fallback either way.
         applySkinTexture(scene, cometMat, SKIN_MANIFEST.obstacleDecalComet);
-        const cometMesh = BABYLON.MeshBuilder.CreateSphere('comet', { diameter: COMET_RADIUS_M * 2 }, scene);
+        // Faceted, not smooth. A low-subdivision flat-shaded icosphere is the single strongest
+        // "this is a mineral, not a planet" cue available, and it is what separates the comet from
+        // Saturn at a glance now that Saturn is banded and ringed. It is also dramatically CHEAPER
+        // than what it replaces: 80 triangles, measured in-scene, against the default 32-segment
+        // sphere's 4624.
+        //
+        // The collider is pinned explicitly to COMET_RADIUS_M rather than left to be inferred from
+        // the mesh, because an icosphere's bounding box is not the sphere's - without this the
+        // derived radius would shift with the mesh. Verified in-browser to produce the identical
+        // shape radius the smooth sphere produced.
+        const cometMesh = BABYLON.MeshBuilder.CreateIcoSphere('comet', {
+            radius: COMET_RADIUS_M,
+            subdivisions: 2,
+            flat: true
+        }, scene);
         cometMesh.position.set(COMET_POS.x, COMET_RADIUS_M, COMET_POS.z);
         cometMesh.material = cometMat;
         cometMesh.metadata = { kind: 'comet' };
-        new BABYLON.PhysicsAggregate(cometMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.8, friction: 0.3 }, scene);
+        new BABYLON.PhysicsAggregate(cometMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.8, friction: 0.3, radius: COMET_RADIUS_M }, scene);
 
-        // A single thin "tail" ring standing in for a comet's streak - simpler than the two-ring
-        // Saturn/old-satellite treatment (a comet isn't a ringed planet), still reads as a
-        // distinct halo of motion around the core.
-        const cometRingMat = new BABYLON.PBRMaterial('cometRingMat', scene);
-        cometRingMat.albedoColor = COLOR_COMET;
-        cometRingMat.metallic = 0.2;
-        cometRingMat.roughness = 0.2;
-        cometRingMat.emissiveColor = COLOR_COMET.scale(0.6);
-        cometRingMat.alpha = 0.7;
-        const cometRing = BABYLON.MeshBuilder.CreateTorus('cometRing', {
-            diameter: COMET_RADIUS_M * 3,
-            thickness: COMET_RADIUS_M * 0.18,
-            tessellation: 24
-        }, scene);
-        cometRing.position.set(COMET_POS.x, COMET_RADIUS_M, COMET_POS.z);
-        cometRing.rotation.x = Math.PI / 2.4;
-        cometRing.material = cometRingMat;
+        // The comet's tail, replacing the single tilted ring that used to stand in for it.
+        //
+        // That ring was the main reason the comet read as a small Saturn: a sphere with a tilted
+        // hoop around it is the universal shorthand for a ringed planet, and this board now has an
+        // actual ringed planet 17cm away to be confused with. A comet's identifying feature is a
+        // tail, so it gets one.
+        //
+        // Two nested cones, bright narrow core inside a wide faint envelope - the way a real tail
+        // reads, and the reason a single cone always looks like a traffic pylon. No particles, no
+        // per-frame work, no collider: four meshes' worth of triangles in total.
+        //
+        // Direction: up-table and rising, so the comet reads as having come DOWN the table toward
+        // the player. That also keeps the tail clear of the two places it must not be - the right
+        // orbit lane outboard of it, and the ball's own plane, which it leaves within its first
+        // centimetre (its far end sits at y 0.045, well above the ball's 0.027 crown).
+        const cometTailMeshes = [];
+        const cometTailMat = new BABYLON.StandardMaterial('cometTailMat', scene);
+        cometTailMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        cometTailMat.specularColor = new BABYLON.Color3(0, 0, 0);
+        // 0.62/0.42 was the first attempt and it was measured (screenshot) to blow out into a
+        // white beam - the scene GlowLayer blooms an emissive cone along its whole length, and a
+        // long thin bright shape is the worst case for that. Both cones are excluded from the
+        // GlowLayer in main() and run at roughly half this brightness instead, which is what keeps
+        // this a "restrained glow" and not a searchlight.
+        cometTailMat.emissiveColor = COLOR_COMET.scale(0.38);
+        cometTailMat.disableLighting = true;
+        cometTailMat.alpha = 0.32;
+        cometTailMat.disableDepthWrite = true; // a transparent tail must never punch a hole in what is behind it
+        cometTailMat.backFaceCulling = false;
+
+        const cometTailCoreMat = cometTailMat.clone('cometTailCoreMat');
+        cometTailCoreMat.emissiveColor = COLOR_COMET.scale(0.14).add(new BABYLON.Color3(0.26, 0.31, 0.34)); // pale ice at the core, a step brighter than the envelope around it
+        cometTailCoreMat.alpha = 0.40;
+
+        {
+            // Built along +Y (a cone's own axis) and then turned onto the tail direction with a
+            // single axis-angle rotation. Deliberately not Euler angles: this file's rotation
+            // convention is YXZ and composing a two-axis aim by hand there is exactly the kind of
+            // sign/order ambiguity that has bitten other rotations in this file.
+            // Mostly upward with an up-table, slightly outboard lean. An earlier, flatter aim was
+            // measured to foreshorten into a vertical line from the gameplay camera (which looks
+            // up-table from only 22 degrees of depression) and to hang over the right orbit lane
+            // at ball height. This one leaves the ball's plane immediately and its far end sits at
+            // (0.198, 0.066, 0.331) - clear of the lane, the rail and the right wall alike.
+            const dir = new BABYLON.Vector3(0.42, 0.66, 0.62).normalize();
+            const up = BABYLON.Vector3.Up();
+            const axis = BABYLON.Vector3.Cross(up, dir);
+            const angle = Math.acos(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(up, dir))));
+            const aim = axis.lengthSquared() < 1e-8
+                ? BABYLON.Quaternion.Identity()
+                : BABYLON.Quaternion.RotationAxis(axis.normalize(), angle);
+
+            [
+                { name: 'cometTail', length: COMET_RADIUS_M * 3.0, base: COMET_RADIUS_M * 1.45, mat: cometTailMat },
+                { name: 'cometTailCore', length: COMET_RADIUS_M * 2.1, base: COMET_RADIUS_M * 0.66, mat: cometTailCoreMat }
+            ].forEach(({ name, length, base, mat }) => {
+                // diameterTop 0 at the far end, widest at the nucleus - a tail spreads AWAY from
+                // the body, so the cone points the other way from the obvious orientation: its
+                // apex is at the comet and its open end trails off. Built apex-down by giving the
+                // wide end to diameterBottom and then offsetting along the aim direction.
+                const cone = BABYLON.MeshBuilder.CreateCylinder(name, {
+                    diameterTop: base,
+                    diameterBottom: 0,
+                    height: length,
+                    tessellation: 12
+                }, scene);
+                cone.rotationQuaternion = aim.clone();
+                cone.position.set(
+                    COMET_POS.x + dir.x * length * 0.5,
+                    COMET_RADIUS_M + dir.y * length * 0.5,
+                    COMET_POS.z + dir.z * length * 0.5
+                );
+                cone.material = mat;
+                cone.isPickable = false;
+                cometTailMeshes.push(cone);
+            });
+        }
 
         // Landing-pad floor glow - see saturnFloorGlow's own comment for the reasoning. Sized
         // and dimmed a step down from Saturn's own pad, matching this object's existing "simpler
-        // than Saturn" design language (see cometRing's own comment).
+        // than Saturn" design language (see the tail's own comment).
         const cometFloorMat = makeLaneFloorMat('cometFloorMat', COLOR_COMET, 0.18);
         addFeatureFloorGlow(scene, 'cometFloorGlow', cometFloorMat, COMET_RADIUS_M * 2.6, COMET_POS.x, COMET_POS.z);
 
@@ -3876,85 +4950,199 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // hit should actually count, independent of this mesh's enabled state.
         powerUpMesh.setEnabled(false);
 
+        // ===================================
+        // Slingshots
+        // ===================================
+        // A real slingshot is a recognisable machine: a moulded housing, a lit plastic on top of
+        // it, two posts, and a rubber band stretched between them that the ball actually strikes.
+        // What was here was a glowing magenta slab with a dark wedge somewhere behind it - the
+        // brightest thing in the lower table and the least mechanical-looking.
+        //
+        // Everything below is decoration. The collider box keeps its exact dimensions, position,
+        // rotation, restitution and friction, and every kick force, cooldown and score is
+        // untouched; the parts are laid out around it, never through it.
+        //
+        // They are positioned in a rig's LOCAL space rather than in world coordinates with a
+        // mirror-signed offset, which is how the old decorations were placed - and that convention
+        // put the left slingshot's housing on the ball-facing side of its own kicker while the
+        // right one's sat correctly behind it. In local space "behind" is +Z on both sides, so the
+        // two are genuine mirror images for the first time.
+        //
+        // Local frame, derived from the collider's own 20-degree angle: +X runs along the kicker
+        // toward the middle of the table, -Z is the face the ball strikes (verified from the
+        // rotation, not assumed - at +20 degrees the box's local -Z maps to world (-0.34, 0, -0.94),
+        // i.e. down-table, which is where a ball coming off the flipper arrives from).
         const slingshotMat = new BABYLON.PBRMaterial('slingshotMat', scene);
-        slingshotMat.albedoColor = new BABYLON.Color3(1, 0, 1); // no direct CONFIG.colors entry for slingshots - kept the existing magenta identity
-        slingshotMat.metallic = 0.3;
-        slingshotMat.roughness = 0.3;
-        slingshotMat.emissiveColor = new BABYLON.Color3(0.5, 0, 0.5);
+        // Was a full-intensity magenta (1,0,1) with a 0.5 emissive - a neon slab. This is the
+        // kicker BODY now, the moulded mass the rubber is mounted on, so it reads as dark plastic
+        // with the fixture's magenta in it rather than as a light source. The lit plastic and the
+        // rubber below are what the eye is meant to land on.
+        // Darker than a first pass at this had it: rendered head-on, a mid-magenta body still read
+        // as one bright slab with a band drawn on it. Taking the body down to near-black is what
+        // lets the posts and the rubber between them come forward as the mechanism, which is the
+        // whole point of the fixture.
+        slingshotMat.albedoColor = new BABYLON.Color3(0.105, 0.025, 0.10);
+        slingshotMat.metallic = 0.12;
+        slingshotMat.roughness = 0.6;
+        slingshotMat.emissiveColor = new BABYLON.Color3(0.05, 0.0, 0.05);
+
+        // The rubber ring itself. Matte, near-black, barely emissive - rubber does not glow, and
+        // making it the darkest part of the fixture is what makes the lit plastic above it read as
+        // lit. Shared by both slingshots; nothing ever recolours it per-instance.
+        const slingshotRubberMat = new BABYLON.PBRMaterial('slingshotRubberMat', scene);
+        // Sits a step LIGHTER than the body behind it, not darker. Rubber genuinely is the darkest
+        // material on a real machine, but against a near-black kicker body a near-black band is
+        // invisible; a touch of lift plus a matte 0.8 roughness is what makes it read as a
+        // separate rubber part rather than a shadow on the body.
+        slingshotRubberMat.albedoColor = new BABYLON.Color3(0.21, 0.075, 0.19);
+        slingshotRubberMat.metallic = 0.0;
+        slingshotRubberMat.roughness = 0.8;
+        slingshotRubberMat.emissiveColor = new BABYLON.Color3(0.08, 0.01, 0.08);
+
+        const slingshotPlasticTex = createSlingshotPlasticTexture(scene);
 
         SLINGSHOTS.forEach((def, i) => {
+            const angle = def.mirror * BABYLON.Tools.ToRadians(20);
             const mesh = BABYLON.MeshBuilder.CreateBox('slingshot' + i, {
                 width: SLINGSHOT_SIZE_M,
                 height: 0.03,
                 depth: SLINGSHOT_SIZE_M * 0.5
             }, scene);
             mesh.position.set(def.x, 0.015, def.z);
-            mesh.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20); // angled inward, like a real slingshot kicker
-            mesh.material = slingshotMat;
+            mesh.rotation.y = angle; // angled inward, like a real slingshot kicker
+            // A per-instance clone of slingshotMat, not the shared instance itself. The hit
+            // handler calls pulseMesh(mesh), which flashes mesh.material.emissiveColor to white -
+            // and while both slingshots shared one material that flashed BOTH of them on every
+            // single hit. It was easy to miss while the body sat at a bright magenta; against the
+            // dark moulded body it now has, one slingshot lighting up because the other was struck
+            // is obvious. Matches the per-instance-clone convention the housing and the plastic
+            // already use, and for the same reason.
+            mesh.material = slingshotMat.clone('slingshotBodyMat' + i);
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: SLINGSHOT_RESTITUTION, friction: 0.3 }, scene);
 
-            // Kicker housing: a triangular-prism wedge (a cylinder with 3-sided tessellation is a
-            // cheap way to get a real prism from MeshBuilder) behind the rubber face above,
-            // matching a real slingshot's wedge shape - the collider itself stays the box it
-            // always was (a wedge-shaped collider would change how the ball bounces off it, which
-            // this doc explicitly says not to do).
-            const housing = BABYLON.MeshBuilder.CreateCylinder('slingshot' + i + 'Housing', {
-                diameterTop: SLINGSHOT_SIZE_M * 1.1,
-                diameterBottom: SLINGSHOT_SIZE_M * 1.1,
-                height: 0.026,
-                tessellation: 3
+            // Decoration rig - shares the collider's position and angle, so every part below can be
+            // written in the fixture's own local space. Nothing is parented to the COLLIDER itself
+            // except the rubber (see below), and the aggregate is already built by this point, so
+            // none of this can reach the physics shape.
+            const rig = new BABYLON.TransformNode('slingshot' + i + 'Rig', scene);
+            rig.position.set(def.x, 0, def.z);
+            rig.rotation.y = angle;
+
+            // Structural housing: the moulded back wall the kicker is mounted against, standing
+            // clear behind the collider's own +Z face (local z 0.014..0.024 vs. the box's 0.0125).
+            // Replaces the old triangular prism, which was a nice idea undone by needing two
+            // stacked rotations to orient - it ended up nearly invisible and on the wrong side.
+            //
+            // Still a per-instance clone rather than the shared housingMat, because snapSlingshot()
+            // in main() brightens this material directly on a hit and must only affect this one
+            // slingshot. Restyled from housingMat's dark chrome (metallic 0.8) to moulded plastic:
+            // a chrome back wall reads as a rail, not as a housing.
+            const housing = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Housing', {
+                width: SLINGSHOT_SIZE_M * 1.12,
+                height: 0.030,
+                depth: 0.010
             }, scene);
-            housing.position.set(def.x, 0.013, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.15);
-            housing.rotation.x = Math.PI / 2; // lay the prism flat, matching the table plane
-            housing.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20) + Math.PI / 2;
-            // A per-instance clone, not the shared housingMat every other decorative housing/
-            // skirt/rail uses - the new active-kick "rubber snap" flash (see snapSlingshot() in
-            // main()) brightens this material directly, and it must only affect this one
-            // slingshot's housing, not every object on the board that happens to share housingMat.
+            housing.parent = rig;
+            housing.position.set(0, 0.015, 0.019);
             housing.material = housingMat.clone('slingshotHousingMat' + i);
+            housing.material.albedoColor = new BABYLON.Color3(0.16, 0.14, 0.18);
+            housing.material.metallic = 0.25;
+            housing.material.roughness = 0.6;
 
             // Base mount plate (obstacle visual-polish pass, user-requested - "caps/bases...
-            // readable height differences"): grounds the wedge with a visible low foot instead of
+            // readable height differences"): grounds the fixture with a visible low foot instead of
             // it appearing to hover just above the playfield, the same base-under-fixture cue the
-            // bumpers' skirt already gives them. Shares housingMat (not the housing's own hit-
-            // flash clone above) - the base never flashes on a kick, only the housing does.
+            // bumpers' skirt already gives them. Shares housingMat (not the housing's own hit-flash
+            // clone above) - the base never flashes on a kick. Deliberately kept at its original
+            // size: this sits inside the left/right flipper's swept arc, and widening it is exactly
+            // the change that would put decoration through a moving flipper.
             const base = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Base', {
                 width: SLINGSHOT_SIZE_M * 1.3,
                 height: 0.006,
                 depth: SLINGSHOT_SIZE_M * 0.75
             }, scene);
-            base.position.set(def.x, 0.003, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.1);
-            base.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20);
+            base.parent = rig;
+            base.position.set(0, 0.003, 0.004);
             base.material = housingMat;
 
-            // Ridge trim along the housing's own peak (obstacle visual-polish pass - "trim...
-            // subtle emissive inserts... contrasting materials"): a thin bright magenta line
-            // distinct from the dark housing beneath it, reading as a neon accent along the
-            // wedge's top edge rather than one flat-colored mass. A per-instance clone (each
-            // slingshot's own trim, matching the housing's own per-instance-clone convention just
-            // above) so a future skin pass can recolor one slingshot's trim independently.
+            // The two posts the rubber is strung between, sitting just outboard of the collider's
+            // own ends (local x +/-0.026 against the box's +/-0.025) so they frame the striking face
+            // without ever standing in front of it. railCapMat is the polished-trim material every
+            // guide-rail bevel on the board already shares, which is exactly what a real post is.
+            [-1, 1].forEach((end) => {
+                const post = BABYLON.MeshBuilder.CreateCylinder('slingshot' + i + 'Post' + (end < 0 ? 'A' : 'B'), {
+                    diameter: 0.008,
+                    height: 0.034,
+                    tessellation: 10
+                }, scene);
+                post.parent = rig;
+                post.position.set(end * 0.026, 0.017, -0.012);
+                post.material = railCapMat;
+            });
+
+            // Illuminated insert: the lit plastic across the top of the housing. This is the mesh
+            // the obstacleDecalSlingshot skin slot has always targeted (it was a thin trim bar
+            // before), so the slot keeps pointing at exactly the same material - it just now has a
+            // surface worth putting artwork on.
+            //
+            // A per-instance clone (each slingshot's own plastic, matching the housing's own
+            // per-instance-clone convention above) so a skin, or the hit flash, can drive one
+            // slingshot's plastic independently.
             const ridgeMat = slingshotMat.clone('slingshotRidgeMat' + i);
-            ridgeMat.emissiveColor = new BABYLON.Color3(1, 0.35, 1);
-            // Obstacle decal skin slot (visual-architecture pass, user-requested) - the "future
-            // skin pass" this material's own per-instance-clone comment above already flagged.
-            // Both slingshots share the same manifest path (two independent Texture loads of the
-            // same URL - the browser caches the actual fetch) since they're mirror images of one
-            // fixture, not two distinct ones. No-op until
+            // White, because createSlingshotPlasticTexture() bakes the magenta into the albedo
+            // texture - see that function's comment. Emissive drops from a flat (1, 0.35, 1) to
+            // roughly a third of it: at the old value the plastic clipped to white and none of the
+            // border, chevrons or gradient could be seen through it.
+            ridgeMat.albedoColor = new BABYLON.Color3(1, 1, 1);
+            ridgeMat.albedoTexture = slingshotPlasticTex;
+            ridgeMat.metallic = 0.05;
+            ridgeMat.roughness = 0.3;
+            ridgeMat.emissiveColor = new BABYLON.Color3(0.42, 0.10, 0.42);
+            // Obstacle decal skin slot (visual-architecture pass, user-requested). Both slingshots
+            // share the same manifest path (two independent Texture loads of the same URL - the
+            // browser caches the actual fetch) since they're mirror images of one fixture, not two
+            // distinct ones. Assigned AFTER the procedural texture above so real artwork cleanly
+            // replaces it rather than racing it. No-op until
             // assets/skins/obstacles/obstacle-decal-slingshot.png actually exists (see SKINS.md).
             applySkinTexture(scene, ridgeMat, SKIN_MANIFEST.obstacleDecalSlingshot);
             const ridge = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Ridge', {
-                width: SLINGSHOT_SIZE_M * 0.9,
-                height: 0.004,
-                depth: 0.008
+                width: SLINGSHOT_SIZE_M,
+                height: 0.005,
+                depth: 0.020
             }, scene);
-            ridge.position.set(def.x, 0.027, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.15);
-            ridge.rotation.y = mesh.rotation.y;
+            ridge.parent = rig;
+            ridge.position.set(0, 0.0325, 0.012); // rests on the collider's own 0.030 crown, never inside it
             ridge.material = ridgeMat;
+
+            // Rubber/contact edge: the band strung between the two posts, standing 3mm proud of
+            // the collider's striking face so the ball meets rubber first.
+            //
+            // On the rig, NOT parented to the collider. Parenting it there was tried, because
+            // snapSlingshot() stretches the collider on every kick and a rubber band riding that
+            // for free is an appealing idea - but rendered mid-hit it stretches the band along its
+            // own length, past both posts, which reads as the rubber flying off its anchors. A
+            // real band bulges FORWARD, so snapSlingshot() pushes this one out along -Z instead.
+            const rubber = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Rubber', {
+                width: SLINGSHOT_SIZE_M * 1.04,
+                height: 0.009,
+                depth: 0.0035
+            }, scene);
+            rubber.parent = rig;
+            rubber.position.set(0, 0.019, -0.0140);
+            rubber.material = slingshotRubberMat;
 
             // Referenced by snapSlingshot() (in main(), via the collider mesh's metadata below) so
             // the hit handler - which only ever receives the collider mesh from the collision
-            // event - can reach this decorative housing without a separate scene lookup.
-            mesh.metadata = { kind: 'slingshot', housing };
+            // event - can reach these decorative parts without a separate scene lookup. `plastic`
+            // and `rubber` are new: the lit insert is the part a real slingshot flashes, and the
+            // band is the part that visibly moves.
+            //
+            // restScale is captured here rather than read off the mesh at hit time. The hit branch
+            // calls pulseMesh(mesh) and then snapSlingshot(mesh), and snapSlingshot used to
+            // multiply whatever scale it found - which was pulseMesh's 1.3x, already applied - so
+            // the fixture actually ballooned to 1.95x rather than the 1.5x that code intends and
+            // documents. Anchoring to the true rest scale gives the stretch its intended size.
+            mesh.metadata = { kind: 'slingshot', housing, plastic: ridge, rubber, restScale: mesh.scaling.clone() };
         });
 
         // Unlit state: dim yellow-ish neutral (no direct 2D equivalent - the 2D lanes start
@@ -4061,24 +5249,28 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             {
                 const guideTopX = mirror * INLANE_GUIDE_TOP_X_M;
                 const guideBottomX = mirror * INLANE_GUIDE_BOTTOM_X_M;
+                // The guide stops at its OWN bottom Z, not the divider's - see
+                // INLANE_GUIDE_BOTTOM_Z_M for the pinch this removes. The divider rail and posts
+                // below still run to LANE_Z_BOTTOM_M.
                 const dx = guideBottomX - guideTopX;
-                const dz = LANE_Z_BOTTOM_M - LANE_Z_TOP_M;
+                const dz = INLANE_GUIDE_BOTTOM_Z_M - LANE_Z_TOP_M;
                 const guideLength = Math.sqrt(dx * dx + dz * dz);
                 const guideRotationY = Math.atan2(-dz, dx);
+                const guideCenterZ = (LANE_Z_TOP_M + INLANE_GUIDE_BOTTOM_Z_M) / 2;
 
                 const guide = BABYLON.MeshBuilder.CreateBox('inlaneGuide' + laneDef.side, {
                     width: guideLength,
                     height: 0.022,
                     depth: 0.006
                 }, scene);
-                guide.position.set((guideTopX + guideBottomX) / 2, 0.011, dividerCenterZ);
+                guide.position.set((guideTopX + guideBottomX) / 2, 0.011, guideCenterZ);
                 guide.rotation.y = guideRotationY;
                 guide.material = housingMat;
                 guide.metadata = { kind: 'wall' };
                 new BABYLON.PhysicsAggregate(guide, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
                 // This guide already uses the "long axis along local X, then rotationY" convention
                 // addRailBevel() itself assumes, so its own guideRotationY passes straight through.
-                addRailBevel(scene, 'inlaneGuide' + laneDef.side + 'Cap', railCapMat, guideLength, 0.006, (guideTopX + guideBottomX) / 2, 0.022, dividerCenterZ, guideRotationY);
+                addRailBevel(scene, 'inlaneGuide' + laneDef.side + 'Cap', railCapMat, guideLength, 0.006, (guideTopX + guideBottomX) / 2, 0.022, guideCenterZ, guideRotationY);
             }
 
             // Lane floor tints (visual-polish pass, user-requested - "inset/grooved lane surfaces
@@ -4110,9 +5302,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // split just above that already existed for the dev-only trigger overlay.
                 const laneLampColor = laneKind.kind === 'outlane' ? COLOR_OUTLANE_LAMP : COLOR_LANE_LAMP;
                 const lampMat = new BABYLON.PBRMaterial(laneKind.kind + 'LampMat' + laneDef.side, scene);
-                lampMat.albedoColor = laneLampColor.scale(0.3);
-                lampMat.metallic = 0.2;
-                lampMat.roughness = 0.4;
+                // Arrow points down-table on both: an inlane and an outlane are both lanes the
+                // ball rolls DOWN, toward the flipper and toward the drain respectively, so the
+                // legend marks the direction of travel rather than a shot to aim at.
+                styleInsertLampMat(lampMat, laneLampColor, insertLensTextures.down);
                 // Lane insert skin slot (visual-architecture pass, user-requested) - shared per
                 // kind (inlane/outlane), both sides. Emissive, not albedo, matching the lamp
                 // system's own emissive-only on/off convention (registerLamp() in main()) - a
@@ -4120,13 +5313,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // currently is, never override that state. No-op until the matching
                 // assets/skins/lanes/lane-insert-<kind>.png actually exists (see SKINS.md).
                 applySkinTexture(scene, lampMat, laneKind.kind === 'outlane' ? SKIN_MANIFEST.laneInsertOutlane : SKIN_MANIFEST.laneInsertInlane);
-                const lamp = BABYLON.MeshBuilder.CreateCylinder(laneKind.kind + 'Lamp' + laneDef.side, {
-                    diameterTop: LANE_TRIGGER_WIDTH_M * 0.6,
-                    diameterBottom: LANE_TRIGGER_WIDTH_M * 0.6,
-                    height: 0.003
-                }, scene);
-                lamp.position.set(laneKind.x, 0.011, LANE_TRIGGER_Z_M);
-                lamp.material = lampMat;
+                const lamp = addPlayfieldInsert(scene, laneKind.kind + 'Lamp' + laneDef.side,
+                    lampMat, insertCollarMat, LANE_TRIGGER_WIDTH_M * 0.6, laneKind.x, LANE_TRIGGER_Z_M);
                 // Lamp system id (registered in main()) - kind+side, e.g. 'inlaneLeft' - unique
                 // per lane/side combination, matching the naming every other lamp id in this file uses.
                 const lampId = laneKind.kind + (laneDef.side === 'left' ? 'Left' : 'Right');
@@ -4158,34 +5346,23 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // "your last line of defense" - no physics of its own, purely a state indicator.
         const kickbackMirror = SIDE_LANES.find((l) => l.side === KICKBACK_SIDE).mirror;
         const kickbackLampMat = new BABYLON.PBRMaterial('kickbackLampMat', scene);
-        kickbackLampMat.albedoColor = COLOR_KICKBACK_LAMP.scale(0.3);
-        kickbackLampMat.metallic = 0.2;
-        kickbackLampMat.roughness = 0.4;
         kickbackLampMat.emissiveColor = COLOR_KICKBACK_LAMP.scale(0.12); // faint glow at rest, lit when earned (see setKickbackLampLit() in main())
-        const kickbackLampMesh = BABYLON.MeshBuilder.CreateCylinder('kickbackLamp', {
-            diameterTop: LANE_TRIGGER_WIDTH_M * 0.7,
-            diameterBottom: LANE_TRIGGER_WIDTH_M * 0.7,
-            height: 0.003
-        }, scene);
-        kickbackLampMesh.position.set(kickbackMirror * OUTLANE_TRIGGER_X_M, 0.011, LANE_Z_BOTTOM_M);
-        kickbackLampMesh.material = kickbackLampMat;
+        // Rings, not an arrow: this lamp marks an earned STATE ("your kickback is armed"), not a
+        // lane to shoot, and it sits a few centimetres from the outlane's own arrow insert where
+        // a second arrow would just read as more of the same lane.
+        styleInsertLampMat(kickbackLampMat, COLOR_KICKBACK_LAMP, insertLensTextures.ring);
+        const kickbackLampMesh = addPlayfieldInsert(scene, 'kickbackLamp', kickbackLampMat,
+            insertCollarMat, LANE_TRIGGER_WIDTH_M * 0.7, kickbackMirror * OUTLANE_TRIGGER_X_M, LANE_Z_BOTTOM_M);
 
         // BALL SAVE lamp (fairness mechanics, user-requested) - sits beside the shooter lane, at
         // the ball's own rest spot, so it's the first thing a player sees while charging a
         // launch. Same rest/lit split as every other stateful lamp here (setBallSaveLampLit() in
         // main()).
         const ballSaveLampMat = new BABYLON.PBRMaterial('ballSaveLampMat', scene);
-        ballSaveLampMat.albedoColor = COLOR_BALL_SAVE_LAMP.scale(0.3);
-        ballSaveLampMat.metallic = 0.2;
-        ballSaveLampMat.roughness = 0.4;
         ballSaveLampMat.emissiveColor = COLOR_BALL_SAVE_LAMP.scale(0.12);
-        const ballSaveLampMesh = BABYLON.MeshBuilder.CreateCylinder('ballSaveLamp', {
-            diameterTop: LANE_TRIGGER_WIDTH_M * 0.7,
-            diameterBottom: LANE_TRIGGER_WIDTH_M * 0.7,
-            height: 0.003
-        }, scene);
-        ballSaveLampMesh.position.set(toWorldX(BALL_REST_X_PX) - 0.035, 0.011, BALL_REST_Z_M);
-        ballSaveLampMesh.material = ballSaveLampMat;
+        styleInsertLampMat(ballSaveLampMat, COLOR_BALL_SAVE_LAMP, insertLensTextures.ring); // a state, not a shot - same reasoning as the kickback lamp above
+        const ballSaveLampMesh = addPlayfieldInsert(scene, 'ballSaveLamp', ballSaveLampMat,
+            insertCollarMat, LANE_TRIGGER_WIDTH_M * 0.7, toWorldX(BALL_REST_X_PX) - 0.035, BALL_REST_Z_M);
 
         // Upper-lane skill shot (user-requested) - see SKILL_SHOT_LANES' own block comment (near
         // its declaration) for the full geometry reasoning. Same invisible-unless-dev trigger +
@@ -4196,17 +5373,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const skillShotLampMeshes = [];
         SKILL_SHOT_LANES.forEach((laneDef, i) => {
             const lampMat = new BABYLON.PBRMaterial('skillShotLampMat' + i, scene);
-            lampMat.albedoColor = COLOR_SKILL_SHOT_LAMP.scale(0.3);
-            lampMat.metallic = 0.2;
-            lampMat.roughness = 0.4;
             lampMat.emissiveColor = COLOR_SKILL_SHOT_LAMP.scale(0.12); // faint glow at rest, like a real backlit-but-unlit insert
-            const lamp = BABYLON.MeshBuilder.CreateCylinder('skillShotLamp' + i, {
-                diameterTop: laneDef.halfWidth * 2 * 0.5,
-                diameterBottom: laneDef.halfWidth * 2 * 0.5,
-                height: 0.003
-            }, scene);
-            lamp.position.set(laneDef.x, 0.011, SKILL_SHOT_Z_M);
-            lamp.material = lampMat;
+            // Up-table arrow: a skill shot is a lane the player aims the launched ball INTO, so
+            // here the legend marks the shot, the opposite of the inlane/outlane arrows.
+            styleInsertLampMat(lampMat, COLOR_SKILL_SHOT_LAMP, insertLensTextures.up);
+            const lamp = addPlayfieldInsert(scene, 'skillShotLamp' + i, lampMat, insertCollarMat,
+                laneDef.halfWidth * 2 * 0.5, laneDef.x, SKILL_SHOT_Z_M);
             skillShotLampMeshes.push(lamp);
 
             const triggerMat = new BABYLON.PBRMaterial('skillShotTriggerMat' + i, scene);
@@ -4296,21 +5468,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 { kind: 'orbitCompletion', x: orbitDef.completionX, z: ORBIT_COMPLETION_Z_M, debugColor: new BABYLON.Color3(1, 0.9, 0.2) }
             ].forEach((triggerDef) => {
                 const lampMat = new BABYLON.PBRMaterial(triggerDef.kind + 'LampMat' + orbitDef.side, scene);
-                lampMat.albedoColor = COLOR_ORBIT_LAMP.scale(0.3);
-                lampMat.metallic = 0.2;
-                lampMat.roughness = 0.4;
+                // Up-table arrow on both orbit inserts: an orbit is a shot you drive UP the lane,
+                // and the entrance insert marking that direction is the cue a player reads when
+                // deciding whether to take it.
+                styleInsertLampMat(lampMat, COLOR_ORBIT_LAMP, insertLensTextures.up);
                 // Lane insert skin slot (visual-architecture pass, user-requested) - shared by
                 // both orbit trigger kinds (entrance/completion) and both sides, same emissive-
                 // over-the-lamp-system reasoning as the inlane/outlane inserts above. No-op until
                 // assets/skins/lanes/lane-insert-orbit.png actually exists (see SKINS.md).
                 applySkinTexture(scene, lampMat, SKIN_MANIFEST.laneInsertOrbit);
-                const lamp = BABYLON.MeshBuilder.CreateCylinder(triggerDef.kind + 'Lamp' + orbitDef.side, {
-                    diameterTop: ORBIT_TRIGGER_WIDTH_M * 0.6,
-                    diameterBottom: ORBIT_TRIGGER_WIDTH_M * 0.6,
-                    height: 0.003
-                }, scene);
-                lamp.position.set(triggerDef.x, 0.011, triggerDef.z);
-                lamp.material = lampMat;
+                const lamp = addPlayfieldInsert(scene, triggerDef.kind + 'Lamp' + orbitDef.side,
+                    lampMat, insertCollarMat, ORBIT_TRIGGER_WIDTH_M * 0.6, triggerDef.x, triggerDef.z);
                 // Lamp system id (registered in main()) - kind+side, e.g. 'orbitEntranceLeft'.
                 const lampId = triggerDef.kind + (orbitDef.side === 'left' ? 'Left' : 'Right');
                 orbitLampMeshes.push({ id: lampId, mesh: lamp });
@@ -4450,6 +5618,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // 1. Metal side rails - a raised chrome cap along the top edge of the existing left/right
         // walls, the rounded rail real cabinets run the full length of the playfield. Dressing on
         // top of an already-physical collider, not a new one.
+        //
+        // Cabinet/perimeter pass (user-requested): these were housingMat, the same dark near-black
+        // metal every bracket and skirt on the board uses, which made the machine's most prominent
+        // hardware its least visible. They now share cabinetMetalMat with the wall crowns and the
+        // lockdown bar below - one polished chrome for every rail on the cabinet. Looked up by
+        // name because buildTable() creates it (it runs first) off the wall footprints those
+        // crowns are derived from; a second, separately-written chrome here is exactly the drift
+        // this pass exists to remove.
+        const cabinetMetalMat = scene.getMaterialByName('cabinetMetalMat') || housingMat;
         [-1, 1].forEach((side) => {
             const rail = BABYLON.MeshBuilder.CreateCylinder('sideRail' + side, {
                 diameter: 0.012,
@@ -4457,9 +5634,43 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 tessellation: 10
             }, scene);
             rail.rotation.x = Math.PI / 2;
-            rail.position.set(side * (TABLE_WIDTH_M / 2 - 0.006), WALL_HEIGHT_M + 0.004, 0);
-            rail.material = housingMat;
+            // Raised to sit ON the wall crown buildTable() now adds (which tops out at 0.0445)
+            // instead of half-buried in the wall itself, where its lower half was invisible.
+            rail.position.set(side * (TABLE_WIDTH_M / 2 - 0.006), WALL_HEIGHT_M + 0.0085, 0);
+            rail.material = cabinetMetalMat;
+            rail.isPickable = false;
         });
+
+        // The rail across the top of the machine, closing the perimeter. Its absence was why the
+        // two side rails read as two loose bars rather than as a frame.
+        {
+            const topRail = BABYLON.MeshBuilder.CreateCylinder('topRail', {
+                diameter: 0.012,
+                height: TABLE_WIDTH_M,
+                tessellation: 10
+            }, scene);
+            topRail.rotation.z = Math.PI / 2;
+            topRail.position.set(0, WALL_HEIGHT_M + 0.0085, TABLE_LENGTH_M / 2 - 0.006);
+            topRail.material = cabinetMetalMat;
+            topRail.isPickable = false;
+        }
+
+        // Lockdown bar - the chrome bar across the front of every real machine, at the player's
+        // own edge. Placed just beyond the apron (z -0.62, depth 0.05, so its near face is at
+        // -0.645), which puts this at the frontmost point of the cabinet and nowhere near any
+        // playfield geometry. More than any other single piece, this is what makes the near edge
+        // read as the front of a machine rather than as where the model stops.
+        {
+            const lockdown = BABYLON.MeshBuilder.CreateCylinder('lockdownBar', {
+                diameter: 0.018,
+                height: TABLE_WIDTH_M + 0.012,
+                tessellation: 12
+            }, scene);
+            lockdown.rotation.z = Math.PI / 2;
+            lockdown.position.set(0, 0.017, -0.658);
+            lockdown.material = cabinetMetalMat;
+            lockdown.isPickable = false;
+        }
 
         // 2. Apron - the trim strip below the flippers, closest to the player/camera, where a
         // real cabinet's ball-return/coin-door graphics live. Sits just beyond the drain zone's
@@ -4572,8 +5783,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         [-1, 1].forEach((mirror, i) => {
             const color = COLOR_CHAKRA[(i + 3) % COLOR_CHAKRA.length];
             const insertMat = new BABYLON.PBRMaterial('flipperInsertMat' + i, scene);
-            insertMat.albedoColor = color.scale(0.3);
-            insertMat.emissiveColor = color.scale(0.35);
+            // Hierarchy pass: these two little discs measured p90 253 across 1,000 pixels -
+            // level with the BALL's 252 across 553, and parked at the busiest point on the board.
+            // They are ambient set-dressing (this rule's own comment says so), so they have no
+            // business at the top of the hierarchy. 0.35 -> 0.20 emissive.
+            insertMat.albedoColor = color.scale(0.24);
+            insertMat.emissiveColor = color.scale(0.20);
             insertMat.metallic = 0.1;
             insertMat.roughness = 0.5;
             const insert = BABYLON.MeshBuilder.CreateCylinder('flipperInsert' + mirror, {
@@ -4679,7 +5894,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 depth: TABLE_LENGTH_M + 0.04
             }, scene);
             trim.position.set(side * (TABLE_WIDTH_M / 2 + 0.014), 0.005, 0);
-            trim.material = housingMat;
+            trim.material = cabinetMetalMat; // was housingMat - see the side rails' own comment
+            trim.isPickable = false;
         });
         const topTrim = BABYLON.MeshBuilder.CreateBox('cabinetTopTrim', {
             width: TABLE_WIDTH_M + 0.04,
@@ -4687,7 +5903,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             depth: 0.01
         }, scene);
         topTrim.position.set(0, 0.005, TABLE_LENGTH_M / 2 + 0.014);
-        topTrim.material = housingMat;
+        topTrim.material = cabinetMetalMat;
+        topTrim.isPickable = false;
 
         // ===================================
         // Table-composition pass (user-requested - "distinct upper/middle/lower table regions...
@@ -4772,7 +5989,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return {
             missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
             sideLaneLampMeshes, orbitLampMeshes, debugTriggerMeshes,
-            kickbackLampMesh, ballSaveLampMesh, saturnRings, powerUpMesh, visionGateMesh: ring
+            kickbackLampMesh, ballSaveLampMesh, saturnRings, saturnRim, cometTailMeshes, powerUpMesh, visionGateMesh: ring
         };
     }
 
@@ -5128,6 +6345,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // colors/contrast do that job now, see buildBackglass()), it just no longer gets the
         // additional per-mesh glow treatment.
         glowLayer.addExcludedMesh(backglass.mesh);
+        // Saturn's atmospheric limb shell - see its own comment in buildObstacles() for why. Its
+        // whole look depends on an opacity Fresnel that GlowLayer does not honour; bloomed, it
+        // becomes a flat warm disc over the planet instead of a rim around it.
+        glowLayer.addExcludedMesh(obstacles.saturnRim);
+        // The comet's tail cones, for the same reason: GlowLayer blooms an emissive shape across
+        // its whole extent, and a long thin cone bloomed along its length stops being a tail and
+        // becomes a beam. Their own alpha already gives them the soft edge they need.
+        obstacles.cometTailMeshes.forEach((m) => glowLayer.addExcludedMesh(m));
 
         // Hoisted to a `let` (not a const declared only inside the if-block) so the dev HUD's
         // "post-processing" checkbox (below, once devMode is confirmed) can toggle
@@ -5303,10 +6528,33 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // here since it's needed just to test flippers at all). window-level listeners, not
         // canvas-focused, so no click-to-focus step is needed first.
         window.addEventListener('keydown', (e) => {
+            // Input-boundary audit fix: a flip is a BARE arrow press. Ctrl/Meta/Alt + arrow is a
+            // browser or OS shortcut the player is aiming at something else entirely (Alt+Left and
+            // Cmd+Left are Back; Ctrl/Cmd+arrow are word/desktop navigation), and firing a flipper
+            // off it is both a false activation and a stuck-flipper risk: if the browser consumes
+            // the chord to navigate or switch context, the matching keyup may never be delivered
+            // to this page at all. Confirmed via Playwright that Ctrl/Alt/Meta+ArrowLeft each flew
+            // the left flipper before this guard.
+            //
+            // Shift is deliberately NOT in this list: it is not a shortcut prefix for the arrows
+            // in any browser, and a player resting a hand on Shift must not silently lose their
+            // flippers. keyup below is deliberately NOT filtered either - see its own comment.
+            //
+            // Space and Escape are deliberately left unfiltered, and that asymmetry is the audited
+            // decision, not an oversight. Filtering Space's keydown would let its keyup still fall
+            // through to handleLaunchRelease() (which intentionally launches without a matching
+            // press - see its own comment), turning a harmless chord into a phantom launch; and
+            // Escape's only chords (Ctrl/Alt+Esc) background the window, where the blur handler's
+            // openPauseMenu() already produces the exact same, idempotent result.
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
             // Optional "lane change" mechanic (rotateLaneLamps()) - checked on the off->on edge,
             // BEFORE activateFlipper() flips flipper.active to true, same guard activateFlipper()
             // itself uses to fire its solenoid sound only once per real press, not once per
-            // browser key-repeat event.
+            // browser key-repeat event. That state-edge check is deliberately used INSTEAD of an
+            // `if (e.repeat) return` bail: it suppresses the repeat side effects just as
+            // completely, but still activates correctly in the one case an e.repeat bail would
+            // break - a key already physically held as the page takes focus, where the browser
+            // delivers repeat keydowns with no initial non-repeat one to latch onto.
             if (e.code === 'ArrowLeft') {
                 if (!leftFlipper.active) rotateLaneLamps(-1);
                 activateFlipper(leftFlipper);
@@ -5316,6 +6564,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 activateFlipper(rightFlipper);
             }
         });
+        // Release is deliberately unconditional - no modifier check, no state check. A player who
+        // grabs Ctrl/Cmd MID-HOLD and then lets go of the arrow sends a keyup carrying that
+        // modifier, and the one thing a flipper must never do is stay down because the release
+        // looked unusual. deactivateFlipper() is idempotent, so an unmatched keyup is a harmless
+        // no-op; a filtered one would be a flipper stuck up for the rest of the ball.
         window.addEventListener('keyup', (e) => {
             if (e.code === 'ArrowLeft') deactivateFlipper(leftFlipper);
             if (e.code === 'ArrowRight') deactivateFlipper(rightFlipper);
@@ -5351,6 +6604,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // targets 0.55) so the ball reads as the clear top of the hierarchy at a glance, moving or
         // still, without needing a value so extreme it blooms into a shapeless blob.
         ballMat.emissiveColor = COLOR_EYEBALL.scale(0.7);
+        // Same markings on both channels, so the pattern is visible in the lit surface AND in the
+        // ball's own glow - otherwise the emissive would wash the stripes out at exactly the
+        // moments the ball is moving fastest and rotation matters most. See createBallTexture().
+        {
+            const ballTex = createBallTexture(scene);
+            ballMat.albedoTexture = ballTex;
+            ballMat.emissiveTexture = ballTex;
+        }
 
         // --- The main game ball (Stage 3): one canonical ball, physics-maintained every frame
         // via updateBallPhysics(). Now spawned resting on the plunger (Stage 5), matching
@@ -6699,6 +7960,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }, 100);
         }
 
+        // Pop-bumper hit reaction: a short emissive lift on the body and its lamp ring, and
+        // nothing else. Deliberately NOT pulseMesh(): that also scales the mesh 1.4x for 100ms,
+        // and a bumper visibly inflating on every hit is the one thing that gives away that the
+        // fixture is a prop rather than a lit lamp behind plastic. Scaling also fought the new
+        // moulded base, which stays put while the dome it is seated in grew.
+        //
+        // Cheap by construction, which matters on mobile: two emissiveColor writes and one
+        // timeout per hit. No light is created, no geometry is touched, nothing runs per frame.
+        // The scale-up is a MULTIPLIER on each material's own resting emissive, so each bumper
+        // brightens in its own colour rather than all four flashing the same white.
+        //
+        // The shared cap material is deliberately excluded - flashing that one instance would
+        // light up all four caps at once. Same reason the cap was already excluded before.
+        function pulseBumperLamp(meta) {
+            const targets = [meta.bodyMat, meta.lampMat].filter((m) => m && m.emissiveColor);
+            if (!targets.length) return;
+            const saved = targets.map((m) => m.emissiveColor.clone());
+            targets.forEach((m) => { m.emissiveColor = m.emissiveColor.scale(2.1); });
+            setTimeout(() => {
+                targets.forEach((m, k) => { if (m.emissiveColor) m.emissiveColor.copyFrom(saved[k]); });
+            }, 90);
+        }
+
         // Physical hits: comet/slingshots already bounce the ball via restitution (set in
         // buildObstacles()) - for those kinds this only adds the score/cooldown/feedback layer on
         // top, it does NOT set the ball's velocity by hand the way the 2D version's hitSatellite()/
@@ -6837,20 +8121,61 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // pulseMesh()'s 100ms, matching the "fast" spec.
         function snapSlingshot(mesh) {
             const housing = mesh.metadata.housing;
+            const plastic = mesh.metadata.plastic;
 
-            const originalScale = mesh.scaling.clone();
-            mesh.scaling.x = originalScale.x * 1.5;
-            mesh.scaling.z = originalScale.z * 0.6;
+            const rubber = mesh.metadata.rubber;
 
-            const housingMat = housing.material;
-            const originalHousingEmissive = housingMat.emissiveColor ? housingMat.emissiveColor.clone() : null;
-            if (originalHousingEmissive) {
-                housingMat.emissiveColor = new BABYLON.Color3(1, 0.6, 1); // bright magenta-white, echoing the slingshot's own magenta identity rather than pulseMesh()'s plain white
+            // The body no longer stretches sideways, it only compresses slightly into its housing.
+            //
+            // The old 1.5x-wide, 0.6x-deep stretch was written when this box WAS the visible rubber
+            // - the only part of the fixture there was - and stretching it read as a band under
+            // load. Now that there is a real rubber band strung between real posts, widening the
+            // body just pushes it out past those posts, and the fixture visibly comes apart on
+            // every kick. The stretch moves to the rubber below, where it belongs, and the body
+            // gets the recoil.
+            //
+            // This also anchors to the fixture's real rest scale (captured in buildObstacles())
+            // rather than to whatever is applied right now: the hit branch calls pulseMesh(mesh)
+            // immediately before this, so the old `mesh.scaling.clone()` compounded with pulseMesh's
+            // own 1.3x into a measured 1.95x balloon rather than the 1.5x it documented. Setting
+            // from restScale supersedes that pulse for this one fixture, the same call
+            // pulseBumperLamp() already makes for the pop bumpers and for the same reason - a
+            // moulded mechanism that inflates on contact gives away that it is a box.
+            const restScale = mesh.metadata.restScale;
+            mesh.scaling.set(restScale.x, restScale.y, restScale.z * 0.88);
+
+            // The rubber snaps FORWARD off its posts and flattens, which is what a struck slingshot
+            // band actually does. -Z is the striking face in the rig's local frame (see
+            // buildObstacles()), so this is a straight push out toward the ball.
+            const rubberRestZ = rubber ? rubber.position.z : 0;
+            const rubberRestScale = rubber ? rubber.scaling.clone() : null;
+            if (rubber) {
+                rubber.position.z = rubberRestZ - 0.0032;
+                rubber.scaling.z = rubberRestScale.z * 0.65;
+                rubber.scaling.y = rubberRestScale.y * 1.25;
             }
 
+            // The flash lands on the lit plastic first and the housing second - on a real machine
+            // the plastic is the part that flashes, and it is the only part of this fixture bright
+            // enough at rest for a lift to read as "that just fired". Both materials are
+            // per-instance clones, so this can never bleed onto the other slingshot.
+            const flashed = [housing, plastic].filter((m) => m && m.material && m.material.emissiveColor)
+                .map((m) => ({ mesh: m, mat: m.material, original: m.material.emissiveColor.clone() }));
+            flashed.forEach(({ mat }, idx) => {
+                mat.emissiveColor = idx === 0
+                    ? new BABYLON.Color3(0.85, 0.5, 0.85)  // housing: a lift, not a blowout - it is structure
+                    : new BABYLON.Color3(1, 0.75, 1);      // plastic: bright magenta-white, the actual lamp
+            });
+
             setTimeout(() => {
-                if (!mesh.isDisposed()) mesh.scaling.copyFrom(originalScale);
-                if (originalHousingEmissive && !housing.isDisposed()) housingMat.emissiveColor.copyFrom(originalHousingEmissive);
+                if (!mesh.isDisposed()) mesh.scaling.copyFrom(restScale);
+                if (rubber && !rubber.isDisposed()) {
+                    rubber.position.z = rubberRestZ;
+                    rubber.scaling.copyFrom(rubberRestScale);
+                }
+                flashed.forEach(({ mesh: m, mat, original }) => {
+                    if (!m.isDisposed()) mat.emissiveColor.copyFrom(original);
+                });
             }, 90);
         }
 
@@ -7159,7 +8484,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // touch punchier than a passive bounce, without changing scoring or any other
                 // obstacle kind's feedback (all other pulseMesh()/playHitSound() call sites are
                 // untouched, defaulting back to their original 1.3x/0.14 values).
-                pulseMesh(mesh, 1.4, [meta.capMesh, meta.insertMesh]); // extends the flash/pulse to the bumper's decorative cap+insert (see pulseMesh()'s own comment on why those two are scale-only)
+                pulseBumperLamp(meta); // emissive-only lamp pulse - see pulseBumperLamp() for why a bumper must not scale on hit
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + points, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
                 triggerCameraShake(130, meta.boss ? 0.009 : 0.007); // was 120/0.008/0.006 - a bit stronger, matching the new active-kick feel
@@ -8015,6 +9340,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // that submenu is open, matching the 2D version's exact behavior.
         window.addEventListener('keydown', (e) => {
             if (e.code !== 'Escape') return;
+            // Input-boundary audit fix: Escape auto-repeats like any other key, and every branch
+            // below is a TOGGLE, so a held Escape was strobing the game between paused and running
+            // once per repeat - confirmed via Playwright (a hold with an odd number of repeats
+            // ended up un-paused, i.e. the player's deliberate pause had been undone by their own
+            // still-held key). Only the true off->on edge may act. Unlike the flipper handler
+            // above, an e.repeat bail is exactly right here: there is no held-state to latch, and
+            // a missed initial keydown just means no pause, never a stuck control.
+            if (e.repeat) return;
             if (controlsOverlay.style.display === 'flex') {
                 backFromControlsScreen();
                 return;

@@ -148,7 +148,43 @@ export const BALL_MASS_KG = 0.08;
 // 2% -> 12%, with scoring-object contacts per ball unchanged (~2.0) and the drain rate slightly
 // UP (81% -> 88%), i.e. livelier circulation without becoming floaty. 0.50 was also measured and
 // was worse on every metric, so this is not simply "bouncier is better".
-export const BALL_RESTITUTION = 0.45;
+//
+// Ball-movement tuning pass (user-requested - "a lively steel pinball rolling across a polished
+// machine"): 0.45 -> 0.55. This is the ONLY constant that pass changed; the measurement rig that
+// justified it is qa/ball-movement.js, which reports every number quoted here.
+//
+// Why this constant and not the other three candidates:
+//   - Rolling decay and downhill acceleration were measured FIRST and are already essentially
+//     ideal: 0.717 m/s^2 downhill against a theoretical maximum of 0.7317 for a rolling solid
+//     sphere at 6 degrees (98.0%), and 97.5% gravity-corrected speed retention per second of
+//     free rolling. There was nothing for BALL_FRICTION or TABLE_TILT_DEGREES to recover there.
+//   - The ball's angularDamping is 0.1 (a Havok/Babylon body default, never set anywhere in this
+//     repo). Zeroing it was measured and is deliberately NOT done: it pushes free-roll retention
+//     to 99.9%/s, which is the "floaty/frictionless" failure mode this pass was asked to avoid.
+//     That default damping is what makes the ball lose energy GRADUALLY, so it stays.
+//   - Restitution was the one lever that moved the two symptoms that were actually wrong.
+//
+// Measured, before -> after (identical deterministic rig, physics stepped at a fixed 1/60):
+//   head-on rebound off the outer wall  33-40%  -> 40-46% of incoming speed
+//     (the rig fires three speeds at the wall and reports whichever land a clean head-on
+//      impact, so a given run may print a narrower range than this - the floor is what moved)
+//   average speed over a whole ball     0.445   -> 0.595 m/s   (+34%)
+//   frames spent below 0.1 m/s          12.5%   -> 0.0%        (the "sticky" feel, gone)
+//   downhill acceleration               0.717   -> 0.717 m/s^2 (unchanged, already ideal)
+//   free-roll retention                 97.5%/s -> 97.5%/s     (unchanged, still loses energy)
+//   airborne frames                     0.0%    -> 0.0%        (superball guard: no floor hopping)
+//
+// KNOWN TENSION, recorded rather than hidden: this partly reverses the previous pass's finding
+// just above. A flipperless ball now drains in ~2.05s instead of ~2.90s, and that pass rejected
+// 0.50 for exactly that reason. The two passes measured different things and both are right -
+// that one scored "shots reaching the upper third" and drain RATE, this one scored rebound
+// retention and time spent nearly stationary. Some of the shorter ball life is dead time being
+// removed rather than difficulty being added: the 0.45 ball spent 12.5% of every ball under
+// 0.1 m/s, which is where the "heavy/sluggish" feel came from. If ball life turns out to matter
+// more than liveliness in playtest, BALL_FRICTION 0.08 -> 0.05 was also measured and buys a
+// similar speed gain (avg 0.642 m/s) for a smaller drain cost (~2.35s) - but it does nothing for
+// rebound, which is why it is not the one chosen here.
+export const BALL_RESTITUTION = 0.55;
 export const BALL_FRICTION = 0.08;
 
 // Converted from CONFIG.ballMaxVelocity: 1800 (px/s) in ../index.js, using the same PX_TO_M
@@ -163,7 +199,43 @@ export const BALL_FRICTION = 0.08;
 // (JS wrapper or native HP_* function). createBall() previously called two methods
 // (setCcdMotionThreshold/setCcdSweptSphereRadius) that don't exist on this PhysicsBody build -
 // dead code, now removed. This per-frame JS clamp is genuinely the only per-body defense.
-export const MAX_BALL_SPEED_MS = 1800 * PX_TO_M; // ~1.7 m/s
+//
+// Flipper-to-ball energy-transfer pass (user-requested, measured): 1800 -> 2700 px/s
+// (1.70 -> 2.55 m/s). Raised as a SAFETY ceiling, not as a gameplay knob - it is still the only
+// per-body anti-tunneling defense this build has, and it still clamps every velocity source.
+//
+// Why this constant moved and FLIPPER_CONTACT_VELOCITY_TRANSFER did not. That pass was asked to
+// grade shot strength by contact point: base modest, midpoint strong, tip strongest. Measured
+// exit speed at a real rolling contact, by contact radius along the bat:
+//
+//   transfer  base(24%)   mid(59%)   tip(89%)     with the 1.70 ceiling applied
+//   2.4        0.729       1.679      4.833  ->   0.729 / 1.679 / 1.700
+//
+// The natural spread is already 1 : 2.3 : 6.6, which is exactly the requested gradient - the
+// ceiling was flattening the top of it, putting mid (1.679) and tip (1.700) within 1% of each
+// other so timing carried no information. And because transfer is a plain linear gain, it scales
+// base/mid/tip together and CANNOT restore that spread: at 1.70 every value >= 2.4 pins both mid
+// and tip, and low enough values to leave headroom make every shot weak. So the required increase
+// to FLIPPER_CONTACT_VELOCITY_TRANSFER measured as exactly zero, and it is left at 2.4.
+//
+// At 2.55 the same three contacts read 0.729 / 1.679 / 2.550 - 29% / 66% / 100% of the ceiling,
+// a gradient a player can actually feel. Flipper-strike reach (qa/circulation-suite.js, n=8):
+// mean best-Z 0.075 -> 0.138, best Z 0.186 -> 0.332.
+//
+// Why 2.55 and not higher: 3.40 measured the same mean reach (0.138) for less anti-tunneling
+// margin, so it buys nothing. The ceiling was chosen against a direct tunneling probe - 40 shots
+// per speed, fired at the walls from five positions in eight directions:
+//   1.70 m/s (2.1 ball-radii/frame)  0/40 escaped
+//   2.55 m/s (3.1 ball-radii/frame)  0/40 escaped   <- shipped
+//   3.40 m/s (4.2 ball-radii/frame)  0/40 escaped
+//   5.10 m/s (6.3 ball-radii/frame)  1/40 escaped   <- ball reached x=0.284, past the 0.227 wall
+//
+// SCOPE NOTE, recorded rather than hidden: this ceiling is shared, so raising it also lets the
+// pop bumpers and slingshots push a ball past 1.70 where they previously could not. No kick force
+// was modified (BUMPER_KICK_SPEED_MS and friends are untouched) - the same clamp is simply
+// clamping less often. The plunger is unaffected either way: PLUNGER_MAX_POWER_MS is 1.51 m/s,
+// already under the old ceiling.
+export const MAX_BALL_SPEED_MS = 2700 * PX_TO_M; // ~2.55 m/s
 
 // Real Havok API found in the same investigation (HavokPlugin.setVelocityLimits(), backed by
 // the native HP_World_SetSpeedLimit/GetSpeedLimit functions - confirmed present via the same
@@ -421,6 +493,24 @@ export const FLIPPER_FRICTION = 0.4;
 // Unchanged: flipper geometry, sweep, activate/return speeds, resting behaviour, and the
 // held-flipper guarantee (omega is 0 once the bat reaches its stop, so a held flipper adds
 // nothing - re-verified at every value tested; a cradled ball stayed at ~0 m/s).
+// Flipper-to-ball energy-transfer pass (user-requested, measured): INSPECTED, DELIBERATELY
+// UNCHANGED at 2.4. That pass was asked to raise transfer "only as much as required" to grade
+// shots by contact point; the required amount measured as zero, and the ceiling moved instead
+// (see MAX_BALL_SPEED_MS above for the full numbers).
+//
+// The reason is a property of this constant worth stating outright: it is a plain LINEAR GAIN on
+// a physically-derived vector, so it scales base, midpoint and tip together and leaves their
+// ratios fixed at 1 : 2.3 : 6.6 no matter what value it takes. It sets how hard the flipper hits;
+// it cannot change how much a tip hit beats a base hit. Measured natural exit speeds:
+//
+//   transfer   base(24%)   mid(59%)   tip(89%)
+//   2.4         0.729       1.679      4.833
+//   3.0         0.914       2.085      6.044
+//   3.5         1.068       2.423      7.054
+//
+// So if shots ever read as too weak or too strong ACROSS THE BOARD, this is the right knob. If
+// they read as insufficiently DIFFERENTIATED, this is the wrong knob - look at what is flattening
+// the top of the range instead.
 export const FLIPPER_CONTACT_VELOCITY_TRANSFER = 2.4;
 
 // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
@@ -664,6 +754,34 @@ export const LANE_TRIGGER_DEPTH_M = 0.025;
 // preference.
 export const INLANE_GUIDE_TOP_X_M = 0.14; // mirrored - almost flush with LANE_DIVIDER_X_M (0.145)
 export const INLANE_GUIDE_BOTTOM_X_M = 0.125; // mirrored - tapers toward the flipper, clearing its full swept footprint (see this constant's own comment)
+
+// Where the guide STOPS in Z. Previously it ran the divider's full span (LANE_Z_BOTTOM_M, -0.40),
+// which carried it down past the flipper's pivot at z=-0.36 and produced a hard geometric pinch -
+// a ball rolling the inlane was funnelled into a corridor narrower than itself and wedged there,
+// dead, until the anti-stuck kick fired ~1.6s later. The player could not recover it: measured,
+// a full flipper stroke does not reach that pocket.
+//
+// Measured corridor between inlaneGuide and the RESTING flipper, ball diameter 0.027m:
+//   z=-0.355  0.0230   z=-0.360  0.0196   z=-0.365  0.0163  <- minimum   z=-0.370  0.0224
+//
+// The X axis cannot fix this. INLANE_GUIDE_BOTTOM_X_M is already pinned by the flipper-overlap
+// audit above (0.115 is the intersection threshold, 0.125 the shipped value), and opening the
+// corridor to a ball's width would need the guide out past 0.149 - through LANE_DIVIDER_X_M at
+// 0.145. The whole flipper-pivot-to-divider space is only 0.028m wide; ANY rail inside it pinches.
+// So the guide ends above the pinch instead, at -0.35, and the ball drops onto the bat the way a
+// real inlane delivers it. The full 0.14 -> 0.125 taper is preserved over the shorter span, so the
+// rail still steers inward (it is now steeper - the "improve rail angle" lever, applied for free).
+//
+// Verified against everything the old geometry guaranteed:
+//   flipper/guide mesh intersection, 1-degree sweep across the full stroke, both flippers:
+//     0 of 66 angles intersect at -0.40 AND at -0.35 (the constraint that pinned BOTTOM_X holds)
+//   trapped starts across both side lanes, 25 -> 8, with all 15 guide/flipper wedges eliminated
+//   inlane -> flipper delivery: 5 of 6 approach lines still land on the bat (unchanged)
+//   qa/circulation-suite.js: identical on every metric, so no new drain path was opened
+//
+// Deliberately NOT LANE_Z_BOTTOM_M: the divider rail and its posts still run to -0.40, because
+// separating the inlane from the outlane is their job and they are not what pinches the ball.
+export const INLANE_GUIDE_BOTTOM_Z_M = -0.35;
 // mirror is a plain position-sign multiplier here (unlike SLINGSHOTS'/BUMPER_CLUSTER's own
 // `mirror`, which only flips rotation handedness - their X positions are hardcoded per-entry
 // instead) - left is negative X throughout this file (see FLIPPER_GAP_HALF_M's left pivot at
@@ -725,7 +843,13 @@ export const ORBITS = [
     // Left: rail runs alongside the mission target bank's inner (Saturn-facing) edge.
     { side: 'left', railBottomX: -0.075, railTopX: -0.08, entranceX: -0.078, completionX: -0.08 },
     // Right: near-mirror of the left (see the note just above), running inboard of the comet.
-    { side: 'right', railBottomX: 0.077, railTopX: 0.082, entranceX: 0.08, completionX: 0.082 }
+    // Ball-trap fix (measured): the right rail moved 12mm outboard (0.077/0.082 -> 0.089/0.094).
+    // A ball rolling the right orbit lane used to dead-end against the vision gate's guard posts
+    // with the rail capping its outboard escape - see VISION_GATE_POS for the full measurement.
+    // The rail move alone does nothing (measured 25/30 balls still rested); it only works paired
+    // with the gate move. entranceX/completionX are deliberately NOT moved - they are scoring
+    // triggers and still sit inside the (now wider) lane.
+    { side: 'right', railBottomX: 0.089, railTopX: 0.094, entranceX: 0.08, completionX: 0.082 }
 ];
 
 // ===================================
@@ -748,7 +872,34 @@ export const ORBITS = [
 // primitive - confirmed by the existing bumper/Saturn/comet decorative rings in this file
 // never getting a PhysicsAggregate at all), so a near-miss clips a post and bounces away
 // rather than sailing through untouched.
-export const VISION_GATE_POS = { x: 0.045, z: 0.235 };
+// Ball-trap fix (measured, user-authorised): x 0.045 -> 0.027, an 18mm INBOARD move.
+//
+// A ball rolling down the right orbit lane came to a genuine dead stop at (0.059, 0.266) - still
+// a DYNAMIC body, so not the gate's own capture mechanic - in 24 of 30 legal rolls, and the
+// anti-stuck kick needed 2.58s to free it (the worst on the table, and past the 2.5s bound
+// qa/ball-trap-audit.js asserts).
+//
+// The blocker is this gate's RIGHT guard post cutting across the lane's downhill exit, with the
+// orbit rail capping the outboard way around it. That matters because it rules out the two
+// obvious fixes, both measured and both useless on their own:
+//   moving the gate DOWN-TABLE (-Z):        24/30 still rested - the obstruction is an X extent,
+//                                           so sliding it along Z cannot open the exit
+//   moving the rail outboard alone (+24mm): 23/30 still rested - widening the lane does not help
+//                                           while a post still blocks the way out of it
+//   widening the gate<->rail gap to 34mm:   still rested - that gap was never the pinch
+// Only moving BOTH works, because the ball needs a gap between the post and the rail that it can
+// actually pass through:
+//   rail +12mm, gate -15mm:  5/30    rail +20mm, gate -15mm:  3/30
+//   rail +12mm, gate -18mm:  2/30 <- shipped, recovery 2.58s -> 1.03s
+//
+// Shrinking VISION_GATE_COLLAR_RADIUS_M instead was considered and rejected: at a radius small
+// enough to clear the lane, the gate's own mouth (2*radius - post diameter) drops under the
+// ball's 27mm and the scoop stops being able to accept a ball at all.
+//
+// This is ONE number. If the gate's new position reads wrong in playtest, move it back toward
+// 0.045 and re-run qa/ball-trap-audit.js - the trade is trap rate against gate placement, and
+// the table above is the exchange rate.
+export const VISION_GATE_POS = { x: 0.027, z: 0.235 };
 export const VISION_GATE_RADIUS_M = 0.015; // the actual capture trigger
 export const VISION_GATE_COLLAR_RADIUS_M = 0.02; // ring radius the 3 guard posts sit on
 // Awarded once per successful capture - deliberately the single biggest configurable bonus on
