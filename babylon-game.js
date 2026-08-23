@@ -1221,8 +1221,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }, scene);
         floor.position.set(0, -0.15, 0);
         const floorMat = new BABYLON.StandardMaterial('floorMat', scene);
-        floorMat.diffuseColor = new BABYLON.Color3(0.3, 0, 0.1);
-        floorMat.alpha = 0.5;
+        // Dimmed hard in the hierarchy pass. This is a diagnostic plane, not scenery - but it is
+        // not dev-gated, and measured from the gameplay camera it was the third heaviest element
+        // in the frame (29,528 visible pixels at p90 58), a translucent red sheet hanging under
+        // and well outside the cabinet. It still catches an escaped ball and is still visible
+        // enough to find one; it just stops competing for attention with the table.
+        floorMat.diffuseColor = new BABYLON.Color3(0.12, 0, 0.05);
+        floorMat.alpha = 0.18;
         floor.material = floorMat;
         new BABYLON.PhysicsAggregate(floor, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.1, friction: 0.8 }, scene);
 
@@ -2896,7 +2901,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }
         // a soft highlight off-centre, so the cap has a consistent moulded sheen
         const gloss = ctx.createRadialGradient(c * 0.72, c * 0.66, 0, c * 0.72, c * 0.66, c * 0.85);
-        gloss.addColorStop(0, 'rgba(255,255,255,0.85)');
+        // 0.85 -> 0.45 (hierarchy pass): this highlight is what actually pinned the caps at 255,
+        // not the material tint under it. The moulded sheen still reads, it just stops clipping.
+        gloss.addColorStop(0, 'rgba(255,255,255,0.45)');
         gloss.addColorStop(1, 'rgba(255,255,255,0)');
         ctx.fillStyle = gloss;
         ctx.beginPath();
@@ -4137,7 +4144,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // the small, precise insert lenses sitting on top of them. 0.24 keeps the lane's
             // colour identity as a floor TINT, which is all it was ever meant to be, and hands the
             // "this is a light" job back to the inserts. Their alpha and geometry are unchanged.
-            mat.emissiveColor = color.scale(0.24);
+            // 0.24 -> 0.14 (hierarchy pass). Measured from the gameplay camera these strips
+            // were at p90 130 across 23,887 pixels - above the perimeter walls (124), above the
+            // slingshots (123) and the flippers (119), and above an unlit lane insert (93). Floor
+            // tint is tier-5 playfield art; it cannot outrank the hardware standing on it.
+            mat.emissiveColor = color.scale(0.14);
             mat.alpha = alpha;
             mat.backFaceCulling = false;
             return mat;
@@ -4149,13 +4160,40 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
         // identity, not one shared color - each bumper is its own emissive-glass PBR material so
         // it can be individually recolored/pulsed on hit (pulseMesh() in main()).
+        // Perceptual-luminance balance for the bumper palette (visual-hierarchy pass). Returns 1
+        // for any colour already at or below the ceiling, so it only ever darkens - never brightens
+        // a colour past what its material scale asked for. 0.42 is the ceiling that puts the yellow
+        // bumper level with its neighbours without dulling the dim ones; it is a luminance, in the
+        // same 0-1 space as the Color3 channels it is computed from.
+        const BUMPER_LUM_CEILING = 0.42;
+        const bumperLumBalance = (color) => {
+            const lum = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+            return lum > BUMPER_LUM_CEILING ? BUMPER_LUM_CEILING / lum : 1;
+        };
+
         const bumperMats = COLOR_BUMPERS.map((color, i) => {
             const mat = new BABYLON.PBRMaterial('bumperMat' + i, scene);
-            mat.albedoColor = color;
+            // Albedo, not just emissive, and that distinction is the finding. HEX_BUMPERS is a
+            // fully-saturated palette, so a bumper dome clipped to 255 under the scene's three
+            // direct lights before its emissive was added at all - cutting only the glow moved the
+            // cluster's p90 by two units out of 255.
+            //
+            // The per-colour balance is the other half, and it fixes a latent problem rather than
+            // just trimming one: these four colours are nowhere near equally bright. Measured from
+            // the gameplay camera at an identical material scale, the yellow bumper sat at a median
+            // of 242 while the magenta one sat at 101 - because perceptual luminance weights green
+            // at 0.72 and blue at 0.07, so 0xffff00 carries 0.93 of full luminance and 0xff00ff
+            // only 0.28. One flat multiplier can only ever be right for one of them. bumperLumBalance()
+            // pulls each colour down to a shared luminance ceiling and leaves the already-dim ones
+            // alone, so the cluster reads as one tier instead of one blazing bumper and three quiet
+            // ones - and nothing in it clips.
+            mat.albedoColor = color.scale(0.75 * bumperLumBalance(color));
             mat.metallic = 0.2;
             mat.roughness = 0.3;
             mat.alpha = 0.88; // "glass-or-crystal-like... moderate transparency" per the doc
-            mat.emissiveColor = color.scale(0.6);
+            // 0.6 -> 0.42, same hierarchy pass as the lamp rings above and for the same measured
+            // reason: the bumper domes were clipping to 255 from the gameplay camera.
+            mat.emissiveColor = color.scale(0.40 * bumperLumBalance(color));
             return mat;
         });
 
@@ -4168,7 +4206,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // on why hit-flash is scale-only for extra meshes) - flashing this shared instance would
         // bleed into every other bumper's cap at once.
         const bumperCapMat = new BABYLON.PBRMaterial('bumperCapMat', scene);
-        bumperCapMat.albedoColor = new BABYLON.Color3(0.88, 0.88, 0.94);
+        // 0.88 -> 0.66 (hierarchy pass): measured, the caps were the single brightest surface in
+        // the frame after the ball, clipping to 255 across their whole visible face. Still clearly
+        // the pale plastic of the fixture, just no longer competing with the ball.
+        bumperCapMat.albedoColor = new BABYLON.Color3(0.54, 0.54, 0.58);
         // Plastic, deliberately: near-zero metallic and a tighter roughness than the machined
         // metal of the housing below it (bumperBaseMat, 0.95/0.3). That gap is the whole point -
         // a real pop bumper is a moulded plastic cap sitting in a metal fixture, and giving the
@@ -4202,10 +4243,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // gold band is the same trick real machines use to mark their jackpot bumper, and it reads
         // instantly at a glance because nothing else on the board is this colour.
         const bumperTrimMat = new BABYLON.PBRMaterial('bumperTrimMat', scene);
-        bumperTrimMat.albedoColor = new BABYLON.Color3(0.92, 0.72, 0.26);
+        // Hierarchy pass: a 0.92 gold on a 0.9-metallic band measured p90 249 - the fourth
+        // brightest surface on the board, brighter than every tier-2 insert, for a 423-pixel
+        // decorative band. Albedo is the lever here; a mid-pass attempt to soften the specular by
+        // RAISING roughness to 0.34 was measured to make it worse (p90 230 -> 239, a broader hot
+        // streak rather than a tighter one), so roughness stays where it was.
+        bumperTrimMat.albedoColor = new BABYLON.Color3(0.30, 0.23, 0.08);
         bumperTrimMat.metallic = 0.9;
         bumperTrimMat.roughness = 0.22;
-        bumperTrimMat.emissiveColor = new BABYLON.Color3(0.35, 0.24, 0.05);
+        bumperTrimMat.emissiveColor = new BABYLON.Color3(0.22, 0.15, 0.03); // cut alongside the albedo above, same pass
 
         // The lamp ring, one per bumper so it can flash with its own body on a hit. Brighter and
         // markedly more translucent than the body it rings (alpha 0.55 vs 0.88, emissive 1.15x vs
@@ -4213,11 +4259,19 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // the dome's own glow - a lit ring has to out-glow what it sits on to read as a lamp at all.
         const bumperLampMats = COLOR_BUMPERS.map((color, i) => {
             const mat = new BABYLON.PBRMaterial('bumperLampMat' + i, scene);
-            mat.albedoColor = color;
+            mat.albedoColor = color.scale(0.85 * bumperLumBalance(color)); // same saturated-palette clipping and the same per-colour balance as the domes - see bumperMats above
             mat.metallic = 0.0;
             mat.roughness = 0.45;
             mat.alpha = 0.55;
-            mat.emissiveColor = color.scale(1.15);
+            // Visual-hierarchy pass (user-requested). 1.15 made this the brightest material
+            // anywhere on the board - above the BALL's own 0.7 - and it showed: measured from the
+            // gameplay camera the bumper cluster sat at p90 246 across 14,363 pixels against a
+            // ball at 253 across 553. A tier-3 feature was tying the one object the player has to
+            // track, over twenty-six times the screen area. 0.62 puts the cluster clearly below
+            // the ball and below the tier-2 targets while still reading as a lit ring.
+            // pulseBumperLamp()'s x2.1 hit flash is untouched and still peaks at 1.30, so a struck
+            // bumper is if anything MORE distinct now that its resting state is not already there.
+            mat.emissiveColor = color.scale(0.62 * bumperLumBalance(color));
             return mat;
         });
 
@@ -4329,6 +4383,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // to a one-line change. The boss gets its own glyph, a second cue that costs nothing.
             const insert = createLabelPlane(scene, isBoss ? '\u2605' : '\u25c9', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: isBoss ? 34 : 30, planeSize: radius * 1.5 });
             insert.position.y = radius * 2.05;
+            // Hierarchy pass: pure decoration on a tier-3 fixture, so it is stepped down with the
+            // rest of the bumper. Deliberately not quoting a measured number for this one - the
+            // glyph plane is mostly transparent, so what a per-object luminance pass reads inside
+            // its silhouette is mostly the bumper cap behind it, not the glyph. Texture level
+            // rather than a redraw, because createLabelPlane() is shared with the shot LABELS
+            // (L ORBIT, SKILL SHOT, TARGETS), which are gameplay information and keep theirs.
+            if (insert.material && insert.material.emissiveTexture) insert.material.emissiveTexture.level = 0.4;
 
             // bodyMat/lampMat are carried so the hit reaction can flash exactly these two
             // per-bumper materials and nothing else - notably NOT the shared cap material,
@@ -4546,7 +4607,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // texture, and albedoTexture is multiplied by albedoColor - keeping the tint here as well
         // would square it and flatten every band back into one dark amber. Same reasoning, and the
         // same resulting look, as the mission-target plates.
-        saturnMat.albedoColor = new BABYLON.Color3(1, 1, 1);
+        // 1.0 -> 0.82 (hierarchy pass). saturnBandTex is multiplied by this, so it scales the
+        // whole banded body evenly and keeps every band's relationship intact - which trimming the
+        // texture itself would not. Saturn measured p90 245 across 10,618 pixels, level with a
+        // ball occupying 553.
+        saturnMat.albedoColor = new BABYLON.Color3(0.52, 0.52, 0.52);
         saturnMat.albedoTexture = createSaturnBandTexture(scene);
         // Metallic 0.5 -> 0.06: a gas giant is not a metal ball, and at 0.5 the body picked up a
         // broad specular sheen that washed the new banding straight back out. Roughness up to
@@ -4558,7 +4623,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // rule that the BALL stays the brightest, easiest-to-track thing on the board (ballMat's
         // own emissive is 0.7 of cyan; see its comment). Measured, not guessed: at 0.35 Saturn's
         // peak emissive channel was half the ball's while covering ~20x the screen area.
-        saturnMat.emissiveColor = COLOR_SATURN.scale(0.18);
+        saturnMat.emissiveColor = COLOR_SATURN.scale(0.13); // 0.18 -> 0.13, hierarchy pass - see saturnRimMat below
         const saturnMesh = BABYLON.MeshBuilder.CreateSphere('saturn', { diameter: SATURN_RADIUS_M * 2 }, scene);
         saturnMesh.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
         saturnMesh.material = saturnMat;
@@ -4610,8 +4675,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const saturnRimMat = new BABYLON.StandardMaterial('saturnRimMat', scene);
         saturnRimMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
         saturnRimMat.specularColor = new BABYLON.Color3(0, 0, 0);
-        saturnRimMat.emissiveColor = new BABYLON.Color3(0.8, 0.8, 0.8); // the texture carries the colour and the falloff; this only trims the peak so the limb does not clip to white
+        // 0.8 -> 0.5 (hierarchy pass): Saturn measured p90 245 across 10,618 pixels from the
+        // gameplay camera, level with the ball. The limb is the brightest part of it, so it takes
+        // most of the cut. The texture still carries the colour and the falloff.
+        saturnRimMat.emissiveColor = new BABYLON.Color3(0.62, 0.62, 0.62); // restored toward its original tint now that texture.level above is doing the dimming
         saturnRimMat.emissiveTexture = saturnRimTex;
+        // Hierarchy pass: dropping saturnRimMat.emissiveColor from 0.8 all the way to 0.24 moved
+        // this limb's measured p90 by only 8 units, because on a StandardMaterial the emissive
+        // TEXTURE carries its own brightness and the colour barely scales it. texture.level is the
+        // control that actually does - it multiplies the sampled texel directly. Measured, not
+        // assumed: this is the difference between the limb sitting above every tier-2 target and
+        // sitting with the rest of tier 3.
+        saturnRimTex.level = 0.55;
         saturnRimMat.opacityTexture = saturnRimTex;
         saturnRimMat.disableLighting = true;
         saturnRimMat.disableDepthWrite = true; // never let a transparent halo occlude the rings crossing behind it
@@ -4640,7 +4715,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Emissive is TEXTURED, unlike the body's: the divisions have to stay dark, and a flat
         // emissive would light them back up and erase the structure the texture just added.
         saturnRingMat.emissiveTexture = saturnRingTex;
-        saturnRingMat.emissiveColor = COLOR_SATURN_RING.scale(0.22);
+        saturnRingMat.emissiveColor = COLOR_SATURN_RING.scale(0.17); // 0.22 -> 0.17, hierarchy pass
         saturnRingMat.alpha = 0.82;
 
         // scaling.y flattens the torus tube into a ribbon before any rotation is applied (Babylon
@@ -4697,14 +4772,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // glossy cap read as a highlight, but against the banded atmosphere it caught the point
         // lights as a blown white smear at the pole. Matte cream sits in the bands instead of on
         // top of them. Geometry, position and the skin slot below are unchanged.
-        saturnCapMat.albedoColor = new BABYLON.Color3(0.95, 0.88, 0.72);
+        saturnCapMat.albedoColor = new BABYLON.Color3(0.72, 0.67, 0.55); // hierarchy pass - a near-white cap on the board's largest feature clipped alongside the body
         saturnCapMat.metallic = 0.08;
         saturnCapMat.roughness = 0.48;
         // 0.85 -> 0.45. At 0.85 this small cap's peak emissive channel was BRIGHTER than the ball's
         // own (0.7), which put a fixed board decoration above the one object the player has to
         // track continuously. 0.45 keeps it clearly the highlight of Saturn's pole without
         // competing. Purely the resting brightness - nothing about the skin slot below changes.
-        saturnCapMat.emissiveColor = COLOR_SATURN.scale(0.45);
+        saturnCapMat.emissiveColor = COLOR_SATURN.scale(0.22); // 0.45 -> 0.22 across the hierarchy pass - this cap sits at Saturn's brightest point
         // Obstacle decal skin slot (visual-architecture pass, user-requested). No-op until
         // assets/skins/obstacles/obstacle-decal-saturn.png actually exists (see SKINS.md); this
         // highlight cap's neutral-warm material stays the fallback either way.
@@ -4741,7 +4816,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         cometMat.roughness = 0.14;
         // 0.4 -> 0.20, the "restrained glow" half of this. The nucleus is lit, not a lamp; the
         // tail below carries the comet's brightness, which is where a comet's light belongs.
-        cometMat.emissiveColor = COLOR_COMET.scale(0.20);
+        cometMat.emissiveColor = COLOR_COMET.scale(0.14); // 0.20 -> 0.14, hierarchy pass - the comet measured p90 222, above every tier-2 target
         // Obstacle decal skin slot (visual-architecture pass, user-requested) - applied to the
         // comet's own material, not its collider: this only ever swaps a texture property on an
         // existing PBRMaterial, the mesh/shape/physics/metadata below are entirely unaffected.
@@ -5708,8 +5783,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         [-1, 1].forEach((mirror, i) => {
             const color = COLOR_CHAKRA[(i + 3) % COLOR_CHAKRA.length];
             const insertMat = new BABYLON.PBRMaterial('flipperInsertMat' + i, scene);
-            insertMat.albedoColor = color.scale(0.3);
-            insertMat.emissiveColor = color.scale(0.35);
+            // Hierarchy pass: these two little discs measured p90 253 across 1,000 pixels -
+            // level with the BALL's 252 across 553, and parked at the busiest point on the board.
+            // They are ambient set-dressing (this rule's own comment says so), so they have no
+            // business at the top of the hierarchy. 0.35 -> 0.20 emissive.
+            insertMat.albedoColor = color.scale(0.24);
+            insertMat.emissiveColor = color.scale(0.20);
             insertMat.metallic = 0.1;
             insertMat.roughness = 0.5;
             const insert = BABYLON.MeshBuilder.CreateCylinder('flipperInsert' + mirror, {
