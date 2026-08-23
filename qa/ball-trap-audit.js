@@ -36,7 +36,11 @@ const URL = `http://localhost:${PORT}/index.html?dev=1`;
 
 // Measured with the inlane guide still running to LANE_Z_BOTTOM_M (-0.40), immediately before
 // INLANE_GUIDE_BOTTOM_Z_M was introduced to end it at -0.35.
-const BEFORE = { trapped: 25, wedges: 15, minGap: 0.0163 };
+// Reference points, each measured on the geometry immediately before the fix that moved it.
+// trapped/wedges/minGap are from the inlane-guide pass; orbitRests is the right orbit lane's own
+// trap rate (24 of 30 rolls resting, anti-stuck needing 2.58s) before the rail and vision gate
+// were moved apart - see VISION_GATE_POS in js/config.js.
+const BEFORE = { trapped: 25, wedges: 15, minGap: 0.0163, orbitRests: '24/30', orbitRecovery: 2.58 };
 
 let fails = 0;
 const check = (label, cond, detail) => {
@@ -64,10 +68,40 @@ const RIG = () => {
     }
     return [...out];
   };
+  // A seed is only meaningful if the ball could actually BE there. Dropping one inside a collider
+  // makes Havok shove it out at up to 25mm in a single step, and it can end up wedged inside
+  // geometry it could never have rolled into - which an earlier version of this script reported
+  // as real traps. Two independent gates catch that: refuse to seed anywhere the ball does not
+  // geometrically fit, then verify the first step moved it no further than its own travel.
+  const R = 0.0135;
+  const clearance = (px, pz) => {
+    let best = Infinity;
+    for (let a = 0; a < 32; a++) {
+      const th = a * Math.PI / 16;
+      try {
+        const h = pe.raycast(new BABYLON.Vector3(px, Y, pz),
+                             new BABYLON.Vector3(px + Math.cos(th) * 0.09, Y, pz + Math.sin(th) * 0.09));
+        if (h && h.hasHit) {
+          const dd = Math.hypot(h.hitPointWorld.x - px, h.hitPointWorld.z - pz);
+          if (dd < best) best = dd;
+        }
+      } catch (e) { /* no hit along this ray */ }
+    }
+    return best;
+  };
+  const SEED_SPEED = 0.12;
   const seed = (x, z) => {
     mesh.position.set(x, Y, z);
-    body.setLinearVelocity(new BABYLON.Vector3(0, 0, -0.12));
-    body.setAngularVelocity(new BABYLON.Vector3(-0.12 / 0.0135, 0, 0)); // no-slip: wx = vz/R
+    body.setLinearVelocity(new BABYLON.Vector3(0, 0, -SEED_SPEED));
+    body.setAngularVelocity(new BABYLON.Vector3(-SEED_SPEED / 0.0135, 0, 0)); // no-slip: wx = vz/R
+  };
+  // Returns false when the seed was illegal, so the caller can count it rather than score it.
+  const seedIsLegal = (x, z) => {
+    if (clearance(x, z) < R + 0.0005) return false;
+    const before = { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z };
+    pe._step(1 / 60);
+    const moved = Math.hypot(mesh.position.x - before.x, mesh.position.y - before.y, mesh.position.z - before.z);
+    return moved < SEED_SPEED / 60 + 0.004;   // its own travel, plus room for the first-step settle
   };
   // 1.5s immobile below the game's own STUCK_SPEED_THRESHOLD_MS counts as trapped.
   const settle = (frames, antiStuck) => {
@@ -85,14 +119,25 @@ const RIG = () => {
 
   // --- 1. trapped-start census over both side lanes
   const traps = [];
-  let tested = 0;
-  for (let x = -0.145; x <= 0.146; x += 0.006) {
-    if (Math.abs(x) < 0.085) continue;
-    for (let z = -0.24; z >= -0.38; z -= 0.02) {
-      tested++;
-      seed(x, z);
-      if (settle(300, false)) {
-        traps.push({ rest: [+mesh.position.x.toFixed(3), +mesh.position.z.toFixed(3)], c: contacts() });
+  let tested = 0, illegal = 0;
+  // Two bands: the inlane/outlane corridors, and the upper-table orbit lanes (where the vision
+  // gate sits). The orbit band was missing entirely from the first version of this script, which
+  // is why the worst trap on the table went unreported until it was found by hand.
+  const bands = [
+    { x0: -0.145, x1: 0.146, z0: -0.24, z1: -0.38, skipInner: 0.085 },
+    { x0: -0.100, x1: 0.101, z0: 0.42, z1: 0.15, skipInner: 0.040 }
+  ];
+  for (const band of bands) {
+    const zStep = band.z1 < band.z0 ? -0.02 : 0.02;
+    for (let x = band.x0; x <= band.x1; x += 0.006) {
+      if (Math.abs(x) < band.skipInner) continue;
+      for (let z = band.z0; zStep < 0 ? z >= band.z1 : z <= band.z1; z += zStep) {
+        seed(x, z);
+        if (!seedIsLegal(x, z)) { illegal++; continue; }
+        tested++;
+        if (settle(300, false)) {
+          traps.push({ rest: [+mesh.position.x.toFixed(3), +mesh.position.z.toFixed(3)], c: contacts() });
+        }
       }
     }
   }
@@ -139,7 +184,7 @@ const RIG = () => {
     }
     recovery.push({ at: t.rest, s: freed < 0 ? null : +(freed / 60).toFixed(2) });
   }
-  return { traps, tested, minGap: minGap === Infinity ? null : +minGap.toFixed(4), minZ, overlap, recovery, BALL_D };
+  return { traps, tested, illegal, minGap: minGap === Infinity ? null : +minGap.toFixed(4), minZ, overlap, recovery, BALL_D };
 };
 
 (async () => {
@@ -158,10 +203,17 @@ const RIG = () => {
   const r = await page.evaluate(RIG);
   const groups = {};
   r.traps.forEach((t) => { const k = `(${t.rest[0]}, ${t.rest[1]})  [${t.c.join(' + ')}]`; groups[k] = (groups[k] || 0) + 1; });
-  const wedges = r.traps.filter((t) => t.c.some((n) => n && n.startsWith('inlaneGuide')) && t.c.some((n) => n && n.endsWith('Flipper'))).length;
+  // A ball resting ON a flipper is a CRADLE - the normal, desirable end of an inlane feed, and the
+  // player flips it away. The pathology this audit exists for is a ball stuck against the guide
+  // that never reaches the bat at all, so a flipper contact disqualifies a rest from counting.
+  const wedges = r.traps.filter((t) => t.c.some((n) => n && n.startsWith('inlaneGuide'))
+                                    && !t.c.some((n) => n && n.endsWith('Flipper'))).length;
+  const cradles = r.traps.filter((t) => t.c.some((n) => n && n.endsWith('Flipper'))).length;
 
-  console.log(`=== SIDE-LANE TRAP AUDIT  (${r.tested} seeded starts, anti-stuck disabled) ===\n`);
-  console.log(`  trapped starts: ${BEFORE.trapped} -> ${r.traps.length}`);
+  console.log(`=== BALL-TRAP AUDIT  (${r.tested} legal seeded starts, ${r.illegal} illegal seeds rejected, anti-stuck disabled) ===\n`);
+  console.log(`  rests: ${r.traps.length} (${cradles} of them balls cradled on a flipper, which is normal)`);
+  console.log(`  NOTE: BEFORE.trapped (${BEFORE.trapped}) was counted with the old ungated seeding and is`);
+  console.log(`        NOT comparable to this number - most of those seeds started inside geometry.`);
   Object.entries(groups).sort((a, b) => b[1] - a[1]).forEach(([k, n]) => console.log(`     x${n}  rest ${k}`));
   console.log('');
   // The fix's actual claim: no corridor along the inlane is narrower than the ball. That is what
@@ -171,10 +223,17 @@ const RIG = () => {
   // The dominant cluster this fix removed: 15 seeds all funnelled to the same pocket. Residual
   // singles at slightly different rest points are a different, pre-existing effect (5 before this
   // change, 3 after) and are covered by the recovery bound below, not by this check.
-  check(`no guide/flipper pocket funnels a cluster of balls (was ${BEFORE.wedges} at one spot)`,
-    wedges < 5, { wedges, was: BEFORE.wedges });
-  check(`trapped starts reduced vs the pre-fix geometry (${BEFORE.trapped})`,
-    r.traps.length < BEFORE.trapped, { now: r.traps.length, was: BEFORE.trapped });
+  check('no ball is stuck against an inlane guide without reaching its flipper',
+    wedges === 0, { wedges, cradles });
+  // Absolute bounds rather than a comparison against a number measured a different way.
+  check('no single spot traps a cluster of balls', (() => {
+    const bySpot = {};
+    r.traps.forEach((t) => { if (t.c.some((n) => n && n.endsWith('Flipper'))) return;
+      const k = `${t.rest[0]},${t.rest[1]}`; bySpot[k] = (bySpot[k] || 0) + 1; });
+    return Object.values(bySpot).every((n) => n < 5);
+  })(), Object.entries(r.traps.reduce((a, t) => {
+    if (!t.c.some((n) => n && n.endsWith('Flipper'))) { const k = `${t.rest[0]},${t.rest[1]}`; a[k] = (a[k] || 0) + 1; }
+    return a; }, {})).filter(([, n]) => n > 1));
   check('flipper never intersects the inlane guide across its full stroke (left)', r.overlap.left && r.overlap.left.hits === 0, r.overlap.left);
   check('flipper never intersects the inlane guide across its full stroke (right)', r.overlap.right && r.overlap.right.hits === 0, r.overlap.right);
   check('no page errors', pageErrors.length === 0, pageErrors);

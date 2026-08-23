@@ -843,7 +843,13 @@ export const ORBITS = [
     // Left: rail runs alongside the mission target bank's inner (Saturn-facing) edge.
     { side: 'left', railBottomX: -0.075, railTopX: -0.08, entranceX: -0.078, completionX: -0.08 },
     // Right: near-mirror of the left (see the note just above), running inboard of the comet.
-    { side: 'right', railBottomX: 0.077, railTopX: 0.082, entranceX: 0.08, completionX: 0.082 }
+    // Ball-trap fix (measured): the right rail moved 12mm outboard (0.077/0.082 -> 0.089/0.094).
+    // A ball rolling the right orbit lane used to dead-end against the vision gate's guard posts
+    // with the rail capping its outboard escape - see VISION_GATE_POS for the full measurement.
+    // The rail move alone does nothing (measured 25/30 balls still rested); it only works paired
+    // with the gate move. entranceX/completionX are deliberately NOT moved - they are scoring
+    // triggers and still sit inside the (now wider) lane.
+    { side: 'right', railBottomX: 0.089, railTopX: 0.094, entranceX: 0.08, completionX: 0.082 }
 ];
 
 // ===================================
@@ -866,7 +872,34 @@ export const ORBITS = [
 // primitive - confirmed by the existing bumper/Saturn/comet decorative rings in this file
 // never getting a PhysicsAggregate at all), so a near-miss clips a post and bounces away
 // rather than sailing through untouched.
-export const VISION_GATE_POS = { x: 0.045, z: 0.235 };
+// Ball-trap fix (measured, user-authorised): x 0.045 -> 0.027, an 18mm INBOARD move.
+//
+// A ball rolling down the right orbit lane came to a genuine dead stop at (0.059, 0.266) - still
+// a DYNAMIC body, so not the gate's own capture mechanic - in 24 of 30 legal rolls, and the
+// anti-stuck kick needed 2.58s to free it (the worst on the table, and past the 2.5s bound
+// qa/ball-trap-audit.js asserts).
+//
+// The blocker is this gate's RIGHT guard post cutting across the lane's downhill exit, with the
+// orbit rail capping the outboard way around it. That matters because it rules out the two
+// obvious fixes, both measured and both useless on their own:
+//   moving the gate DOWN-TABLE (-Z):        24/30 still rested - the obstruction is an X extent,
+//                                           so sliding it along Z cannot open the exit
+//   moving the rail outboard alone (+24mm): 23/30 still rested - widening the lane does not help
+//                                           while a post still blocks the way out of it
+//   widening the gate<->rail gap to 34mm:   still rested - that gap was never the pinch
+// Only moving BOTH works, because the ball needs a gap between the post and the rail that it can
+// actually pass through:
+//   rail +12mm, gate -15mm:  5/30    rail +20mm, gate -15mm:  3/30
+//   rail +12mm, gate -18mm:  2/30 <- shipped, recovery 2.58s -> 1.03s
+//
+// Shrinking VISION_GATE_COLLAR_RADIUS_M instead was considered and rejected: at a radius small
+// enough to clear the lane, the gate's own mouth (2*radius - post diameter) drops under the
+// ball's 27mm and the scoop stops being able to accept a ball at all.
+//
+// This is ONE number. If the gate's new position reads wrong in playtest, move it back toward
+// 0.045 and re-run qa/ball-trap-audit.js - the trade is trap rate against gate placement, and
+// the table above is the exchange rate.
+export const VISION_GATE_POS = { x: 0.027, z: 0.235 };
 export const VISION_GATE_RADIUS_M = 0.015; // the actual capture trigger
 export const VISION_GATE_COLLAR_RADIUS_M = 0.02; // ring radius the 3 guard posts sit on
 // Awarded once per successful capture - deliberately the single biggest configurable bonus on
