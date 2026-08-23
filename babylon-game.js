@@ -78,7 +78,7 @@ import {
     POWERUP_RADIUS_M, POWERUP_POS, POWERUP_SPAWN_INTERVAL_MS, POWERUP_ACTIVE_DURATION_MS,
     POWERUP_MULTIPLIER, POWERUP_MULTIPLIER_DURATION_MS, SLINGSHOT_SIZE_M, SLINGSHOTS,
     SLINGSHOT_KICK_SPEED_MS, SLINGSHOT_KICK_UPTABLE_BIAS_MS, SLINGSHOT_RESTITUTION, REENTRY_LANE_RADIUS_M, REENTRY_LANES,
-    LANE_Z_TOP_M, LANE_Z_BOTTOM_M, LANE_DIVIDER_X_M, LANE_TRIGGER_Z_M,
+    LANE_Z_TOP_M, LANE_Z_BOTTOM_M, LANE_DIVIDER_X_M, LANE_TRIGGER_Z_M, INLANE_GUIDE_BOTTOM_Z_M,
     INLANE_TRIGGER_X_M, OUTLANE_TRIGGER_X_M, LANE_TRIGGER_WIDTH_M, LANE_TRIGGER_DEPTH_M,
     INLANE_GUIDE_TOP_X_M, INLANE_GUIDE_BOTTOM_X_M, SIDE_LANES, ORBIT_RAIL_BOTTOM_Z_M,
     ORBIT_RAIL_TOP_Z_M, ORBIT_ENTRANCE_Z_M, ORBIT_COMPLETION_Z_M, ORBIT_TRIGGER_WIDTH_M,
@@ -4061,24 +4061,28 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             {
                 const guideTopX = mirror * INLANE_GUIDE_TOP_X_M;
                 const guideBottomX = mirror * INLANE_GUIDE_BOTTOM_X_M;
+                // The guide stops at its OWN bottom Z, not the divider's - see
+                // INLANE_GUIDE_BOTTOM_Z_M for the pinch this removes. The divider rail and posts
+                // below still run to LANE_Z_BOTTOM_M.
                 const dx = guideBottomX - guideTopX;
-                const dz = LANE_Z_BOTTOM_M - LANE_Z_TOP_M;
+                const dz = INLANE_GUIDE_BOTTOM_Z_M - LANE_Z_TOP_M;
                 const guideLength = Math.sqrt(dx * dx + dz * dz);
                 const guideRotationY = Math.atan2(-dz, dx);
+                const guideCenterZ = (LANE_Z_TOP_M + INLANE_GUIDE_BOTTOM_Z_M) / 2;
 
                 const guide = BABYLON.MeshBuilder.CreateBox('inlaneGuide' + laneDef.side, {
                     width: guideLength,
                     height: 0.022,
                     depth: 0.006
                 }, scene);
-                guide.position.set((guideTopX + guideBottomX) / 2, 0.011, dividerCenterZ);
+                guide.position.set((guideTopX + guideBottomX) / 2, 0.011, guideCenterZ);
                 guide.rotation.y = guideRotationY;
                 guide.material = housingMat;
                 guide.metadata = { kind: 'wall' };
                 new BABYLON.PhysicsAggregate(guide, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
                 // This guide already uses the "long axis along local X, then rotationY" convention
                 // addRailBevel() itself assumes, so its own guideRotationY passes straight through.
-                addRailBevel(scene, 'inlaneGuide' + laneDef.side + 'Cap', railCapMat, guideLength, 0.006, (guideTopX + guideBottomX) / 2, 0.022, dividerCenterZ, guideRotationY);
+                addRailBevel(scene, 'inlaneGuide' + laneDef.side + 'Cap', railCapMat, guideLength, 0.006, (guideTopX + guideBottomX) / 2, 0.022, guideCenterZ, guideRotationY);
             }
 
             // Lane floor tints (visual-polish pass, user-requested - "inset/grooved lane surfaces

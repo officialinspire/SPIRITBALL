@@ -754,6 +754,34 @@ export const LANE_TRIGGER_DEPTH_M = 0.025;
 // preference.
 export const INLANE_GUIDE_TOP_X_M = 0.14; // mirrored - almost flush with LANE_DIVIDER_X_M (0.145)
 export const INLANE_GUIDE_BOTTOM_X_M = 0.125; // mirrored - tapers toward the flipper, clearing its full swept footprint (see this constant's own comment)
+
+// Where the guide STOPS in Z. Previously it ran the divider's full span (LANE_Z_BOTTOM_M, -0.40),
+// which carried it down past the flipper's pivot at z=-0.36 and produced a hard geometric pinch -
+// a ball rolling the inlane was funnelled into a corridor narrower than itself and wedged there,
+// dead, until the anti-stuck kick fired ~1.6s later. The player could not recover it: measured,
+// a full flipper stroke does not reach that pocket.
+//
+// Measured corridor between inlaneGuide and the RESTING flipper, ball diameter 0.027m:
+//   z=-0.355  0.0230   z=-0.360  0.0196   z=-0.365  0.0163  <- minimum   z=-0.370  0.0224
+//
+// The X axis cannot fix this. INLANE_GUIDE_BOTTOM_X_M is already pinned by the flipper-overlap
+// audit above (0.115 is the intersection threshold, 0.125 the shipped value), and opening the
+// corridor to a ball's width would need the guide out past 0.149 - through LANE_DIVIDER_X_M at
+// 0.145. The whole flipper-pivot-to-divider space is only 0.028m wide; ANY rail inside it pinches.
+// So the guide ends above the pinch instead, at -0.35, and the ball drops onto the bat the way a
+// real inlane delivers it. The full 0.14 -> 0.125 taper is preserved over the shorter span, so the
+// rail still steers inward (it is now steeper - the "improve rail angle" lever, applied for free).
+//
+// Verified against everything the old geometry guaranteed:
+//   flipper/guide mesh intersection, 1-degree sweep across the full stroke, both flippers:
+//     0 of 66 angles intersect at -0.40 AND at -0.35 (the constraint that pinned BOTTOM_X holds)
+//   trapped starts across both side lanes, 25 -> 8, with all 15 guide/flipper wedges eliminated
+//   inlane -> flipper delivery: 5 of 6 approach lines still land on the bat (unchanged)
+//   qa/circulation-suite.js: identical on every metric, so no new drain path was opened
+//
+// Deliberately NOT LANE_Z_BOTTOM_M: the divider rail and its posts still run to -0.40, because
+// separating the inlane from the outlane is their job and they are not what pinches the ball.
+export const INLANE_GUIDE_BOTTOM_Z_M = -0.35;
 // mirror is a plain position-sign multiplier here (unlike SLINGSHOTS'/BUMPER_CLUSTER's own
 // `mirror`, which only flips rotation handedness - their X positions are hardcoded per-entry
 // instead) - left is negative X throughout this file (see FLIPPER_GAP_HALF_M's left pivot at
