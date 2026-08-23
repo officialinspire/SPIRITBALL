@@ -2803,6 +2803,95 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return texture;
     }
 
+    // Saturn's atmosphere. The centrepiece was a single flat gold colour on a smooth sphere, which
+    // at this size (SATURN_RADIUS_M is more than double any bumper) is the one object on the board
+    // where a featureless surface is most obvious - it read as a plastic ball, not a planet.
+    //
+    // Bands are generated from two summed sines over latitude rather than a hand-listed table, so
+    // the zones vary in width and brightness the way a real gas giant's do instead of looking like
+    // painted stripes, and the values stay adjustable as one curve. Sphere UVs in Babylon are
+    // equirectangular (v = latitude), so a row of this texture is a line of latitude - bands drawn
+    // as horizontal rows come out as bands around the planet.
+    //
+    // The gold is baked in here, so saturnMat's albedoColor goes to white; leaving the tint on the
+    // material as well would multiply it twice and crush every band into the same dark amber.
+    function createSaturnBandTexture(scene) {
+        const w = 256, h = 128;
+        const texture = new BABYLON.DynamicTexture('saturnBandTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        // Deep amber -> pale cream, the two ends of a gas giant's belt/zone range.
+        const deep = [0.44, 0.25, 0.05], pale = [1.00, 0.86, 0.60];
+        for (let y = 0; y < h; y++) {
+            const lat = (y / h) * 2 - 1; // -1 pole .. +1 pole
+            let t = 0.5 + 0.34 * Math.sin(lat * 11.5) + 0.16 * Math.sin(lat * 23.0 + 1.7);
+            t = Math.max(0, Math.min(1, t));
+            // Limb/polar darkening - the poles of a banded planet are always dimmer than its
+            // equator, and without it the bands alone still read as a flat cylinder.
+            const polar = 1 - 0.5 * Math.pow(Math.abs(lat), 2.6);
+            const c = deep.map((d, i) => Math.round((d + (pale[i] - d) * t) * polar * 255));
+            ctx.fillStyle = 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+            ctx.fillRect(0, y, w, 1);
+        }
+        // Two storm ovals riding in the bands. Purely so the planet is not perfectly
+        // rotationally uniform - the detail that stops a banded sphere reading as a lathe turning.
+        for (const [cx, cy, rx, ry, a] of [[0.30, 0.62, 0.075, 0.035, 0.30], [0.72, 0.41, 0.045, 0.022, 0.22]]) {
+            const g = ctx.createRadialGradient(cx * w, cy * h, 0, cx * w, cy * h, rx * w);
+            g.addColorStop(0, 'rgba(255,236,200,' + a + ')');
+            g.addColorStop(1, 'rgba(255,236,200,0)');
+            ctx.save();
+            ctx.translate(cx * w, cy * h);
+            ctx.scale(1, (ry * h) / (rx * w));
+            ctx.translate(-cx * w, -cy * h);
+            ctx.fillStyle = g;
+            ctx.fillRect((cx - rx) * w, (cy - rx) * w, rx * 2 * w, rx * 2 * w);
+            ctx.restore();
+        }
+        texture.update();
+        return texture;
+    }
+
+    // Saturn's ring plane. Two things this fixes.
+    //
+    // First: the rings were one flat gold colour with no internal structure. Real ring systems are
+    // concentric ringlets separated by divisions, and that structure is most of what makes a ring
+    // read as a ring rather than a hoop.
+    //
+    // Second, and less obvious: updateSaturnRotation() has always spun both rings about their own
+    // axes, and that rotation has never been visible, because a uniform torus is rotationally
+    // symmetric - spinning it produces an identical image every frame. The faint azimuthal
+    // variation below is what finally gives that existing animation something to show. (Same class
+    // of problem, and the same fix, as the featureless ball whose real physics rotation was
+    // invisible - see createBallTexture().)
+    //
+    // Babylon's torus UVs run u around the ring and v around the tube, so `rad` below - folded so
+    // that v and 1-v map to the same value - is a genuine radial coordinate across the ribbon,
+    // identical on the ring's top and bottom faces.
+    function createSaturnRingTexture(scene) {
+        const w = 192, h = 64;
+        const texture = new BABYLON.DynamicTexture('saturnRingTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        for (let y = 0; y < h; y++) {
+            const v = y / h;
+            const rad = Math.abs(v - 0.5) * 2; // 1 = outer edge of the ribbon, 0 = inner edge
+            // Concentric ringlets, plus one wide dark division at rad ~0.55 (a Cassini stand-in)
+            // and a soft fade at the very outer edge so the ring does not end on a hard line.
+            let b = 0.62 + 0.26 * Math.sin(rad * 26.0) + 0.12 * Math.sin(rad * 61.0 + 0.9);
+            b *= 1 - 0.72 * Math.exp(-Math.pow((rad - 0.55) / 0.055, 2));
+            b *= 1 - 0.55 * Math.pow(Math.max(0, (rad - 0.86) / 0.14), 2);
+            for (let x = 0; x < w; x++) {
+                const u = x / w;
+                // Faint density variation around the ring - the "spokes" that make the spin read.
+                const spoke = 1 + 0.11 * Math.sin(u * Math.PI * 2 * 3) + 0.07 * Math.sin(u * Math.PI * 2 * 7 + 2.1);
+                const k = Math.max(0, Math.min(1, b * spoke));
+                const c = [Math.round((0.30 + 0.70 * k) * 255), Math.round((0.20 + 0.62 * k) * 255), Math.round((0.06 + 0.34 * k) * 255)];
+                ctx.fillStyle = 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+                ctx.fillRect(x, y, 1, 1);
+            }
+        }
+        texture.update();
+        return texture;
+    }
+
     // Playfield insert lens face. A real backlit insert is a small moulded lens sitting in a
     // routed hole: unlit it is dark plastic, lit it is a bright translucent lozenge with a printed
     // legend and a hard edge where the plastic ends. The old inserts were flat single-colour discs
@@ -4243,10 +4332,23 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // now finally belong to an object actually named and shaped like Saturn.
         // ===================================
         const saturnMat = new BABYLON.PBRMaterial('saturnMat', scene);
-        saturnMat.albedoColor = COLOR_SATURN;
-        saturnMat.metallic = 0.5;
-        saturnMat.roughness = 0.3;
-        saturnMat.emissiveColor = COLOR_SATURN.scale(0.35);
+        // White, not COLOR_SATURN: createSaturnBandTexture() bakes the gold into the albedo
+        // texture, and albedoTexture is multiplied by albedoColor - keeping the tint here as well
+        // would square it and flatten every band back into one dark amber. Same reasoning, and the
+        // same resulting look, as the mission-target plates.
+        saturnMat.albedoColor = new BABYLON.Color3(1, 1, 1);
+        saturnMat.albedoTexture = createSaturnBandTexture(scene);
+        // Metallic 0.5 -> 0.06: a gas giant is not a metal ball, and at 0.5 the body picked up a
+        // broad specular sheen that washed the new banding straight back out. Roughness up to
+        // match - a diffuse atmosphere, lit rather than polished.
+        saturnMat.metallic = 0.06;
+        saturnMat.roughness = 0.62;
+        // Emissive 0.35 -> 0.18. The bands and the rim shell below now carry Saturn's presence, so
+        // the flat self-glow that used to do all that work can come down - which also protects the
+        // rule that the BALL stays the brightest, easiest-to-track thing on the board (ballMat's
+        // own emissive is 0.7 of cyan; see its comment). Measured, not guessed: at 0.35 Saturn's
+        // peak emissive channel was half the ball's while covering ~20x the screen area.
+        saturnMat.emissiveColor = COLOR_SATURN.scale(0.18);
         const saturnMesh = BABYLON.MeshBuilder.CreateSphere('saturn', { diameter: SATURN_RADIUS_M * 2 }, scene);
         saturnMesh.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
         saturnMesh.material = saturnMat;
@@ -4255,19 +4357,105 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // just a decorative backdrop piece.
         new BABYLON.PhysicsAggregate(saturnMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.85, friction: 0.3 }, scene);
 
+        // Atmospheric limb - a warm halo hugging Saturn's silhouette, so the planet ends in air
+        // rather than at a hard edge.
+        //
+        // This is a camera-facing plane with an explicit radial-alpha texture, NOT the more obvious
+        // Fresnel-opacity shell. That was the first attempt and it was measured, in isolation, to
+        // fail: Babylon's opacity Fresnel does fade toward the centre, but even at power 3.4 the
+        // bright region covered the outer ~60% of the disc rather than a limb, and the result was a
+        // uniform warm veil that erased the new banding underneath completely. A gradient drawn
+        // here is exact, costs two triangles, and cannot drift.
+        //
+        // The halo's inner edge starts at the planet's own silhouette and glows OUTWARD, which also
+        // sidesteps a depth problem: a glow band lying inside the silhouette sits at the same depth
+        // as the limb it is drawn over.
+        const saturnRimSize = SATURN_RADIUS_M * 2 * 1.34;
+        const saturnRimTex = (() => {
+            const size = 128, c = size / 2;
+            const tex = new BABYLON.DynamicTexture('saturnRimTex', { width: size, height: size }, scene, true);
+            const ctx = tex.getContext();
+            const img = ctx.createImageData(size, size);
+            // Planet silhouette lands at this fraction of the plane's half-size.
+            const body = 1 / 1.34;
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const dx = (x + 0.5 - c) / c, dy = (y + 0.5 - c) / c;
+                    const r = Math.sqrt(dx * dx + dy * dy);
+                    let a = 0;
+                    if (r >= body && r <= 1) {
+                        const t = (r - body) / (1 - body); // 0 at the limb, 1 at the plane's edge
+                        a = Math.pow(1 - t, 2.1) * (1 - Math.pow(1 - Math.min(1, t / 0.10), 2)); // rises fast off the limb, then falls away
+                    }
+                    const o = (y * size + x) * 4;
+                    img.data[o] = 255; img.data[o + 1] = 205; img.data[o + 2] = 128;
+                    img.data[o + 3] = Math.round(Math.max(0, Math.min(1, a)) * 255);
+                }
+            }
+            ctx.putImageData(img, 0, 0);
+            tex.update();
+            tex.hasAlpha = true;
+            return tex;
+        })();
+        const saturnRimMat = new BABYLON.StandardMaterial('saturnRimMat', scene);
+        saturnRimMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        saturnRimMat.specularColor = new BABYLON.Color3(0, 0, 0);
+        saturnRimMat.emissiveColor = new BABYLON.Color3(0.8, 0.8, 0.8); // the texture carries the colour and the falloff; this only trims the peak so the limb does not clip to white
+        saturnRimMat.emissiveTexture = saturnRimTex;
+        saturnRimMat.opacityTexture = saturnRimTex;
+        saturnRimMat.disableLighting = true;
+        saturnRimMat.disableDepthWrite = true; // never let a transparent halo occlude the rings crossing behind it
+        saturnRimMat.backFaceCulling = false;
+        const saturnRim = BABYLON.MeshBuilder.CreatePlane('saturnRim', { size: saturnRimSize }, scene);
+        saturnRim.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
+        saturnRim.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL; // the camera shakes and punches; a fixed plane would shear
+        saturnRim.material = saturnRimMat;
+        saturnRim.isPickable = false;
+        // Excluded from the scene GlowLayer in main(). This halo IS the glow, already shaped
+        // exactly as intended; letting GlowLayer blur it again just re-creates the oversized soft
+        // haze the recent insert pass spent its time removing. Same treatment, for the same
+        // reason, the skybox and backglass already get.
+
+        // Ring plane. Structure comes from createSaturnRingTexture() (ringlets, a dark division,
+        // faint spokes); this material's job is to stop the rings looking like painted plastic.
+        // Metallic drops to 0.10 and the emissive falls from 0.35 to a textured 0.26, so the ring
+        // is a lit band of ice and rock rather than a glowing hoop, and alpha 0.82 lets the
+        // planet and the starfield show faintly through it the way a real ring plane does.
         const saturnRingMat = new BABYLON.PBRMaterial('saturnRingMat', scene);
-        saturnRingMat.albedoColor = COLOR_SATURN_RING;
-        saturnRingMat.metallic = 0.6;
-        saturnRingMat.roughness = 0.25;
-        saturnRingMat.emissiveColor = COLOR_SATURN_RING.scale(0.35);
+        const saturnRingTex = createSaturnRingTexture(scene);
+        saturnRingMat.albedoColor = new BABYLON.Color3(1, 1, 1); // texture carries the colour - see saturnMat's own comment
+        saturnRingMat.albedoTexture = saturnRingTex;
+        saturnRingMat.metallic = 0.10;
+        saturnRingMat.roughness = 0.55;
+        // Emissive is TEXTURED, unlike the body's: the divisions have to stay dark, and a flat
+        // emissive would light them back up and erase the structure the texture just added.
+        saturnRingMat.emissiveTexture = saturnRingTex;
+        saturnRingMat.emissiveColor = COLOR_SATURN_RING.scale(0.22);
+        saturnRingMat.alpha = 0.82;
+
+        // scaling.y flattens the torus tube into a ribbon before any rotation is applied (Babylon
+        // composes scale, then rotation, then translation), turning a doughnut into a ring plane.
+        // This is most of why the old rings read as two hoops around a ball.
+        //
+        // The tilt also changes, and it fixes a real defect: at the old Math.PI/2.3 (78 degrees)
+        // the ring plane stood almost vertical, so ring1 spanned y -0.038 to 0.128 - measured, not
+        // estimated - i.e. it passed 38mm THROUGH the playfield. The gameplay camera looks down at
+        // Saturn from only 16 degrees (also measured), so the ring needs real tilt of its own to
+        // open into a readable ellipse from that view. 0.545 rad (31 degrees) is as far as it can
+        // go before the ring's lowest point reaches the playfield again - swept in-browser, not
+        // derived: 0.52 puts ring1's world minimum at y 0.0027 and 0.58 puts it at -0.0015, so
+        // this sits just inside the limit while opening the ellipse as wide as the table allows.
+        const RING_TILT_RAD = 0.545;
         const saturnRing1 = BABYLON.MeshBuilder.CreateTorus('saturnRing1', {
             diameter: SATURN_RADIUS_M * 3.5,
             thickness: SATURN_RADIUS_M * 0.22,
             tessellation: 32
         }, scene);
         saturnRing1.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
-        saturnRing1.rotation.x = Math.PI / 2.3; // tilted, not flat, so it reads as a ring from the fixed camera angle
+        saturnRing1.scaling.y = 0.16;
+        saturnRing1.rotation.x = RING_TILT_RAD;
         saturnRing1.material = saturnRingMat;
+        saturnRing1.isPickable = false;
         // No physics body - purely decorative, would otherwise double the ball's Saturn hit
         // detection (same reasoning as every other obstacle's decorative ring in this file).
 
@@ -4277,8 +4465,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             tessellation: 32
         }, scene);
         saturnRing2.position.set(SATURN_POS.x, SATURN_RADIUS_M, SATURN_POS.z);
-        saturnRing2.rotation.x = Math.PI / 2.5;
+        saturnRing2.scaling.y = 0.22;
+        // Coplanar with ring1, not offset: an offset made the two read as two crossing hoops, the
+        // exact silhouette this pass is trying to get away from. updateSaturnRotation() already
+        // turns them at different speeds and in opposite directions, and now that the ring texture
+        // carries spokes that counter-rotation is visible - which is what sells a ring SYSTEM.
+        saturnRing2.rotation.x = RING_TILT_RAD;
         saturnRing2.material = saturnRingMat;
+        saturnRing2.isPickable = false;
         // Rotated opposite to ring1 each frame (see updateSaturnRotation()) - two rings turning
         // against each other reads as a much more alive, "spinning" system than one ring alone.
         const saturnRings = [saturnRing1, saturnRing2];
@@ -4289,10 +4483,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // as a highlight, not a lighting artifact" treatment the bumper cluster's caps already
         // established. Purely decorative, embedded slightly into the body to hide the seam.
         const saturnCapMat = new BABYLON.PBRMaterial('saturnCapMat', scene);
-        saturnCapMat.albedoColor = new BABYLON.Color3(1, 0.95, 0.82);
-        saturnCapMat.metallic = 0.15;
-        saturnCapMat.roughness = 0.2;
-        saturnCapMat.emissiveColor = COLOR_SATURN.scale(0.85);
+        // Roughness up from 0.2 and metallic down from 0.15: against the old flat-gold body a
+        // glossy cap read as a highlight, but against the banded atmosphere it caught the point
+        // lights as a blown white smear at the pole. Matte cream sits in the bands instead of on
+        // top of them. Geometry, position and the skin slot below are unchanged.
+        saturnCapMat.albedoColor = new BABYLON.Color3(0.95, 0.88, 0.72);
+        saturnCapMat.metallic = 0.08;
+        saturnCapMat.roughness = 0.48;
+        // 0.85 -> 0.45. At 0.85 this small cap's peak emissive channel was BRIGHTER than the ball's
+        // own (0.7), which put a fixed board decoration above the one object the player has to
+        // track continuously. 0.45 keeps it clearly the highlight of Saturn's pole without
+        // competing. Purely the resting brightness - nothing about the skin slot below changes.
+        saturnCapMat.emissiveColor = COLOR_SATURN.scale(0.45);
         // Obstacle decal skin slot (visual-architecture pass, user-requested). No-op until
         // assets/skins/obstacles/obstacle-decal-saturn.png actually exists (see SKINS.md); this
         // highlight cap's neutral-warm material stays the fallback either way.
@@ -4318,43 +4520,125 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // sharing Saturn's gold/orange colors, and nudged to sit clear of Saturn's new footprint.
         // ===================================
         const cometMat = new BABYLON.PBRMaterial('cometMat', scene);
-        cometMat.albedoColor = COLOR_COMET;
-        cometMat.metallic = 0.4;
-        cometMat.roughness = 0.25;
-        cometMat.emissiveColor = COLOR_COMET.scale(0.4);
+        // Pale, desaturated ice rather than the neon cyan it shared with the ball. Two reasons:
+        // a comet nucleus is dirty ice and rock, not a glowing orb, and COLOR_COMET is close
+        // enough to COLOR_EYEBALL (the ball's own emissive) that a saturated cyan sphere on the
+        // board competes with the one object the player must never lose track of.
+        cometMat.albedoColor = COLOR_COMET.scale(0.34).add(new BABYLON.Color3(0.12, 0.15, 0.18));
+        // metallic 0.4 -> 0.0 with a low roughness: ice is a dielectric that reflects sharply, not
+        // a metal. This is what makes the facets below catch light as crystal rather than chrome.
+        cometMat.metallic = 0.0;
+        cometMat.roughness = 0.14;
+        // 0.4 -> 0.20, the "restrained glow" half of this. The nucleus is lit, not a lamp; the
+        // tail below carries the comet's brightness, which is where a comet's light belongs.
+        cometMat.emissiveColor = COLOR_COMET.scale(0.20);
         // Obstacle decal skin slot (visual-architecture pass, user-requested) - applied to the
         // comet's own material, not its collider: this only ever swaps a texture property on an
         // existing PBRMaterial, the mesh/shape/physics/metadata below are entirely unaffected.
         // No-op until assets/skins/obstacles/obstacle-decal-comet.png actually exists (see
         // SKINS.md); the icy-cyan procedural material stays the fallback either way.
         applySkinTexture(scene, cometMat, SKIN_MANIFEST.obstacleDecalComet);
-        const cometMesh = BABYLON.MeshBuilder.CreateSphere('comet', { diameter: COMET_RADIUS_M * 2 }, scene);
+        // Faceted, not smooth. A low-subdivision flat-shaded icosphere is the single strongest
+        // "this is a mineral, not a planet" cue available, and it is what separates the comet from
+        // Saturn at a glance now that Saturn is banded and ringed. It is also dramatically CHEAPER
+        // than what it replaces: 80 triangles, measured in-scene, against the default 32-segment
+        // sphere's 4624.
+        //
+        // The collider is pinned explicitly to COMET_RADIUS_M rather than left to be inferred from
+        // the mesh, because an icosphere's bounding box is not the sphere's - without this the
+        // derived radius would shift with the mesh. Verified in-browser to produce the identical
+        // shape radius the smooth sphere produced.
+        const cometMesh = BABYLON.MeshBuilder.CreateIcoSphere('comet', {
+            radius: COMET_RADIUS_M,
+            subdivisions: 2,
+            flat: true
+        }, scene);
         cometMesh.position.set(COMET_POS.x, COMET_RADIUS_M, COMET_POS.z);
         cometMesh.material = cometMat;
         cometMesh.metadata = { kind: 'comet' };
-        new BABYLON.PhysicsAggregate(cometMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.8, friction: 0.3 }, scene);
+        new BABYLON.PhysicsAggregate(cometMesh, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, restitution: 0.8, friction: 0.3, radius: COMET_RADIUS_M }, scene);
 
-        // A single thin "tail" ring standing in for a comet's streak - simpler than the two-ring
-        // Saturn/old-satellite treatment (a comet isn't a ringed planet), still reads as a
-        // distinct halo of motion around the core.
-        const cometRingMat = new BABYLON.PBRMaterial('cometRingMat', scene);
-        cometRingMat.albedoColor = COLOR_COMET;
-        cometRingMat.metallic = 0.2;
-        cometRingMat.roughness = 0.2;
-        cometRingMat.emissiveColor = COLOR_COMET.scale(0.6);
-        cometRingMat.alpha = 0.7;
-        const cometRing = BABYLON.MeshBuilder.CreateTorus('cometRing', {
-            diameter: COMET_RADIUS_M * 3,
-            thickness: COMET_RADIUS_M * 0.18,
-            tessellation: 24
-        }, scene);
-        cometRing.position.set(COMET_POS.x, COMET_RADIUS_M, COMET_POS.z);
-        cometRing.rotation.x = Math.PI / 2.4;
-        cometRing.material = cometRingMat;
+        // The comet's tail, replacing the single tilted ring that used to stand in for it.
+        //
+        // That ring was the main reason the comet read as a small Saturn: a sphere with a tilted
+        // hoop around it is the universal shorthand for a ringed planet, and this board now has an
+        // actual ringed planet 17cm away to be confused with. A comet's identifying feature is a
+        // tail, so it gets one.
+        //
+        // Two nested cones, bright narrow core inside a wide faint envelope - the way a real tail
+        // reads, and the reason a single cone always looks like a traffic pylon. No particles, no
+        // per-frame work, no collider: four meshes' worth of triangles in total.
+        //
+        // Direction: up-table and rising, so the comet reads as having come DOWN the table toward
+        // the player. That also keeps the tail clear of the two places it must not be - the right
+        // orbit lane outboard of it, and the ball's own plane, which it leaves within its first
+        // centimetre (its far end sits at y 0.045, well above the ball's 0.027 crown).
+        const cometTailMeshes = [];
+        const cometTailMat = new BABYLON.StandardMaterial('cometTailMat', scene);
+        cometTailMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        cometTailMat.specularColor = new BABYLON.Color3(0, 0, 0);
+        // 0.62/0.42 was the first attempt and it was measured (screenshot) to blow out into a
+        // white beam - the scene GlowLayer blooms an emissive cone along its whole length, and a
+        // long thin bright shape is the worst case for that. Both cones are excluded from the
+        // GlowLayer in main() and run at roughly half this brightness instead, which is what keeps
+        // this a "restrained glow" and not a searchlight.
+        cometTailMat.emissiveColor = COLOR_COMET.scale(0.38);
+        cometTailMat.disableLighting = true;
+        cometTailMat.alpha = 0.32;
+        cometTailMat.disableDepthWrite = true; // a transparent tail must never punch a hole in what is behind it
+        cometTailMat.backFaceCulling = false;
+
+        const cometTailCoreMat = cometTailMat.clone('cometTailCoreMat');
+        cometTailCoreMat.emissiveColor = COLOR_COMET.scale(0.14).add(new BABYLON.Color3(0.26, 0.31, 0.34)); // pale ice at the core, a step brighter than the envelope around it
+        cometTailCoreMat.alpha = 0.40;
+
+        {
+            // Built along +Y (a cone's own axis) and then turned onto the tail direction with a
+            // single axis-angle rotation. Deliberately not Euler angles: this file's rotation
+            // convention is YXZ and composing a two-axis aim by hand there is exactly the kind of
+            // sign/order ambiguity that has bitten other rotations in this file.
+            // Mostly upward with an up-table, slightly outboard lean. An earlier, flatter aim was
+            // measured to foreshorten into a vertical line from the gameplay camera (which looks
+            // up-table from only 22 degrees of depression) and to hang over the right orbit lane
+            // at ball height. This one leaves the ball's plane immediately and its far end sits at
+            // (0.198, 0.066, 0.331) - clear of the lane, the rail and the right wall alike.
+            const dir = new BABYLON.Vector3(0.42, 0.66, 0.62).normalize();
+            const up = BABYLON.Vector3.Up();
+            const axis = BABYLON.Vector3.Cross(up, dir);
+            const angle = Math.acos(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(up, dir))));
+            const aim = axis.lengthSquared() < 1e-8
+                ? BABYLON.Quaternion.Identity()
+                : BABYLON.Quaternion.RotationAxis(axis.normalize(), angle);
+
+            [
+                { name: 'cometTail', length: COMET_RADIUS_M * 3.0, base: COMET_RADIUS_M * 1.45, mat: cometTailMat },
+                { name: 'cometTailCore', length: COMET_RADIUS_M * 2.1, base: COMET_RADIUS_M * 0.66, mat: cometTailCoreMat }
+            ].forEach(({ name, length, base, mat }) => {
+                // diameterTop 0 at the far end, widest at the nucleus - a tail spreads AWAY from
+                // the body, so the cone points the other way from the obvious orientation: its
+                // apex is at the comet and its open end trails off. Built apex-down by giving the
+                // wide end to diameterBottom and then offsetting along the aim direction.
+                const cone = BABYLON.MeshBuilder.CreateCylinder(name, {
+                    diameterTop: base,
+                    diameterBottom: 0,
+                    height: length,
+                    tessellation: 12
+                }, scene);
+                cone.rotationQuaternion = aim.clone();
+                cone.position.set(
+                    COMET_POS.x + dir.x * length * 0.5,
+                    COMET_RADIUS_M + dir.y * length * 0.5,
+                    COMET_POS.z + dir.z * length * 0.5
+                );
+                cone.material = mat;
+                cone.isPickable = false;
+                cometTailMeshes.push(cone);
+            });
+        }
 
         // Landing-pad floor glow - see saturnFloorGlow's own comment for the reasoning. Sized
         // and dimmed a step down from Saturn's own pad, matching this object's existing "simpler
-        // than Saturn" design language (see cometRing's own comment).
+        // than Saturn" design language (see the tail's own comment).
         const cometFloorMat = makeLaneFloorMat('cometFloorMat', COLOR_COMET, 0.18);
         addFeatureFloorGlow(scene, 'cometFloorGlow', cometFloorMat, COMET_RADIUS_M * 2.6, COMET_POS.x, COMET_POS.z);
 
@@ -5257,7 +5541,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return {
             missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
             sideLaneLampMeshes, orbitLampMeshes, debugTriggerMeshes,
-            kickbackLampMesh, ballSaveLampMesh, saturnRings, powerUpMesh, visionGateMesh: ring
+            kickbackLampMesh, ballSaveLampMesh, saturnRings, saturnRim, cometTailMeshes, powerUpMesh, visionGateMesh: ring
         };
     }
 
@@ -5613,6 +5897,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // colors/contrast do that job now, see buildBackglass()), it just no longer gets the
         // additional per-mesh glow treatment.
         glowLayer.addExcludedMesh(backglass.mesh);
+        // Saturn's atmospheric limb shell - see its own comment in buildObstacles() for why. Its
+        // whole look depends on an opacity Fresnel that GlowLayer does not honour; bloomed, it
+        // becomes a flat warm disc over the planet instead of a rim around it.
+        glowLayer.addExcludedMesh(obstacles.saturnRim);
+        // The comet's tail cones, for the same reason: GlowLayer blooms an emissive shape across
+        // its whole extent, and a long thin cone bloomed along its length stops being a tail and
+        // becomes a beam. Their own alpha already gives them the soft edge they need.
+        obstacles.cometTailMeshes.forEach((m) => glowLayer.addExcludedMesh(m));
 
         // Hoisted to a `let` (not a const declared only inside the if-block) so the dev HUD's
         // "post-processing" checkbox (below, once devMode is confirmed) can toggle
