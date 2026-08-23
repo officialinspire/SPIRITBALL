@@ -2892,6 +2892,71 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return texture;
     }
 
+    // Slingshot lit plastic. The wide lozenge of illuminated plastic mounted on top of a real
+    // slingshot's housing - the part that actually flashes when the kicker fires, and the single
+    // clearest "this is a mechanism" cue the fixture has.
+    //
+    // Rectangular rather than the round lens createInsertLensTexture() draws: this maps onto a box
+    // face that is two and a half times wider than it is deep, so a circular design would render
+    // as a stretched ellipse. Drawn in the plastic's own aspect instead.
+    //
+    // This one IS an albedoTexture, unlike the round lane inserts, because that is what the
+    // obstacleDecalSlingshot slot in js/skins.js declares (kind:'albedo') - so a real artwork file
+    // replaces this wholesale on the same property. The caller sets albedoColor to white for the
+    // usual reason: albedoTexture is multiplied by it, and leaving the magenta tint on as well
+    // would square it.
+    function createSlingshotPlasticTexture(scene) {
+        const w = 160, h = 64;
+        const texture = new BABYLON.DynamicTexture('slingshotPlasticTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        const round = (x, y, rw, rh, r) => {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + rw, y, x + rw, y + rh, r);
+            ctx.arcTo(x + rw, y + rh, x, y + rh, r);
+            ctx.arcTo(x, y + rh, x, y, r);
+            ctx.arcTo(x, y, x + rw, y, r);
+            ctx.closePath();
+        };
+        // Dark moulded surround, so the lit lozenge inside it has an edge to read against.
+        ctx.fillStyle = '#140416';
+        ctx.fillRect(0, 0, w, h);
+        // Lit field - magenta, the slingshots' existing identity colour on this board.
+        const field = ctx.createLinearGradient(0, 0, 0, h);
+        field.addColorStop(0.00, '#ff9bff');
+        field.addColorStop(0.45, '#f13cf1');
+        field.addColorStop(1.00, '#8a1090');
+        ctx.fillStyle = field;
+        round(7, 7, w - 14, h - 14, 12);
+        ctx.fill();
+        // Bright printed border plus a dark hairline inside it - the same two-line treatment the
+        // mission-target faces use, for the same reason: the hairline is what stops the bright
+        // border bleeding into the lit field at a distance.
+        ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+        ctx.lineWidth = 5;
+        round(11, 11, w - 22, h - 22, 10);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        ctx.lineWidth = 2;
+        round(16, 16, w - 32, h - 32, 7);
+        ctx.stroke();
+        // Three chevrons pointing along the plastic - a kicker throws the ball sideways, and this
+        // is the legend real slingshot plastics use to say so.
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 3; i++) {
+            const cx = w * 0.5 + (i - 1) * 26;
+            ctx.beginPath();
+            ctx.moveTo(cx - 8, h * 0.32);
+            ctx.lineTo(cx + 8, h * 0.5);
+            ctx.lineTo(cx - 8, h * 0.68);
+            ctx.stroke();
+        }
+        texture.update();
+        return texture;
+    }
+
     // Playfield insert lens face. A real backlit insert is a small moulded lens sitting in a
     // routed hole: unlit it is dark plastic, lit it is a bright translucent lozenge with a printed
     // legend and a hard edge where the plastic ends. The old inserts were flat single-colour discs
@@ -4665,85 +4730,199 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // hit should actually count, independent of this mesh's enabled state.
         powerUpMesh.setEnabled(false);
 
+        // ===================================
+        // Slingshots
+        // ===================================
+        // A real slingshot is a recognisable machine: a moulded housing, a lit plastic on top of
+        // it, two posts, and a rubber band stretched between them that the ball actually strikes.
+        // What was here was a glowing magenta slab with a dark wedge somewhere behind it - the
+        // brightest thing in the lower table and the least mechanical-looking.
+        //
+        // Everything below is decoration. The collider box keeps its exact dimensions, position,
+        // rotation, restitution and friction, and every kick force, cooldown and score is
+        // untouched; the parts are laid out around it, never through it.
+        //
+        // They are positioned in a rig's LOCAL space rather than in world coordinates with a
+        // mirror-signed offset, which is how the old decorations were placed - and that convention
+        // put the left slingshot's housing on the ball-facing side of its own kicker while the
+        // right one's sat correctly behind it. In local space "behind" is +Z on both sides, so the
+        // two are genuine mirror images for the first time.
+        //
+        // Local frame, derived from the collider's own 20-degree angle: +X runs along the kicker
+        // toward the middle of the table, -Z is the face the ball strikes (verified from the
+        // rotation, not assumed - at +20 degrees the box's local -Z maps to world (-0.34, 0, -0.94),
+        // i.e. down-table, which is where a ball coming off the flipper arrives from).
         const slingshotMat = new BABYLON.PBRMaterial('slingshotMat', scene);
-        slingshotMat.albedoColor = new BABYLON.Color3(1, 0, 1); // no direct CONFIG.colors entry for slingshots - kept the existing magenta identity
-        slingshotMat.metallic = 0.3;
-        slingshotMat.roughness = 0.3;
-        slingshotMat.emissiveColor = new BABYLON.Color3(0.5, 0, 0.5);
+        // Was a full-intensity magenta (1,0,1) with a 0.5 emissive - a neon slab. This is the
+        // kicker BODY now, the moulded mass the rubber is mounted on, so it reads as dark plastic
+        // with the fixture's magenta in it rather than as a light source. The lit plastic and the
+        // rubber below are what the eye is meant to land on.
+        // Darker than a first pass at this had it: rendered head-on, a mid-magenta body still read
+        // as one bright slab with a band drawn on it. Taking the body down to near-black is what
+        // lets the posts and the rubber between them come forward as the mechanism, which is the
+        // whole point of the fixture.
+        slingshotMat.albedoColor = new BABYLON.Color3(0.105, 0.025, 0.10);
+        slingshotMat.metallic = 0.12;
+        slingshotMat.roughness = 0.6;
+        slingshotMat.emissiveColor = new BABYLON.Color3(0.05, 0.0, 0.05);
+
+        // The rubber ring itself. Matte, near-black, barely emissive - rubber does not glow, and
+        // making it the darkest part of the fixture is what makes the lit plastic above it read as
+        // lit. Shared by both slingshots; nothing ever recolours it per-instance.
+        const slingshotRubberMat = new BABYLON.PBRMaterial('slingshotRubberMat', scene);
+        // Sits a step LIGHTER than the body behind it, not darker. Rubber genuinely is the darkest
+        // material on a real machine, but against a near-black kicker body a near-black band is
+        // invisible; a touch of lift plus a matte 0.8 roughness is what makes it read as a
+        // separate rubber part rather than a shadow on the body.
+        slingshotRubberMat.albedoColor = new BABYLON.Color3(0.21, 0.075, 0.19);
+        slingshotRubberMat.metallic = 0.0;
+        slingshotRubberMat.roughness = 0.8;
+        slingshotRubberMat.emissiveColor = new BABYLON.Color3(0.08, 0.01, 0.08);
+
+        const slingshotPlasticTex = createSlingshotPlasticTexture(scene);
 
         SLINGSHOTS.forEach((def, i) => {
+            const angle = def.mirror * BABYLON.Tools.ToRadians(20);
             const mesh = BABYLON.MeshBuilder.CreateBox('slingshot' + i, {
                 width: SLINGSHOT_SIZE_M,
                 height: 0.03,
                 depth: SLINGSHOT_SIZE_M * 0.5
             }, scene);
             mesh.position.set(def.x, 0.015, def.z);
-            mesh.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20); // angled inward, like a real slingshot kicker
-            mesh.material = slingshotMat;
+            mesh.rotation.y = angle; // angled inward, like a real slingshot kicker
+            // A per-instance clone of slingshotMat, not the shared instance itself. The hit
+            // handler calls pulseMesh(mesh), which flashes mesh.material.emissiveColor to white -
+            // and while both slingshots shared one material that flashed BOTH of them on every
+            // single hit. It was easy to miss while the body sat at a bright magenta; against the
+            // dark moulded body it now has, one slingshot lighting up because the other was struck
+            // is obvious. Matches the per-instance-clone convention the housing and the plastic
+            // already use, and for the same reason.
+            mesh.material = slingshotMat.clone('slingshotBodyMat' + i);
             new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: SLINGSHOT_RESTITUTION, friction: 0.3 }, scene);
 
-            // Kicker housing: a triangular-prism wedge (a cylinder with 3-sided tessellation is a
-            // cheap way to get a real prism from MeshBuilder) behind the rubber face above,
-            // matching a real slingshot's wedge shape - the collider itself stays the box it
-            // always was (a wedge-shaped collider would change how the ball bounces off it, which
-            // this doc explicitly says not to do).
-            const housing = BABYLON.MeshBuilder.CreateCylinder('slingshot' + i + 'Housing', {
-                diameterTop: SLINGSHOT_SIZE_M * 1.1,
-                diameterBottom: SLINGSHOT_SIZE_M * 1.1,
-                height: 0.026,
-                tessellation: 3
+            // Decoration rig - shares the collider's position and angle, so every part below can be
+            // written in the fixture's own local space. Nothing is parented to the COLLIDER itself
+            // except the rubber (see below), and the aggregate is already built by this point, so
+            // none of this can reach the physics shape.
+            const rig = new BABYLON.TransformNode('slingshot' + i + 'Rig', scene);
+            rig.position.set(def.x, 0, def.z);
+            rig.rotation.y = angle;
+
+            // Structural housing: the moulded back wall the kicker is mounted against, standing
+            // clear behind the collider's own +Z face (local z 0.014..0.024 vs. the box's 0.0125).
+            // Replaces the old triangular prism, which was a nice idea undone by needing two
+            // stacked rotations to orient - it ended up nearly invisible and on the wrong side.
+            //
+            // Still a per-instance clone rather than the shared housingMat, because snapSlingshot()
+            // in main() brightens this material directly on a hit and must only affect this one
+            // slingshot. Restyled from housingMat's dark chrome (metallic 0.8) to moulded plastic:
+            // a chrome back wall reads as a rail, not as a housing.
+            const housing = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Housing', {
+                width: SLINGSHOT_SIZE_M * 1.12,
+                height: 0.030,
+                depth: 0.010
             }, scene);
-            housing.position.set(def.x, 0.013, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.15);
-            housing.rotation.x = Math.PI / 2; // lay the prism flat, matching the table plane
-            housing.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20) + Math.PI / 2;
-            // A per-instance clone, not the shared housingMat every other decorative housing/
-            // skirt/rail uses - the new active-kick "rubber snap" flash (see snapSlingshot() in
-            // main()) brightens this material directly, and it must only affect this one
-            // slingshot's housing, not every object on the board that happens to share housingMat.
+            housing.parent = rig;
+            housing.position.set(0, 0.015, 0.019);
             housing.material = housingMat.clone('slingshotHousingMat' + i);
+            housing.material.albedoColor = new BABYLON.Color3(0.16, 0.14, 0.18);
+            housing.material.metallic = 0.25;
+            housing.material.roughness = 0.6;
 
             // Base mount plate (obstacle visual-polish pass, user-requested - "caps/bases...
-            // readable height differences"): grounds the wedge with a visible low foot instead of
+            // readable height differences"): grounds the fixture with a visible low foot instead of
             // it appearing to hover just above the playfield, the same base-under-fixture cue the
-            // bumpers' skirt already gives them. Shares housingMat (not the housing's own hit-
-            // flash clone above) - the base never flashes on a kick, only the housing does.
+            // bumpers' skirt already gives them. Shares housingMat (not the housing's own hit-flash
+            // clone above) - the base never flashes on a kick. Deliberately kept at its original
+            // size: this sits inside the left/right flipper's swept arc, and widening it is exactly
+            // the change that would put decoration through a moving flipper.
             const base = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Base', {
                 width: SLINGSHOT_SIZE_M * 1.3,
                 height: 0.006,
                 depth: SLINGSHOT_SIZE_M * 0.75
             }, scene);
-            base.position.set(def.x, 0.003, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.1);
-            base.rotation.y = def.mirror * BABYLON.Tools.ToRadians(20);
+            base.parent = rig;
+            base.position.set(0, 0.003, 0.004);
             base.material = housingMat;
 
-            // Ridge trim along the housing's own peak (obstacle visual-polish pass - "trim...
-            // subtle emissive inserts... contrasting materials"): a thin bright magenta line
-            // distinct from the dark housing beneath it, reading as a neon accent along the
-            // wedge's top edge rather than one flat-colored mass. A per-instance clone (each
-            // slingshot's own trim, matching the housing's own per-instance-clone convention just
-            // above) so a future skin pass can recolor one slingshot's trim independently.
+            // The two posts the rubber is strung between, sitting just outboard of the collider's
+            // own ends (local x +/-0.026 against the box's +/-0.025) so they frame the striking face
+            // without ever standing in front of it. railCapMat is the polished-trim material every
+            // guide-rail bevel on the board already shares, which is exactly what a real post is.
+            [-1, 1].forEach((end) => {
+                const post = BABYLON.MeshBuilder.CreateCylinder('slingshot' + i + 'Post' + (end < 0 ? 'A' : 'B'), {
+                    diameter: 0.008,
+                    height: 0.034,
+                    tessellation: 10
+                }, scene);
+                post.parent = rig;
+                post.position.set(end * 0.026, 0.017, -0.012);
+                post.material = railCapMat;
+            });
+
+            // Illuminated insert: the lit plastic across the top of the housing. This is the mesh
+            // the obstacleDecalSlingshot skin slot has always targeted (it was a thin trim bar
+            // before), so the slot keeps pointing at exactly the same material - it just now has a
+            // surface worth putting artwork on.
+            //
+            // A per-instance clone (each slingshot's own plastic, matching the housing's own
+            // per-instance-clone convention above) so a skin, or the hit flash, can drive one
+            // slingshot's plastic independently.
             const ridgeMat = slingshotMat.clone('slingshotRidgeMat' + i);
-            ridgeMat.emissiveColor = new BABYLON.Color3(1, 0.35, 1);
-            // Obstacle decal skin slot (visual-architecture pass, user-requested) - the "future
-            // skin pass" this material's own per-instance-clone comment above already flagged.
-            // Both slingshots share the same manifest path (two independent Texture loads of the
-            // same URL - the browser caches the actual fetch) since they're mirror images of one
-            // fixture, not two distinct ones. No-op until
+            // White, because createSlingshotPlasticTexture() bakes the magenta into the albedo
+            // texture - see that function's comment. Emissive drops from a flat (1, 0.35, 1) to
+            // roughly a third of it: at the old value the plastic clipped to white and none of the
+            // border, chevrons or gradient could be seen through it.
+            ridgeMat.albedoColor = new BABYLON.Color3(1, 1, 1);
+            ridgeMat.albedoTexture = slingshotPlasticTex;
+            ridgeMat.metallic = 0.05;
+            ridgeMat.roughness = 0.3;
+            ridgeMat.emissiveColor = new BABYLON.Color3(0.42, 0.10, 0.42);
+            // Obstacle decal skin slot (visual-architecture pass, user-requested). Both slingshots
+            // share the same manifest path (two independent Texture loads of the same URL - the
+            // browser caches the actual fetch) since they're mirror images of one fixture, not two
+            // distinct ones. Assigned AFTER the procedural texture above so real artwork cleanly
+            // replaces it rather than racing it. No-op until
             // assets/skins/obstacles/obstacle-decal-slingshot.png actually exists (see SKINS.md).
             applySkinTexture(scene, ridgeMat, SKIN_MANIFEST.obstacleDecalSlingshot);
             const ridge = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Ridge', {
-                width: SLINGSHOT_SIZE_M * 0.9,
-                height: 0.004,
-                depth: 0.008
+                width: SLINGSHOT_SIZE_M,
+                height: 0.005,
+                depth: 0.020
             }, scene);
-            ridge.position.set(def.x, 0.027, def.z - def.mirror * SLINGSHOT_SIZE_M * 0.15);
-            ridge.rotation.y = mesh.rotation.y;
+            ridge.parent = rig;
+            ridge.position.set(0, 0.0325, 0.012); // rests on the collider's own 0.030 crown, never inside it
             ridge.material = ridgeMat;
+
+            // Rubber/contact edge: the band strung between the two posts, standing 3mm proud of
+            // the collider's striking face so the ball meets rubber first.
+            //
+            // On the rig, NOT parented to the collider. Parenting it there was tried, because
+            // snapSlingshot() stretches the collider on every kick and a rubber band riding that
+            // for free is an appealing idea - but rendered mid-hit it stretches the band along its
+            // own length, past both posts, which reads as the rubber flying off its anchors. A
+            // real band bulges FORWARD, so snapSlingshot() pushes this one out along -Z instead.
+            const rubber = BABYLON.MeshBuilder.CreateBox('slingshot' + i + 'Rubber', {
+                width: SLINGSHOT_SIZE_M * 1.04,
+                height: 0.009,
+                depth: 0.0035
+            }, scene);
+            rubber.parent = rig;
+            rubber.position.set(0, 0.019, -0.0140);
+            rubber.material = slingshotRubberMat;
 
             // Referenced by snapSlingshot() (in main(), via the collider mesh's metadata below) so
             // the hit handler - which only ever receives the collider mesh from the collision
-            // event - can reach this decorative housing without a separate scene lookup.
-            mesh.metadata = { kind: 'slingshot', housing };
+            // event - can reach these decorative parts without a separate scene lookup. `plastic`
+            // and `rubber` are new: the lit insert is the part a real slingshot flashes, and the
+            // band is the part that visibly moves.
+            //
+            // restScale is captured here rather than read off the mesh at hit time. The hit branch
+            // calls pulseMesh(mesh) and then snapSlingshot(mesh), and snapSlingshot used to
+            // multiply whatever scale it found - which was pulseMesh's 1.3x, already applied - so
+            // the fixture actually ballooned to 1.95x rather than the 1.5x that code intends and
+            // documents. Anchoring to the true rest scale gives the stretch its intended size.
+            mesh.metadata = { kind: 'slingshot', housing, plastic: ridge, rubber, restScale: mesh.scaling.clone() };
         });
 
         // Unlit state: dim yellow-ish neutral (no direct 2D equivalent - the 2D lanes start
@@ -7673,20 +7852,61 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // pulseMesh()'s 100ms, matching the "fast" spec.
         function snapSlingshot(mesh) {
             const housing = mesh.metadata.housing;
+            const plastic = mesh.metadata.plastic;
 
-            const originalScale = mesh.scaling.clone();
-            mesh.scaling.x = originalScale.x * 1.5;
-            mesh.scaling.z = originalScale.z * 0.6;
+            const rubber = mesh.metadata.rubber;
 
-            const housingMat = housing.material;
-            const originalHousingEmissive = housingMat.emissiveColor ? housingMat.emissiveColor.clone() : null;
-            if (originalHousingEmissive) {
-                housingMat.emissiveColor = new BABYLON.Color3(1, 0.6, 1); // bright magenta-white, echoing the slingshot's own magenta identity rather than pulseMesh()'s plain white
+            // The body no longer stretches sideways, it only compresses slightly into its housing.
+            //
+            // The old 1.5x-wide, 0.6x-deep stretch was written when this box WAS the visible rubber
+            // - the only part of the fixture there was - and stretching it read as a band under
+            // load. Now that there is a real rubber band strung between real posts, widening the
+            // body just pushes it out past those posts, and the fixture visibly comes apart on
+            // every kick. The stretch moves to the rubber below, where it belongs, and the body
+            // gets the recoil.
+            //
+            // This also anchors to the fixture's real rest scale (captured in buildObstacles())
+            // rather than to whatever is applied right now: the hit branch calls pulseMesh(mesh)
+            // immediately before this, so the old `mesh.scaling.clone()` compounded with pulseMesh's
+            // own 1.3x into a measured 1.95x balloon rather than the 1.5x it documented. Setting
+            // from restScale supersedes that pulse for this one fixture, the same call
+            // pulseBumperLamp() already makes for the pop bumpers and for the same reason - a
+            // moulded mechanism that inflates on contact gives away that it is a box.
+            const restScale = mesh.metadata.restScale;
+            mesh.scaling.set(restScale.x, restScale.y, restScale.z * 0.88);
+
+            // The rubber snaps FORWARD off its posts and flattens, which is what a struck slingshot
+            // band actually does. -Z is the striking face in the rig's local frame (see
+            // buildObstacles()), so this is a straight push out toward the ball.
+            const rubberRestZ = rubber ? rubber.position.z : 0;
+            const rubberRestScale = rubber ? rubber.scaling.clone() : null;
+            if (rubber) {
+                rubber.position.z = rubberRestZ - 0.0032;
+                rubber.scaling.z = rubberRestScale.z * 0.65;
+                rubber.scaling.y = rubberRestScale.y * 1.25;
             }
 
+            // The flash lands on the lit plastic first and the housing second - on a real machine
+            // the plastic is the part that flashes, and it is the only part of this fixture bright
+            // enough at rest for a lift to read as "that just fired". Both materials are
+            // per-instance clones, so this can never bleed onto the other slingshot.
+            const flashed = [housing, plastic].filter((m) => m && m.material && m.material.emissiveColor)
+                .map((m) => ({ mesh: m, mat: m.material, original: m.material.emissiveColor.clone() }));
+            flashed.forEach(({ mat }, idx) => {
+                mat.emissiveColor = idx === 0
+                    ? new BABYLON.Color3(0.85, 0.5, 0.85)  // housing: a lift, not a blowout - it is structure
+                    : new BABYLON.Color3(1, 0.75, 1);      // plastic: bright magenta-white, the actual lamp
+            });
+
             setTimeout(() => {
-                if (!mesh.isDisposed()) mesh.scaling.copyFrom(originalScale);
-                if (originalHousingEmissive && !housing.isDisposed()) housingMat.emissiveColor.copyFrom(originalHousingEmissive);
+                if (!mesh.isDisposed()) mesh.scaling.copyFrom(restScale);
+                if (rubber && !rubber.isDisposed()) {
+                    rubber.position.z = rubberRestZ;
+                    rubber.scaling.copyFrom(rubberRestScale);
+                }
+                flashed.forEach(({ mesh: m, mat, original }) => {
+                    if (!m.isDisposed()) mat.emissiveColor.copyFrom(original);
+                });
             }, 90);
         }
 
