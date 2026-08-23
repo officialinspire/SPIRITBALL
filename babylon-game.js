@@ -2761,6 +2761,48 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return texture;
     }
 
+    // Moulded pop-bumper cap face. Turned concentric rings plus faint radial spokes: the shapes a
+    // real cap is moulded with, and - more usefully here - shapes that catch the light differently
+    // as the cap is viewed from different angles, so the cap reads as a solid moulded object
+    // instead of a flat pale disc. Overridden wholesale by SKIN_MANIFEST.bumperCap when that
+    // artwork exists (applySkinTexture() runs after this and reassigns albedoTexture), so this is
+    // strictly the fallback look, never something a skin has to fight.
+    function createBumperCapTexture(scene) {
+        const size = 128;
+        const texture = new BABYLON.DynamicTexture('bumperCapTex', { width: size, height: size }, scene, true);
+        const ctx = texture.getContext();
+        const c = size / 2;
+        ctx.fillStyle = '#f2f2f7';
+        ctx.fillRect(0, 0, size, size);
+        // radial spokes first, so the rings read as sitting on top of them
+        ctx.strokeStyle = 'rgba(150,152,168,0.30)';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 12; i++) {
+            const a = (i / 12) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(c + Math.cos(a) * c * 0.22, c + Math.sin(a) * c * 0.22);
+            ctx.lineTo(c + Math.cos(a) * c * 0.92, c + Math.sin(a) * c * 0.92);
+            ctx.stroke();
+        }
+        for (const [r, a, w] of [[0.90, 0.35, 3], [0.66, 0.22, 2], [0.44, 0.30, 2], [0.24, 0.40, 3]]) {
+            ctx.beginPath();
+            ctx.arc(c, c, c * r, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(120,124,145,' + a + ')';
+            ctx.lineWidth = w;
+            ctx.stroke();
+        }
+        // a soft highlight off-centre, so the cap has a consistent moulded sheen
+        const gloss = ctx.createRadialGradient(c * 0.72, c * 0.66, 0, c * 0.72, c * 0.66, c * 0.85);
+        gloss.addColorStop(0, 'rgba(255,255,255,0.85)');
+        gloss.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gloss;
+        ctx.beginPath();
+        ctx.arc(c, c, c * 0.95, 0, Math.PI * 2);
+        ctx.fill();
+        texture.update();
+        return texture;
+    }
+
     // Ball trail: emitter attached directly to the ball mesh (particles spawn at its current
     // position every frame automatically), additive-blended for a luminous (not opaque) look -
     // direct port of setupParticles()'s follow-the-ball ballTrail emitter, kept as the one and
@@ -3560,15 +3602,58 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // on why hit-flash is scale-only for extra meshes) - flashing this shared instance would
         // bleed into every other bumper's cap at once.
         const bumperCapMat = new BABYLON.PBRMaterial('bumperCapMat', scene);
-        bumperCapMat.albedoColor = new BABYLON.Color3(0.86, 0.86, 0.92);
-        bumperCapMat.metallic = 0.1;
-        bumperCapMat.roughness = 0.18;
-        bumperCapMat.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.07);
+        bumperCapMat.albedoColor = new BABYLON.Color3(0.88, 0.88, 0.94);
+        // Plastic, deliberately: near-zero metallic and a tighter roughness than the machined
+        // metal of the housing below it (bumperBaseMat, 0.95/0.3). That gap is the whole point -
+        // a real pop bumper is a moulded plastic cap sitting in a metal fixture, and giving the
+        // two the same shading is what made the old fixture read as one undifferentiated blob.
+        bumperCapMat.metallic = 0.04;
+        bumperCapMat.roughness = 0.12;
+        bumperCapMat.emissiveColor = new BABYLON.Color3(0.06, 0.06, 0.08);
+        // Procedural moulded-cap face, so the UNSKINNED cap is attractive on its own rather than a
+        // blank dome: concentric turned rings plus faint radial spokes, the moulding marks a real
+        // cap carries. One 128px DynamicTexture shared by all four caps (same shared-instance
+        // design as the material itself), built once at load - no per-frame cost.
+        bumperCapMat.albedoTexture = createBumperCapTexture(scene);
         // Bumper cap skin slot (visual-architecture pass, user-requested) - one shared texture
         // for all 4 caps, matching this material's own existing shared-instance design above.
         // No-op until assets/skins/bumpers/bumper-cap.png actually exists (see SKINS.md); the
         // glossy off-white plastic look stays the fallback either way.
         applySkinTexture(scene, bumperCapMat, SKIN_MANIFEST.bumperCap);
+
+        // Machined-metal fixture, distinct from the shared obstacleHousingMat every other rail and
+        // post uses (0.8 metallic / 0.35 rough). Pushing this harder and smoother is what creates
+        // the metal-against-plastic contrast with bumperCapMat above; sharing housingMat is what
+        // previously made the bumper base read as just another dark rail offcut. One instance for
+        // all four fixtures.
+        const bumperBaseMat = new BABYLON.PBRMaterial('bumperBaseMat', scene);
+        bumperBaseMat.albedoColor = new BABYLON.Color3(0.16, 0.16, 0.20);
+        bumperBaseMat.metallic = 0.95;
+        bumperBaseMat.roughness = 0.30;
+
+        // Boss-only anodised trim. The boss bumper was previously distinguishable ONLY by being
+        // 1.5x bigger, which reads as "nearer the camera" rather than "more important" - this warm
+        // gold band is the same trick real machines use to mark their jackpot bumper, and it reads
+        // instantly at a glance because nothing else on the board is this colour.
+        const bumperTrimMat = new BABYLON.PBRMaterial('bumperTrimMat', scene);
+        bumperTrimMat.albedoColor = new BABYLON.Color3(0.92, 0.72, 0.26);
+        bumperTrimMat.metallic = 0.9;
+        bumperTrimMat.roughness = 0.22;
+        bumperTrimMat.emissiveColor = new BABYLON.Color3(0.35, 0.24, 0.05);
+
+        // The lamp ring, one per bumper so it can flash with its own body on a hit. Brighter and
+        // markedly more translucent than the body it rings (alpha 0.55 vs 0.88, emissive 1.15x vs
+        // 0.6x), because the old ring shared the body's material outright and simply vanished into
+        // the dome's own glow - a lit ring has to out-glow what it sits on to read as a lamp at all.
+        const bumperLampMats = COLOR_BUMPERS.map((color, i) => {
+            const mat = new BABYLON.PBRMaterial('bumperLampMat' + i, scene);
+            mat.albedoColor = color;
+            mat.metallic = 0.0;
+            mat.roughness = 0.45;
+            mat.alpha = 0.55;
+            mat.emissiveColor = color.scale(1.15);
+            return mat;
+        });
 
         // Pop-bumper silhouette (visual-upgrade pass, user-requested): the collider stays the
         // exact same sphere it always was (shape, size, position, physics aggregate, and the
@@ -3609,40 +3694,65 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const rig = new BABYLON.TransformNode('bumper' + i + 'Rig', scene);
             rig.position.set(pos.x, 0, pos.z);
 
-            const base = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Base', {
-                diameterTop: radius * 2.6,
-                diameterBottom: radius * 2.9,
-                height: radius * 0.35,
-                tessellation: 20
+            // One moulded fixture, lathed from a real profile, replacing the two stacked
+            // cylinders that used to stand in for it. The profile carries a skirt, a chamfer, a
+            // step ledge for the lamp ring to sit on, and a tapered neck - the dimensional
+            // shoulders a cast pop-bumper body actually has, and the reason it now catches light
+            // at several distinct angles instead of reading as one flat disc. This is FEWER meshes
+            // than before (one lathe instead of base + riser), so the upgrade costs less to draw
+            // than what it replaces; tessellation stays at 16, in this file's cheap-primitives
+            // budget. Profile radii are multiples of this bumper's own radius, so the boss's whole
+            // fixture scales with it exactly as before.
+            // NOTE these are RADII, not diameters. The cylinders this replaced were specified as
+            // diameters (diameterBottom: radius * 2.9), so the equivalent profile radius is half
+            // that - 1.45. Reading those numbers across directly builds a fixture twice as wide as
+            // the one it replaces, which swallows the playfield.
+            const profile = [
+                [1.47, 0.00], [1.47, 0.10], [1.31, 0.22], [1.32, 0.32],
+                [1.13, 0.42], [1.10, 0.56], [0.86, 0.74], [0.75, 0.88],
+                [0.59, 0.95], [0.43, 0.99]
+            ].map(([rx, ry]) => new BABYLON.Vector3(radius * rx, radius * ry, 0));
+            // closed:false - 'closed' joins the profile's last point back to its first, which here
+            // would sweep a solid diagonal skirt from the neck back down to the outer rim. The
+            // open top is covered by the dome (the profile ends well inside it) and the open
+            // bottom sits on the playfield.
+            const base = BABYLON.MeshBuilder.CreateLathe('bumper' + i + 'Base', {
+                shape: profile,
+                tessellation: 16,
+                closed: false
             }, scene);
             base.parent = rig;
-            base.position.y = radius * 0.18;
-            base.material = housingMat;
+            base.material = bumperBaseMat;
 
-            const riser = BABYLON.MeshBuilder.CreateCylinder('bumper' + i + 'Riser', {
-                diameterTop: radius * 1.7,
-                diameterBottom: radius * 2.2,
-                height: radius * 0.5,
-                tessellation: 20
-            }, scene);
-            riser.parent = rig;
-            riser.position.y = radius * 0.55;
-            riser.material = housingMat;
-
+            // Lamp ring, seated on the profile's step ledge rather than floating on the dome.
             const collar = BABYLON.MeshBuilder.CreateTorus('bumper' + i + 'Collar', {
-                diameter: radius * 2.15,
-                thickness: radius * 0.14,
-                tessellation: 20
+                diameter: radius * 2.5,
+                thickness: radius * 0.17,
+                tessellation: 18
             }, scene);
             collar.parent = rig;
-            collar.position.y = radius * 0.85;
-            collar.material = colorMat; // shares the body's own material/color - reads as one glowing fixture, not a mismatched add-on, and flashes together with the body on hit (see pulseMesh())
+            collar.position.y = radius * 0.50;
+            collar.material = bumperLampMats[i % bumperLampMats.length];
+
+            // Boss only: one extra gold band low on the skirt. A single 14-segment torus on one
+            // bumper - the cheapest possible way to say "this one is different" without touching
+            // its collider, radius, kick or score.
+            if (isBoss) {
+                const trim = BABYLON.MeshBuilder.CreateTorus('bumper' + i + 'Trim', {
+                    diameter: radius * 2.92,
+                    thickness: radius * 0.11,
+                    tessellation: 14
+                }, scene);
+                trim.parent = rig;
+                trim.position.y = radius * 0.16;
+                trim.material = bumperTrimMat;
+            }
 
             // Flattened sphere, not a hemisphere primitive - simpler geometry, and sinking its
             // equator slightly below the body's own peak hides the seam between the two so the
             // cap reads as continuous with the dome beneath it rather than a disc stuck on top.
-            const cap = BABYLON.MeshBuilder.CreateSphere('bumper' + i + 'Cap', { diameter: radius * 1.3, segments: 12 }, scene);
-            cap.scaling.y = 0.55;
+            const cap = BABYLON.MeshBuilder.CreateSphere('bumper' + i + 'Cap', { diameter: radius * 1.34, segments: 12 }, scene);
+            cap.scaling.y = 0.58;
             cap.parent = rig;
             cap.position.y = radius * 1.85;
             cap.material = bumperCapMat;
@@ -3650,13 +3760,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // Decorative insert/icon: a single glyph tinted to this bumper's own color, reusing
             // createLabelPlane()'s DynamicTexture/emissiveTexture pattern instead of a bespoke
             // one - see this block's own comment for why that keeps a future textured-skin pass
-            // to a one-line change. createLabelPlane() places its plane at a fixed low playfield
-            // height tilted to face this game's fixed camera; overriding .position.y afterward
-            // lifts that same already-camera-tuned tilt up to the cap's face instead.
-            const insert = createLabelPlane(scene, '●', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: 30, planeSize: radius * 1.5 });
+            // to a one-line change. The boss gets its own glyph, a second cue that costs nothing.
+            const insert = createLabelPlane(scene, isBoss ? '\u2605' : '\u25c9', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: isBoss ? 34 : 30, planeSize: radius * 1.5 });
             insert.position.y = radius * 2.05;
 
-            mesh.metadata = { kind: 'bumper', boss: isBoss, capMesh: cap, insertMesh: insert };
+            // bodyMat/lampMat are carried so the hit reaction can flash exactly these two
+            // per-bumper materials and nothing else - notably NOT the shared cap material,
+            // which would bleed one bumper's flash onto all four at once.
+            mesh.metadata = { kind: 'bumper', boss: isBoss, capMesh: cap, insertMesh: insert,
+                              bodyMat: colorMat, lampMat: bumperLampMats[i % bumperLampMats.length] };
         });
 
         // CONFIG.colors.chakra (7 colors) - each mission target gets its own chakra color
@@ -6784,6 +6896,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }, 100);
         }
 
+        // Pop-bumper hit reaction: a short emissive lift on the body and its lamp ring, and
+        // nothing else. Deliberately NOT pulseMesh(): that also scales the mesh 1.4x for 100ms,
+        // and a bumper visibly inflating on every hit is the one thing that gives away that the
+        // fixture is a prop rather than a lit lamp behind plastic. Scaling also fought the new
+        // moulded base, which stays put while the dome it is seated in grew.
+        //
+        // Cheap by construction, which matters on mobile: two emissiveColor writes and one
+        // timeout per hit. No light is created, no geometry is touched, nothing runs per frame.
+        // The scale-up is a MULTIPLIER on each material's own resting emissive, so each bumper
+        // brightens in its own colour rather than all four flashing the same white.
+        //
+        // The shared cap material is deliberately excluded - flashing that one instance would
+        // light up all four caps at once. Same reason the cap was already excluded before.
+        function pulseBumperLamp(meta) {
+            const targets = [meta.bodyMat, meta.lampMat].filter((m) => m && m.emissiveColor);
+            if (!targets.length) return;
+            const saved = targets.map((m) => m.emissiveColor.clone());
+            targets.forEach((m) => { m.emissiveColor = m.emissiveColor.scale(2.1); });
+            setTimeout(() => {
+                targets.forEach((m, k) => { if (m.emissiveColor) m.emissiveColor.copyFrom(saved[k]); });
+            }, 90);
+        }
+
         // Physical hits: comet/slingshots already bounce the ball via restitution (set in
         // buildObstacles()) - for those kinds this only adds the score/cooldown/feedback layer on
         // top, it does NOT set the ball's velocity by hand the way the 2D version's hitSatellite()/
@@ -7244,7 +7379,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // touch punchier than a passive bounce, without changing scoring or any other
                 // obstacle kind's feedback (all other pulseMesh()/playHitSound() call sites are
                 // untouched, defaulting back to their original 1.3x/0.14 values).
-                pulseMesh(mesh, 1.4, [meta.capMesh, meta.insertMesh]); // extends the flash/pulse to the bumper's decorative cap+insert (see pulseMesh()'s own comment on why those two are scale-only)
+                pulseBumperLamp(meta); // emissive-only lamp pulse - see pulseBumperLamp() for why a bumper must not scale on hit
                 spawnHitBurst(scene, particleTexture, mesh, highFidelity);
                 backglass.showMessage('+' + points, 700); // matches hitAttackBumper()'s showPopup(`+${baseScore}`, ...)
                 triggerCameraShake(130, meta.boss ? 0.009 : 0.007); // was 120/0.008/0.006 - a bit stronger, matching the new active-kick feel
