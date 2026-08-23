@@ -199,7 +199,43 @@ export const BALL_FRICTION = 0.08;
 // (JS wrapper or native HP_* function). createBall() previously called two methods
 // (setCcdMotionThreshold/setCcdSweptSphereRadius) that don't exist on this PhysicsBody build -
 // dead code, now removed. This per-frame JS clamp is genuinely the only per-body defense.
-export const MAX_BALL_SPEED_MS = 1800 * PX_TO_M; // ~1.7 m/s
+//
+// Flipper-to-ball energy-transfer pass (user-requested, measured): 1800 -> 2700 px/s
+// (1.70 -> 2.55 m/s). Raised as a SAFETY ceiling, not as a gameplay knob - it is still the only
+// per-body anti-tunneling defense this build has, and it still clamps every velocity source.
+//
+// Why this constant moved and FLIPPER_CONTACT_VELOCITY_TRANSFER did not. That pass was asked to
+// grade shot strength by contact point: base modest, midpoint strong, tip strongest. Measured
+// exit speed at a real rolling contact, by contact radius along the bat:
+//
+//   transfer  base(24%)   mid(59%)   tip(89%)     with the 1.70 ceiling applied
+//   2.4        0.729       1.679      4.833  ->   0.729 / 1.679 / 1.700
+//
+// The natural spread is already 1 : 2.3 : 6.6, which is exactly the requested gradient - the
+// ceiling was flattening the top of it, putting mid (1.679) and tip (1.700) within 1% of each
+// other so timing carried no information. And because transfer is a plain linear gain, it scales
+// base/mid/tip together and CANNOT restore that spread: at 1.70 every value >= 2.4 pins both mid
+// and tip, and low enough values to leave headroom make every shot weak. So the required increase
+// to FLIPPER_CONTACT_VELOCITY_TRANSFER measured as exactly zero, and it is left at 2.4.
+//
+// At 2.55 the same three contacts read 0.729 / 1.679 / 2.550 - 29% / 66% / 100% of the ceiling,
+// a gradient a player can actually feel. Flipper-strike reach (qa/circulation-suite.js, n=8):
+// mean best-Z 0.075 -> 0.138, best Z 0.186 -> 0.332.
+//
+// Why 2.55 and not higher: 3.40 measured the same mean reach (0.138) for less anti-tunneling
+// margin, so it buys nothing. The ceiling was chosen against a direct tunneling probe - 40 shots
+// per speed, fired at the walls from five positions in eight directions:
+//   1.70 m/s (2.1 ball-radii/frame)  0/40 escaped
+//   2.55 m/s (3.1 ball-radii/frame)  0/40 escaped   <- shipped
+//   3.40 m/s (4.2 ball-radii/frame)  0/40 escaped
+//   5.10 m/s (6.3 ball-radii/frame)  1/40 escaped   <- ball reached x=0.284, past the 0.227 wall
+//
+// SCOPE NOTE, recorded rather than hidden: this ceiling is shared, so raising it also lets the
+// pop bumpers and slingshots push a ball past 1.70 where they previously could not. No kick force
+// was modified (BUMPER_KICK_SPEED_MS and friends are untouched) - the same clamp is simply
+// clamping less often. The plunger is unaffected either way: PLUNGER_MAX_POWER_MS is 1.51 m/s,
+// already under the old ceiling.
+export const MAX_BALL_SPEED_MS = 2700 * PX_TO_M; // ~2.55 m/s
 
 // Real Havok API found in the same investigation (HavokPlugin.setVelocityLimits(), backed by
 // the native HP_World_SetSpeedLimit/GetSpeedLimit functions - confirmed present via the same
@@ -457,6 +493,24 @@ export const FLIPPER_FRICTION = 0.4;
 // Unchanged: flipper geometry, sweep, activate/return speeds, resting behaviour, and the
 // held-flipper guarantee (omega is 0 once the bat reaches its stop, so a held flipper adds
 // nothing - re-verified at every value tested; a cradled ball stayed at ~0 m/s).
+// Flipper-to-ball energy-transfer pass (user-requested, measured): INSPECTED, DELIBERATELY
+// UNCHANGED at 2.4. That pass was asked to raise transfer "only as much as required" to grade
+// shots by contact point; the required amount measured as zero, and the ceiling moved instead
+// (see MAX_BALL_SPEED_MS above for the full numbers).
+//
+// The reason is a property of this constant worth stating outright: it is a plain LINEAR GAIN on
+// a physically-derived vector, so it scales base, midpoint and tip together and leaves their
+// ratios fixed at 1 : 2.3 : 6.6 no matter what value it takes. It sets how hard the flipper hits;
+// it cannot change how much a tip hit beats a base hit. Measured natural exit speeds:
+//
+//   transfer   base(24%)   mid(59%)   tip(89%)
+//   2.4         0.729       1.679      4.833
+//   3.0         0.914       2.085      6.044
+//   3.5         1.068       2.423      7.054
+//
+// So if shots ever read as too weak or too strong ACROSS THE BOARD, this is the right knob. If
+// they read as insufficiently DIFFERENTIATED, this is the wrong knob - look at what is flattening
+// the top of the range instead.
 export const FLIPPER_CONTACT_VELOCITY_TRANSFER = 2.4;
 
 // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
