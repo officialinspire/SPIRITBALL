@@ -2716,6 +2716,51 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return texture;
     }
 
+    // The ball's surface markings. Audit finding (user-requested angular-motion pass): the ball's
+    // PHYSICS rotation was already correct and already reaching the renderer - measured
+    // omega*r/v = 0.998 in free roll, and the mesh quaternion genuinely turning 13.8 revolutions
+    // in 1.5s - but none of it was VISIBLE, because the ball was a uniform sphere: one flat albedo
+    // colour, one flat emissive colour, no texture. A featureless sphere looks identical at every
+    // orientation, so a correctly rolling ball read as a sliding one.
+    //
+    // This is deliberately NOT faked rotation. Nothing here spins anything; it only gives the real,
+    // Havok-driven rotation something to show. Meridian stripes are the shape that does that for
+    // both axes that matter here: they sweep sideways when the ball yaws, and converge/part at the
+    // poles when it rolls, so travel and spin are both legible. Kept as one procedural
+    // DynamicTexture in the same style as createParticleTexture() above - no asset to ship.
+    //
+    // Brightness is preserved on purpose. The lighting pass that set emissiveColor documents the
+    // ball as the top of the visual hierarchy ("highest motion readability"), so the stripes are a
+    // modest tint rather than dark bands: the orb still reads as the brightest thing on the board,
+    // it just no longer reads as featureless.
+    function createBallTexture(scene) {
+        const w = 256, h = 128;
+        const texture = new BABYLON.DynamicTexture('ballTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        // Three meridians, evenly spaced so no orientation looks like any other, drawn with soft
+        // edges so they read as markings on a polished ball rather than painted-on stripes.
+        for (let i = 0; i < 3; i++) {
+            const cx = (i + 0.5) * (w / 3);
+            const grad = ctx.createLinearGradient(cx - 12, 0, cx + 12, 0);
+            grad.addColorStop(0, 'rgba(120,190,205,0)');
+            grad.addColorStop(0.5, 'rgba(120,190,205,0.85)');
+            grad.addColorStop(1, 'rgba(120,190,205,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(cx - 12, 0, 24, h);
+        }
+        // One polar cap, so rotation about the vertical axis is still legible when a meridian
+        // happens to be facing the camera.
+        const cap = ctx.createRadialGradient(w / 2, 0, 0, w / 2, 0, h * 0.28);
+        cap.addColorStop(0, 'rgba(120,190,205,0.8)');
+        cap.addColorStop(1, 'rgba(120,190,205,0)');
+        ctx.fillStyle = cap;
+        ctx.fillRect(0, 0, w, h * 0.3);
+        texture.update();
+        return texture;
+    }
+
     // Ball trail: emitter attached directly to the ball mesh (particles spawn at its current
     // position every frame automatically), additive-blended for a luminous (not opaque) look -
     // direct port of setupParticles()'s follow-the-ball ballTrail emitter, kept as the one and
@@ -5383,6 +5428,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // targets 0.55) so the ball reads as the clear top of the hierarchy at a glance, moving or
         // still, without needing a value so extreme it blooms into a shapeless blob.
         ballMat.emissiveColor = COLOR_EYEBALL.scale(0.7);
+        // Same markings on both channels, so the pattern is visible in the lit surface AND in the
+        // ball's own glow - otherwise the emissive would wash the stripes out at exactly the
+        // moments the ball is moving fastest and rotation matters most. See createBallTexture().
+        {
+            const ballTex = createBallTexture(scene);
+            ballMat.albedoTexture = ballTex;
+            ballMat.emissiveTexture = ballTex;
+        }
 
         // --- The main game ball (Stage 3): one canonical ball, physics-maintained every frame
         // via updateBallPhysics(). Now spawned resting on the plunger (Stage 5), matching
