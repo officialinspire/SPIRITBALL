@@ -961,9 +961,24 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // residue rather than zero: fully unlit walls read as flat black silhouettes against the
         // dark space background at this camera angle (verified via screenshot), which loses the
         // wall's own presence entirely rather than looking appropriately "structural."
-        wallMat.metallic = 0.72;
-        wallMat.roughness = 0.3;
-        wallMat.emissiveColor = COLOR_WALL.scale(0.07);
+        // Cabinet/perimeter pass (user-requested): metallic comes DOWN from 0.72, which is the
+        // opposite of the direction the last hierarchy pass moved it, and for a reason that only
+        // applies now. A metal's albedo is its specular tint, not a diffuse colour, so at 0.72
+        // with no environment texture (see this material's own comment above for why there isn't
+        // one) almost nothing of an albedo TEXTURE survives - and the crown highlight and dark
+        // base band that createCabinetRailTexture() draws are the whole point of the pass. 0.45
+        // keeps a clearly metallic response under the three direct lights while letting the
+        // profile read. Roughness up a touch to match.
+        wallMat.metallic = 0.45;
+        wallMat.roughness = 0.36;
+        // 0.07 -> 0.045: a flat emissive lifts every band equally, including the dark base band
+        // whose entire job is to be dark. Still non-zero for the reason the comment above gives -
+        // fully unlit walls read as flat black silhouettes against the space background.
+        wallMat.emissiveColor = COLOR_WALL.scale(0.045);
+        // White, because createCabinetRailTexture() bakes COLOR_WALL into the texture - see that
+        // function's comment.
+        wallMat.albedoColor = new BABYLON.Color3(1, 1, 1);
+        wallMat.albedoTexture = createCabinetRailTexture(scene, COLOR_WALL);
         // Cabinet/table artwork skin slot (visual-architecture pass, user-requested) - shared by
         // every structural boundary wall below. No-op until assets/skins/cabinet/cabinet-rails.png
         // actually exists (see SKINS.md) - the chrome look above stays exactly as-is either way.
@@ -1044,6 +1059,94 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
             return mesh;
         });
+
+        // ===================================
+        // Cabinet shell
+        // ===================================
+        // Built here, off wallDefs, because these walls are the source of truth for where the
+        // machine's perimeter actually is - every piece below is derived from a wall's own
+        // footprint or from TABLE_WIDTH_M/TABLE_LENGTH_M, never from a hand-copied number that
+        // could drift out of step with the collider.
+        //
+        // Nothing here gets a PhysicsAggregate. Not one collision dimension changes.
+
+        // One chrome for every rail on the machine. Looked up by name from buildObstacles() too
+        // (it runs after this), so the side rails, the lockdown bar and all seven wall crowns are
+        // literally the same material instance rather than three near-matches - which is what
+        // "consistent material treatment" has to mean if it is to mean anything.
+        const cabinetMetalMat = new BABYLON.PBRMaterial('cabinetMetalMat', scene);
+        // Worth knowing before tuning this: with metallic near 1 and no environment texture (see
+        // wallMat's comment above for why this project deliberately has none), albedo is the
+        // specular tint and almost nothing else, so it barely moves the result. Sweeping 0.38 vs
+        // 0.60 against the same frame shifted the wall crown's measured luminance by 4 units out
+        // of 255 - the rails' presence comes from roughness and from their silhouette against the
+        // dark background, not from this number. Set for a polished-chrome tint and left there.
+        cabinetMetalMat.albedoColor = new BABYLON.Color3(0.56, 0.62, 0.68);
+        cabinetMetalMat.metallic = 0.88;
+        cabinetMetalMat.roughness = 0.18;
+        cabinetMetalMat.emissiveColor = new BABYLON.Color3(0.03, 0.04, 0.05); // the same "don't read as flat black against space" allowance wallMat gets
+
+        // The cabinet body itself - matte, unlit, deliberately the least interesting surface on
+        // the machine. Its whole job is to be a large dark mass BELOW the playfield so the table
+        // has an underside; without it the playfield is a 20mm plate with nothing under it, which
+        // is the single biggest reason the machine reads as a floating tray.
+        const cabinetBodyMat = new BABYLON.PBRMaterial('cabinetBodyMat', scene);
+        cabinetBodyMat.albedoColor = new BABYLON.Color3(0.055, 0.055, 0.075);
+        cabinetBodyMat.metallic = 0.15;
+        cabinetBodyMat.roughness = 0.82;
+
+        // A polished crown along the top edge of every structural wall, sized from that wall's own
+        // box and overhanging it by 1.5mm on each side so it reads as a capping rail rather than
+        // as more wall. All seven get one - the two side walls, the top wall, both slants and both
+        // mid-table guides - which is what ties the perimeter and the interior rails into one
+        // piece of hardware instead of two unrelated sets of blue slabs.
+        wallDefs.forEach((def) => {
+            const cap = BABYLON.MeshBuilder.CreateBox(def.name + 'Crown', {
+                width: def.w * PX_TO_M + 0.003,
+                height: 0.0045,
+                depth: def.h * PX_TO_M + 0.003
+            }, scene);
+            cap.position.set(toWorldX(def.x), WALL_HEIGHT_M + 0.00225, toWorldZ(def.y));
+            cap.rotation.y = toWorldRotationY(def.rot);
+            cap.material = cabinetMetalMat;
+            cap.isPickable = false;
+        });
+
+        // The cabinet body, and a proud moulding around the playfield's edge.
+        //
+        // The body runs the machine's full length - from just past the top wall down to in front
+        // of the apron at z -0.62 - so the front of the cabinet has a face rather than an edge,
+        // and its top sits flush under the playfield slab (which spans y -0.02 to 0).
+        //
+        // The moulding deliberately wraps the PLAYFIELD footprint only, not the body's. A moulding
+        // is a trim line for an edge, and the only edge it has to trim is the playfield's; run
+        // around the whole shell it would instead draw a bright line 21cm out in front of the
+        // playfield, across the dark ball-trough area where the apron sits, marking nothing.
+        const cabShellFrontZ = -0.665;
+        const cabShellBackZ = TABLE_LENGTH_M / 2 + 0.018;
+        const cabShellDepth = cabShellBackZ - cabShellFrontZ;
+        const cabShellCentreZ = (cabShellBackZ + cabShellFrontZ) / 2;
+
+        const cabinetBody = BABYLON.MeshBuilder.CreateBox('cabinetBody', {
+            width: TABLE_WIDTH_M + 0.004,
+            height: 0.09,
+            depth: cabShellDepth
+        }, scene);
+        cabinetBody.position.set(0, -0.065, cabShellCentreZ);
+        cabinetBody.material = cabinetBodyMat;
+        cabinetBody.isPickable = false;
+
+        const cabinetLip = BABYLON.MeshBuilder.CreateBox('cabinetLip', {
+            width: TABLE_WIDTH_M + 0.016,
+            height: 0.008,
+            depth: TABLE_LENGTH_M + 0.016
+        }, scene);
+        cabinetLip.position.set(0, -0.024, 0);
+        // Same chrome as the rails, not a second near-match: on a real machine the side rail IS
+        // the cabinet's top moulding, and one bright horizontal line at the playfield's edge is
+        // also the cleanest possible separation between the playfield art and everything below it.
+        cabinetLip.material = cabinetMetalMat;
+        cabinetLip.isPickable = false;
 
         // ---------------------------------------------------------------------------------
         // REAL BUG FIX, not just a visual pass: Stages 2-6 never built an actual playfield floor.
@@ -2887,6 +2990,48 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 ctx.fillStyle = 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
                 ctx.fillRect(x, y, 1, 1);
             }
+        }
+        texture.update();
+        return texture;
+    }
+
+    // Cabinet rail face - the wall texture that gives the table's perimeter an actual profile.
+    //
+    // Every structural wall (topWall, the two side walls, the two slants, the two mid-table
+    // guides) is one flat colour on a plain box, which is most of why the machine reads as a
+    // tray rather than as a cabinet: a real side wall has a polished top edge catching light, a
+    // body, and a dark shadow line where it meets the playfield.
+    //
+    // Bands run in V only, with no vertical striations, and that is deliberate: these boxes have
+    // wildly different aspect ratios (topWall's face is roughly 12:1, a guide's is 3:1), so
+    // anything varying along U would stretch differently on every wall and break the "consistent
+    // material treatment" this exists to provide. Horizontal bands look identical on all seven.
+    //
+    // The cabinetRails skin slot in js/skins.js declares kind:'albedo' and targets exactly this
+    // material, so real artwork replaces this wholesale (applySkinTexture() runs after it is
+    // assigned). The caller sets albedoColor to white for the usual reason - albedoTexture is
+    // multiplied by it, and keeping the cyan tint would square it.
+    function createCabinetRailTexture(scene, color) {
+        const w = 32, h = 128;
+        const texture = new BABYLON.DynamicTexture('cabinetRailTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        const mix = (t) => [color.r + (1 - color.r) * t, color.g + (1 - color.g) * t, color.b + (1 - color.b) * t];
+        const dim = (k) => [color.r * k, color.g * k, color.b * k];
+        for (let y = 0; y < h; y++) {
+            const v = y / h; // 0 at the top of the wall face, 1 where it meets the playfield
+            let rgb;
+            if (v < 0.055) rgb = mix(0.85);          // polished crown - the edge highlight
+            else if (v < 0.13) rgb = mix(0.45);      // its fall-off
+            else if (v < 0.70) {
+                // Wall body, darkening gently downward the way a lit vertical face actually does.
+                rgb = dim(1.0 - 0.32 * ((v - 0.13) / 0.57));
+            } else if (v < 0.86) rgb = dim(0.42);    // lower body, in shadow
+            else rgb = dim(0.10);                    // dark base band: the shadow line that keeps
+                                                     // playfield art from running straight into the wall
+            // Fine horizontal machining lines. Also V-only, so they survive any wall's aspect.
+            const k = 1 + 0.055 * Math.sin(v * Math.PI * 2 * 34);
+            ctx.fillStyle = 'rgb(' + rgb.map((c) => Math.round(Math.max(0, Math.min(1, c * k)) * 255)).join(',') + ')';
+            ctx.fillRect(0, y, w, 1);
         }
         texture.update();
         return texture;
@@ -5398,6 +5543,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // 1. Metal side rails - a raised chrome cap along the top edge of the existing left/right
         // walls, the rounded rail real cabinets run the full length of the playfield. Dressing on
         // top of an already-physical collider, not a new one.
+        //
+        // Cabinet/perimeter pass (user-requested): these were housingMat, the same dark near-black
+        // metal every bracket and skirt on the board uses, which made the machine's most prominent
+        // hardware its least visible. They now share cabinetMetalMat with the wall crowns and the
+        // lockdown bar below - one polished chrome for every rail on the cabinet. Looked up by
+        // name because buildTable() creates it (it runs first) off the wall footprints those
+        // crowns are derived from; a second, separately-written chrome here is exactly the drift
+        // this pass exists to remove.
+        const cabinetMetalMat = scene.getMaterialByName('cabinetMetalMat') || housingMat;
         [-1, 1].forEach((side) => {
             const rail = BABYLON.MeshBuilder.CreateCylinder('sideRail' + side, {
                 diameter: 0.012,
@@ -5405,9 +5559,43 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 tessellation: 10
             }, scene);
             rail.rotation.x = Math.PI / 2;
-            rail.position.set(side * (TABLE_WIDTH_M / 2 - 0.006), WALL_HEIGHT_M + 0.004, 0);
-            rail.material = housingMat;
+            // Raised to sit ON the wall crown buildTable() now adds (which tops out at 0.0445)
+            // instead of half-buried in the wall itself, where its lower half was invisible.
+            rail.position.set(side * (TABLE_WIDTH_M / 2 - 0.006), WALL_HEIGHT_M + 0.0085, 0);
+            rail.material = cabinetMetalMat;
+            rail.isPickable = false;
         });
+
+        // The rail across the top of the machine, closing the perimeter. Its absence was why the
+        // two side rails read as two loose bars rather than as a frame.
+        {
+            const topRail = BABYLON.MeshBuilder.CreateCylinder('topRail', {
+                diameter: 0.012,
+                height: TABLE_WIDTH_M,
+                tessellation: 10
+            }, scene);
+            topRail.rotation.z = Math.PI / 2;
+            topRail.position.set(0, WALL_HEIGHT_M + 0.0085, TABLE_LENGTH_M / 2 - 0.006);
+            topRail.material = cabinetMetalMat;
+            topRail.isPickable = false;
+        }
+
+        // Lockdown bar - the chrome bar across the front of every real machine, at the player's
+        // own edge. Placed just beyond the apron (z -0.62, depth 0.05, so its near face is at
+        // -0.645), which puts this at the frontmost point of the cabinet and nowhere near any
+        // playfield geometry. More than any other single piece, this is what makes the near edge
+        // read as the front of a machine rather than as where the model stops.
+        {
+            const lockdown = BABYLON.MeshBuilder.CreateCylinder('lockdownBar', {
+                diameter: 0.018,
+                height: TABLE_WIDTH_M + 0.012,
+                tessellation: 12
+            }, scene);
+            lockdown.rotation.z = Math.PI / 2;
+            lockdown.position.set(0, 0.017, -0.658);
+            lockdown.material = cabinetMetalMat;
+            lockdown.isPickable = false;
+        }
 
         // 2. Apron - the trim strip below the flippers, closest to the player/camera, where a
         // real cabinet's ball-return/coin-door graphics live. Sits just beyond the drain zone's
@@ -5627,7 +5815,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 depth: TABLE_LENGTH_M + 0.04
             }, scene);
             trim.position.set(side * (TABLE_WIDTH_M / 2 + 0.014), 0.005, 0);
-            trim.material = housingMat;
+            trim.material = cabinetMetalMat; // was housingMat - see the side rails' own comment
+            trim.isPickable = false;
         });
         const topTrim = BABYLON.MeshBuilder.CreateBox('cabinetTopTrim', {
             width: TABLE_WIDTH_M + 0.04,
@@ -5635,7 +5824,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             depth: 0.01
         }, scene);
         topTrim.position.set(0, 0.005, TABLE_LENGTH_M / 2 + 0.014);
-        topTrim.material = housingMat;
+        topTrim.material = cabinetMetalMat;
+        topTrim.isPickable = false;
 
         // ===================================
         // Table-composition pass (user-requested - "distinct upper/middle/lower table regions...
