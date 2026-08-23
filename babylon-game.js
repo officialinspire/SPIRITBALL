@@ -2803,6 +2803,84 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return texture;
     }
 
+    // Playfield insert lens face. A real backlit insert is a small moulded lens sitting in a
+    // routed hole: unlit it is dark plastic, lit it is a bright translucent lozenge with a printed
+    // legend and a hard edge where the plastic ends. The old inserts were flat single-colour discs
+    // at full emissive, which under the scene's GlowLayer bloomed into shapeless coloured haze -
+    // the "oversized generic glow" this pass exists to remove. Everything that fixes that is here:
+    // the lit field stops well inside the lens rim (so the bloom has a boundary instead of running
+    // off the edge), it sits at roughly half brightness rather than full (so the bright rim ring
+    // and legend are what actually read), and the area outside the lens emits nothing at all.
+    //
+    // Greyscale on purpose. This is an emissiveTexture, so it is multiplied by the material's
+    // emissiveColor - which is the ONLY thing the lamp system ever writes (createLampSystem()).
+    // Keeping the texture colourless means it modulates brightness and shape while every lamp's
+    // identity colour and its off/dim/lit/blink state still come from exactly where they came from
+    // before, untouched. Same reason it is an emissiveTexture and not an albedoTexture: the
+    // laneInsert* skin slots in js/skins.js are declared kind:'emissive', so a real artwork file
+    // replaces this wholesale on the same property (applySkinTexture() runs after this is
+    // assigned) rather than fighting it.
+    //
+    // legend: 'up'/'down' draws a lane arrow pointing up-table/down-table (canvas -Y maps to +Z on
+    // a cylinder cap - verified by rendering a UV probe, not assumed); null draws concentric rings
+    // for the indicators that mark a state rather than a direction.
+    function createInsertLensTexture(scene, name, legend) {
+        const size = 128, c = size / 2;
+        const texture = new BABYLON.DynamicTexture('insertLensTex' + name, { width: size, height: size }, scene, true);
+        const ctx = texture.getContext();
+        // Black, not transparent: the lens rim and everything outside it must emit nothing, and
+        // black in an emissive texture is exactly "no light from here".
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, size, size);
+
+        // Lit field, stopped at 0.86 of the cap radius so a dark moulded margin always frames it.
+        const lit = 0.86;
+        const field = ctx.createRadialGradient(c, c, 0, c, c, c * lit);
+        field.addColorStop(0.00, 'rgba(255,255,255,0.74)');
+        field.addColorStop(0.60, 'rgba(255,255,255,0.58)');
+        field.addColorStop(1.00, 'rgba(255,255,255,0.36)');
+        ctx.fillStyle = field;
+        ctx.beginPath();
+        ctx.arc(c, c, c * lit, 0, Math.PI * 2);
+        ctx.fill();
+
+        // The lens edge, brightest thing on the insert. This single hard ring is what makes a lit
+        // insert read as a crisp object rather than a glow: the eye locks onto the boundary.
+        ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.arc(c, c, c * (lit - 0.04), 0, Math.PI * 2);
+        ctx.stroke();
+
+        if (legend === 'up' || legend === 'down') {
+            // Classic notched lane arrow. dir flips it along the table's Z axis.
+            const dir = legend === 'down' ? 1 : -1;
+            ctx.fillStyle = 'rgba(255,255,255,0.98)';
+            ctx.beginPath();
+            ctx.moveTo(c, c + dir * 34);
+            ctx.lineTo(c + 26, c - dir * 6);
+            ctx.lineTo(c + 10, c - dir * 6);
+            ctx.lineTo(c + 10, c - dir * 30);
+            ctx.lineTo(c - 10, c - dir * 30);
+            ctx.lineTo(c - 10, c - dir * 6);
+            ctx.lineTo(c - 26, c - dir * 6);
+            ctx.closePath();
+            ctx.fill();
+        } else {
+            // Two concentric rings - the "this is a state lamp, not a shot" legend.
+            ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+            ctx.lineWidth = 5;
+            for (const r of [0.52, 0.28]) {
+                ctx.beginPath();
+                ctx.arc(c, c, c * r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        texture.update();
+        return texture;
+    }
+
     // Mission drop-target face. A real illuminated drop target is a translucent plastic plate with
     // a bright printed border, a number, and a lamp behind it - the border and the number are what
     // make a bank of them readable at a glance, and are exactly what a single flat colour can't
@@ -3598,6 +3676,76 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return strip;
     }
 
+    // ===================================
+    // Playfield inserts (lane/shot indicator lamps)
+    // ===================================
+    // Every rollover lamp on this board - inlane, outlane, orbit entrance/completion, skill-shot
+    // lanes, kickback, ball save - was the same thing: one flat cylinder of height 0.003 floating
+    // at y=0.011. That is 11mm above a playfield whose surface is y=0, i.e. most of a ball radius
+    // (BALL_DIAMETER_M/2 = 0.0135) up in the air, so they read as glowing pucks resting ON the
+    // table rather than lamps set INTO it - and a ball rolling over one passed straight through it,
+    // since none of these have (or should have) a collider.
+    //
+    // These two heights put the lens just proud of the lane floor tints (which top out at 0.0017,
+    // see addLaneFloorTint above) instead. The lens top lands at 0.0036 - about an eighth of a ball
+    // diameter, down from nearly a half - so the insert now sits in the playfield surface, and what
+    // little of it a ball overlaps is underneath the ball where no camera angle can see it.
+    const INSERT_COLLAR_Y_M = 0.0024, INSERT_COLLAR_H_M = 0.0012;
+    const INSERT_LENS_Y_M = 0.00285, INSERT_LENS_H_M = 0.0015;
+
+    // One insert = a dark plastic collar with a chamfered lens sitting in it. The collar is the
+    // other half of the anti-glow work (the lens texture is the first, see
+    // createInsertLensTexture): an unlit ring of genuinely dark plastic around the lens gives the
+    // bloom a hard outer boundary and gives the "off" state something to be, instead of the lamp
+    // simply being a dimmer version of itself.
+    //
+    // Returns the LENS, because that is the mesh the lamp system registers - registerLamp() reads
+    // mesh.material, so the returned mesh must be the one carrying lampMat. Neither mesh ever gets
+    // a collider; the lane's real trigger volume is built separately and is untouched by this.
+    function addPlayfieldInsert(scene, name, lampMat, collarMat, diameter, x, z) {
+        const collar = BABYLON.MeshBuilder.CreateCylinder(name + 'Collar', {
+            diameter: diameter * 1.45,
+            height: INSERT_COLLAR_H_M,
+            tessellation: 20
+        }, scene);
+        collar.position.set(x, INSERT_COLLAR_Y_M, z);
+        collar.material = collarMat;
+
+        // diameterTop < diameterBottom gives the lens a chamfered edge, which is both what a
+        // moulded insert actually looks like and a surface angled to catch the playfield lights -
+        // a highlight that a perfectly flat disc could never pick up.
+        const lens = BABYLON.MeshBuilder.CreateCylinder(name, {
+            diameterTop: diameter * 0.84,
+            diameterBottom: diameter,
+            height: INSERT_LENS_H_M,
+            tessellation: 20
+        }, scene);
+        lens.position.set(x, INSERT_LENS_Y_M, z);
+        lens.material = lampMat;
+        return lens;
+    }
+
+    // The unlit look, applied to every insert lamp material. Two things change from what these
+    // materials used to be:
+    //
+    // albedoColor was <identity colour> * 0.3 - a saturated dark tint, so an "off" insert was
+    // still an obviously coloured disc. A real unlit insert is near-black plastic that only hints
+    // at its colour; that is what this mixes, and it is what makes lit vs. unlit read as ON vs.
+    // OFF rather than bright vs. less bright.
+    //
+    // metallic 0.2 -> 0.04 and roughness 0.4 -> 0.55, because these are plastic lenses, not
+    // painted metal discs. The old values gave them a metal sheen that fought the backlit read.
+    //
+    // emissiveColor is deliberately NOT touched here - it belongs to the lamp system and nothing
+    // else may write it (see createLampSystem()). The texture assigned here is multiplied by
+    // whatever state that system has the lamp in, so off/dim/lit/blink behave exactly as before.
+    function styleInsertLampMat(mat, color, lensTexture) {
+        mat.albedoColor = new BABYLON.Color3(0.042, 0.042, 0.05).add(color.scale(0.09));
+        mat.metallic = 0.04;
+        mat.roughness = 0.55;
+        mat.emissiveTexture = lensTexture;
+    }
+
     // Obstacle visual-polish pass (user-requested - "readable height differences... make the
     // table read like a designed pinball machine"): a round counterpart to addLaneFloorTint()
     // above, for the board's floating spherical features (Saturn, comet) rather than a lane
@@ -3652,6 +3800,25 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // itself glowing.
         railCapMat.emissiveColor = new BABYLON.Color3(0.02, 0.05, 0.065);
 
+        // Shared dark-plastic collar for every playfield insert (see addPlayfieldInsert above).
+        // Deliberately NOT housingMat: that one is dark METAL (metallic 0.8) and every insert
+        // collar rendered in it would pick up a chrome sheen, which is the opposite of the matte
+        // routed-plastic edge that makes a lit lens read as lit. One instance, all 13 inserts.
+        const insertCollarMat = new BABYLON.PBRMaterial('insertCollarMat', scene);
+        insertCollarMat.albedoColor = new BABYLON.Color3(0.045, 0.045, 0.055);
+        insertCollarMat.metallic = 0.12;
+        insertCollarMat.roughness = 0.62;
+
+        // Three lens faces, shared by every insert that wants each - not one texture per lamp.
+        // 13 inserts x a 128px DynamicTexture would be ~830KB of GPU memory to say three things;
+        // sharing costs 3 textures and nothing else, because the only per-lamp state (colour,
+        // brightness) lives in each material's own emissiveColor, never in the texture.
+        const insertLensTextures = {
+            down: createInsertLensTexture(scene, 'ArrowDown', 'down'),
+            up: createInsertLensTexture(scene, 'ArrowUp', 'up'),
+            ring: createInsertLensTexture(scene, 'Ring', null)
+        };
+
         // Shared floor-tint materials for addLaneFloorTint() above - one per lane family (inlane,
         // outlane, orbit), each reused by both mirrored sides, matching the lamp identities those
         // lanes already use elsewhere (COLOR_LANE_LAMP/COLOR_OUTLANE_LAMP/COLOR_ORBIT_LAMP) so the
@@ -3664,7 +3831,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const mat = new BABYLON.PBRMaterial(name, scene);
             mat.albedoColor = new BABYLON.Color3(0, 0, 0);
             mat.disableLighting = true;
-            mat.emissiveColor = color.scale(0.55);
+            // Insert-polish pass (user-requested - "reduce oversized generic glow, favour crisp
+            // illuminated surfaces"): these strips are the largest emissive areas anywhere near
+            // the lanes - the outlane's is 55mm x 58mm, the orbit's runs most of the rail - and at
+            // 0.55 the scene GlowLayer turned each of them into a soft coloured slab that drowned
+            // the small, precise insert lenses sitting on top of them. 0.24 keeps the lane's
+            // colour identity as a floor TINT, which is all it was ever meant to be, and hands the
+            // "this is a light" job back to the inserts. Their alpha and geometry are unchanged.
+            mat.emissiveColor = color.scale(0.24);
             mat.alpha = alpha;
             mat.backFaceCulling = false;
             return mat;
@@ -4445,9 +4619,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // split just above that already existed for the dev-only trigger overlay.
                 const laneLampColor = laneKind.kind === 'outlane' ? COLOR_OUTLANE_LAMP : COLOR_LANE_LAMP;
                 const lampMat = new BABYLON.PBRMaterial(laneKind.kind + 'LampMat' + laneDef.side, scene);
-                lampMat.albedoColor = laneLampColor.scale(0.3);
-                lampMat.metallic = 0.2;
-                lampMat.roughness = 0.4;
+                // Arrow points down-table on both: an inlane and an outlane are both lanes the
+                // ball rolls DOWN, toward the flipper and toward the drain respectively, so the
+                // legend marks the direction of travel rather than a shot to aim at.
+                styleInsertLampMat(lampMat, laneLampColor, insertLensTextures.down);
                 // Lane insert skin slot (visual-architecture pass, user-requested) - shared per
                 // kind (inlane/outlane), both sides. Emissive, not albedo, matching the lamp
                 // system's own emissive-only on/off convention (registerLamp() in main()) - a
@@ -4455,13 +4630,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // currently is, never override that state. No-op until the matching
                 // assets/skins/lanes/lane-insert-<kind>.png actually exists (see SKINS.md).
                 applySkinTexture(scene, lampMat, laneKind.kind === 'outlane' ? SKIN_MANIFEST.laneInsertOutlane : SKIN_MANIFEST.laneInsertInlane);
-                const lamp = BABYLON.MeshBuilder.CreateCylinder(laneKind.kind + 'Lamp' + laneDef.side, {
-                    diameterTop: LANE_TRIGGER_WIDTH_M * 0.6,
-                    diameterBottom: LANE_TRIGGER_WIDTH_M * 0.6,
-                    height: 0.003
-                }, scene);
-                lamp.position.set(laneKind.x, 0.011, LANE_TRIGGER_Z_M);
-                lamp.material = lampMat;
+                const lamp = addPlayfieldInsert(scene, laneKind.kind + 'Lamp' + laneDef.side,
+                    lampMat, insertCollarMat, LANE_TRIGGER_WIDTH_M * 0.6, laneKind.x, LANE_TRIGGER_Z_M);
                 // Lamp system id (registered in main()) - kind+side, e.g. 'inlaneLeft' - unique
                 // per lane/side combination, matching the naming every other lamp id in this file uses.
                 const lampId = laneKind.kind + (laneDef.side === 'left' ? 'Left' : 'Right');
@@ -4493,34 +4663,23 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // "your last line of defense" - no physics of its own, purely a state indicator.
         const kickbackMirror = SIDE_LANES.find((l) => l.side === KICKBACK_SIDE).mirror;
         const kickbackLampMat = new BABYLON.PBRMaterial('kickbackLampMat', scene);
-        kickbackLampMat.albedoColor = COLOR_KICKBACK_LAMP.scale(0.3);
-        kickbackLampMat.metallic = 0.2;
-        kickbackLampMat.roughness = 0.4;
         kickbackLampMat.emissiveColor = COLOR_KICKBACK_LAMP.scale(0.12); // faint glow at rest, lit when earned (see setKickbackLampLit() in main())
-        const kickbackLampMesh = BABYLON.MeshBuilder.CreateCylinder('kickbackLamp', {
-            diameterTop: LANE_TRIGGER_WIDTH_M * 0.7,
-            diameterBottom: LANE_TRIGGER_WIDTH_M * 0.7,
-            height: 0.003
-        }, scene);
-        kickbackLampMesh.position.set(kickbackMirror * OUTLANE_TRIGGER_X_M, 0.011, LANE_Z_BOTTOM_M);
-        kickbackLampMesh.material = kickbackLampMat;
+        // Rings, not an arrow: this lamp marks an earned STATE ("your kickback is armed"), not a
+        // lane to shoot, and it sits a few centimetres from the outlane's own arrow insert where
+        // a second arrow would just read as more of the same lane.
+        styleInsertLampMat(kickbackLampMat, COLOR_KICKBACK_LAMP, insertLensTextures.ring);
+        const kickbackLampMesh = addPlayfieldInsert(scene, 'kickbackLamp', kickbackLampMat,
+            insertCollarMat, LANE_TRIGGER_WIDTH_M * 0.7, kickbackMirror * OUTLANE_TRIGGER_X_M, LANE_Z_BOTTOM_M);
 
         // BALL SAVE lamp (fairness mechanics, user-requested) - sits beside the shooter lane, at
         // the ball's own rest spot, so it's the first thing a player sees while charging a
         // launch. Same rest/lit split as every other stateful lamp here (setBallSaveLampLit() in
         // main()).
         const ballSaveLampMat = new BABYLON.PBRMaterial('ballSaveLampMat', scene);
-        ballSaveLampMat.albedoColor = COLOR_BALL_SAVE_LAMP.scale(0.3);
-        ballSaveLampMat.metallic = 0.2;
-        ballSaveLampMat.roughness = 0.4;
         ballSaveLampMat.emissiveColor = COLOR_BALL_SAVE_LAMP.scale(0.12);
-        const ballSaveLampMesh = BABYLON.MeshBuilder.CreateCylinder('ballSaveLamp', {
-            diameterTop: LANE_TRIGGER_WIDTH_M * 0.7,
-            diameterBottom: LANE_TRIGGER_WIDTH_M * 0.7,
-            height: 0.003
-        }, scene);
-        ballSaveLampMesh.position.set(toWorldX(BALL_REST_X_PX) - 0.035, 0.011, BALL_REST_Z_M);
-        ballSaveLampMesh.material = ballSaveLampMat;
+        styleInsertLampMat(ballSaveLampMat, COLOR_BALL_SAVE_LAMP, insertLensTextures.ring); // a state, not a shot - same reasoning as the kickback lamp above
+        const ballSaveLampMesh = addPlayfieldInsert(scene, 'ballSaveLamp', ballSaveLampMat,
+            insertCollarMat, LANE_TRIGGER_WIDTH_M * 0.7, toWorldX(BALL_REST_X_PX) - 0.035, BALL_REST_Z_M);
 
         // Upper-lane skill shot (user-requested) - see SKILL_SHOT_LANES' own block comment (near
         // its declaration) for the full geometry reasoning. Same invisible-unless-dev trigger +
@@ -4531,17 +4690,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const skillShotLampMeshes = [];
         SKILL_SHOT_LANES.forEach((laneDef, i) => {
             const lampMat = new BABYLON.PBRMaterial('skillShotLampMat' + i, scene);
-            lampMat.albedoColor = COLOR_SKILL_SHOT_LAMP.scale(0.3);
-            lampMat.metallic = 0.2;
-            lampMat.roughness = 0.4;
             lampMat.emissiveColor = COLOR_SKILL_SHOT_LAMP.scale(0.12); // faint glow at rest, like a real backlit-but-unlit insert
-            const lamp = BABYLON.MeshBuilder.CreateCylinder('skillShotLamp' + i, {
-                diameterTop: laneDef.halfWidth * 2 * 0.5,
-                diameterBottom: laneDef.halfWidth * 2 * 0.5,
-                height: 0.003
-            }, scene);
-            lamp.position.set(laneDef.x, 0.011, SKILL_SHOT_Z_M);
-            lamp.material = lampMat;
+            // Up-table arrow: a skill shot is a lane the player aims the launched ball INTO, so
+            // here the legend marks the shot, the opposite of the inlane/outlane arrows.
+            styleInsertLampMat(lampMat, COLOR_SKILL_SHOT_LAMP, insertLensTextures.up);
+            const lamp = addPlayfieldInsert(scene, 'skillShotLamp' + i, lampMat, insertCollarMat,
+                laneDef.halfWidth * 2 * 0.5, laneDef.x, SKILL_SHOT_Z_M);
             skillShotLampMeshes.push(lamp);
 
             const triggerMat = new BABYLON.PBRMaterial('skillShotTriggerMat' + i, scene);
@@ -4631,21 +4785,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 { kind: 'orbitCompletion', x: orbitDef.completionX, z: ORBIT_COMPLETION_Z_M, debugColor: new BABYLON.Color3(1, 0.9, 0.2) }
             ].forEach((triggerDef) => {
                 const lampMat = new BABYLON.PBRMaterial(triggerDef.kind + 'LampMat' + orbitDef.side, scene);
-                lampMat.albedoColor = COLOR_ORBIT_LAMP.scale(0.3);
-                lampMat.metallic = 0.2;
-                lampMat.roughness = 0.4;
+                // Up-table arrow on both orbit inserts: an orbit is a shot you drive UP the lane,
+                // and the entrance insert marking that direction is the cue a player reads when
+                // deciding whether to take it.
+                styleInsertLampMat(lampMat, COLOR_ORBIT_LAMP, insertLensTextures.up);
                 // Lane insert skin slot (visual-architecture pass, user-requested) - shared by
                 // both orbit trigger kinds (entrance/completion) and both sides, same emissive-
                 // over-the-lamp-system reasoning as the inlane/outlane inserts above. No-op until
                 // assets/skins/lanes/lane-insert-orbit.png actually exists (see SKINS.md).
                 applySkinTexture(scene, lampMat, SKIN_MANIFEST.laneInsertOrbit);
-                const lamp = BABYLON.MeshBuilder.CreateCylinder(triggerDef.kind + 'Lamp' + orbitDef.side, {
-                    diameterTop: ORBIT_TRIGGER_WIDTH_M * 0.6,
-                    diameterBottom: ORBIT_TRIGGER_WIDTH_M * 0.6,
-                    height: 0.003
-                }, scene);
-                lamp.position.set(triggerDef.x, 0.011, triggerDef.z);
-                lamp.material = lampMat;
+                const lamp = addPlayfieldInsert(scene, triggerDef.kind + 'Lamp' + orbitDef.side,
+                    lampMat, insertCollarMat, ORBIT_TRIGGER_WIDTH_M * 0.6, triggerDef.x, triggerDef.z);
                 // Lamp system id (registered in main()) - kind+side, e.g. 'orbitEntranceLeft'.
                 const lampId = triggerDef.kind + (orbitDef.side === 'left' ? 'Left' : 'Right');
                 orbitLampMeshes.push({ id: lampId, mesh: lamp });
