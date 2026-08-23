@@ -5303,10 +5303,33 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // here since it's needed just to test flippers at all). window-level listeners, not
         // canvas-focused, so no click-to-focus step is needed first.
         window.addEventListener('keydown', (e) => {
+            // Input-boundary audit fix: a flip is a BARE arrow press. Ctrl/Meta/Alt + arrow is a
+            // browser or OS shortcut the player is aiming at something else entirely (Alt+Left and
+            // Cmd+Left are Back; Ctrl/Cmd+arrow are word/desktop navigation), and firing a flipper
+            // off it is both a false activation and a stuck-flipper risk: if the browser consumes
+            // the chord to navigate or switch context, the matching keyup may never be delivered
+            // to this page at all. Confirmed via Playwright that Ctrl/Alt/Meta+ArrowLeft each flew
+            // the left flipper before this guard.
+            //
+            // Shift is deliberately NOT in this list: it is not a shortcut prefix for the arrows
+            // in any browser, and a player resting a hand on Shift must not silently lose their
+            // flippers. keyup below is deliberately NOT filtered either - see its own comment.
+            //
+            // Space and Escape are deliberately left unfiltered, and that asymmetry is the audited
+            // decision, not an oversight. Filtering Space's keydown would let its keyup still fall
+            // through to handleLaunchRelease() (which intentionally launches without a matching
+            // press - see its own comment), turning a harmless chord into a phantom launch; and
+            // Escape's only chords (Ctrl/Alt+Esc) background the window, where the blur handler's
+            // openPauseMenu() already produces the exact same, idempotent result.
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
             // Optional "lane change" mechanic (rotateLaneLamps()) - checked on the off->on edge,
             // BEFORE activateFlipper() flips flipper.active to true, same guard activateFlipper()
             // itself uses to fire its solenoid sound only once per real press, not once per
-            // browser key-repeat event.
+            // browser key-repeat event. That state-edge check is deliberately used INSTEAD of an
+            // `if (e.repeat) return` bail: it suppresses the repeat side effects just as
+            // completely, but still activates correctly in the one case an e.repeat bail would
+            // break - a key already physically held as the page takes focus, where the browser
+            // delivers repeat keydowns with no initial non-repeat one to latch onto.
             if (e.code === 'ArrowLeft') {
                 if (!leftFlipper.active) rotateLaneLamps(-1);
                 activateFlipper(leftFlipper);
@@ -5316,6 +5339,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 activateFlipper(rightFlipper);
             }
         });
+        // Release is deliberately unconditional - no modifier check, no state check. A player who
+        // grabs Ctrl/Cmd MID-HOLD and then lets go of the arrow sends a keyup carrying that
+        // modifier, and the one thing a flipper must never do is stay down because the release
+        // looked unusual. deactivateFlipper() is idempotent, so an unmatched keyup is a harmless
+        // no-op; a filtered one would be a flipper stuck up for the rest of the ball.
         window.addEventListener('keyup', (e) => {
             if (e.code === 'ArrowLeft') deactivateFlipper(leftFlipper);
             if (e.code === 'ArrowRight') deactivateFlipper(rightFlipper);
@@ -8015,6 +8043,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // that submenu is open, matching the 2D version's exact behavior.
         window.addEventListener('keydown', (e) => {
             if (e.code !== 'Escape') return;
+            // Input-boundary audit fix: Escape auto-repeats like any other key, and every branch
+            // below is a TOGGLE, so a held Escape was strobing the game between paused and running
+            // once per repeat - confirmed via Playwright (a hold with an odd number of repeats
+            // ended up un-paused, i.e. the player's deliberate pause had been undone by their own
+            // still-held key). Only the true off->on edge may act. Unlike the flipper handler
+            // above, an e.repeat bail is exactly right here: there is no held-state to latch, and
+            // a missed initial keydown just means no pause, never a stuck control.
+            if (e.repeat) return;
             if (controlsOverlay.style.display === 'flex') {
                 backFromControlsScreen();
                 return;
