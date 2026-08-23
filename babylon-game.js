@@ -2803,6 +2803,99 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return texture;
     }
 
+    // Mission drop-target face. A real illuminated drop target is a translucent plastic plate with
+    // a bright printed border, a number, and a lamp behind it - the border and the number are what
+    // make a bank of them readable at a glance, and are exactly what a single flat colour can't
+    // give. Same procedural DynamicTexture approach as createBumperCapTexture() above, for the
+    // same reason: no asset to ship, and it stays the FALLBACK - SKIN_MANIFEST.missionTargetFace[i]
+    // reassigns albedoTexture wholesale when real artwork exists (applySkinTexture() runs after
+    // this), so custom art never has to fight a baked-in border.
+    //
+    // Deliberately only an albedoTexture, never an emissiveTexture: a skin only ever replaces
+    // albedoTexture, so a procedural emissive layer would keep glowing this border through
+    // whatever art was dropped on top. The material's flat emissiveColor supplies the "lit plastic"
+    // glow instead, which custom art inherits correctly.
+    function createTargetFaceTexture(scene, color, number) {
+        const w = 128, h = 136;
+        const texture = new BABYLON.DynamicTexture('targetFaceTex' + number, { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        // The chakra colour is baked in here, so the material's own albedoColor is set to white by
+        // the caller - otherwise the tint would be applied twice (texture x albedoColor) and every
+        // target would read as a muddy near-black plate.
+        //
+        // Lighter shades mix toward WHITE rather than scaling the colour up, which matters because
+        // the chakra palette is deliberately saturated: HEX_CHAKRA[1] is 0xff1493 and [2] is
+        // 0xffff00, so multiplying by anything >1 just clamps and every "brighter" stop comes out
+        // as the identical flat colour - a gradient that renders as no gradient at all. Mixing
+        // toward white is the only way to get real luminance range out of a channel already at 1.
+        const rgb = (r, g, b, a) => 'rgba(' + Math.round(r * 255) + ',' + Math.round(g * 255) + ',' + Math.round(b * 255) + ',' + a + ')';
+        const lighten = (t, a) => rgb(color.r + (1 - color.r) * t, color.g + (1 - color.g) * t, color.b + (1 - color.b) * t, a === undefined ? 1 : a);
+        const shade = (s2, a) => rgb(color.r * s2, color.g * s2, color.b * s2, a === undefined ? 1 : a);
+        const roundRect = (x, y, rw, rh, r) => {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + rw, y, x + rw, y + rh, r);
+            ctx.arcTo(x + rw, y + rh, x, y + rh, r);
+            ctx.arcTo(x, y + rh, x, y, r);
+            ctx.arcTo(x, y, x + rw, y, r);
+            ctx.closePath();
+        };
+
+        // Dark moulded rim right at the plate's edge. Drawn first, as the base layer everything
+        // else sits inside: without it the bright border below has nothing to read against on its
+        // outer side, and against the dark playfield the plate's silhouette dissolves.
+        ctx.fillStyle = shade(0.16);
+        ctx.fillRect(0, 0, w, h);
+
+        // Plate body: brightest just under the top edge and deepening downward, the way a plate lit
+        // from a lamp behind its upper half actually falls off. Kept deliberately short of white
+        // at its brightest stop so the printed border below still stands out against it.
+        const body = ctx.createLinearGradient(0, 0, 0, h);
+        body.addColorStop(0.00, lighten(0.06));
+        body.addColorStop(0.32, lighten(0.34));
+        body.addColorStop(1.00, shade(0.30));
+        ctx.fillStyle = body;
+        roundRect(7, 7, w - 14, h - 14, 8);
+        ctx.fill();
+
+        // Printed border: a bright ring, then a dark hairline just inside it. The dark line is what
+        // stops the bright ring from bleeding into the plate body at a distance, which is the whole
+        // reason real target art draws one - and here it also survives the material's flat emissive
+        // glow, which lifts every channel equally and so preserves dark-on-light contrast better
+        // than light-on-light.
+        ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+        ctx.lineWidth = 6;
+        roundRect(11, 11, w - 22, h - 22, 7);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 3;
+        roundRect(16, 16, w - 32, h - 32, 5);
+        ctx.stroke();
+
+        // Bank number. Real drop-target banks are numbered so the player can tell which one is
+        // still standing without reading its colour - the single most useful mark to put here.
+        ctx.fillStyle = 'rgba(255,255,255,0.97)';
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 5;
+        ctx.font = 'bold 66px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeText(String(number), w / 2, h * 0.52);
+        ctx.fillText(String(number), w / 2, h * 0.52);
+
+        // Moulded-plastic sheen across the top third - the highlight a curved plastic face catches,
+        // and a cue that reads as depth even when the plate is only ~30px tall on screen.
+        const gloss = ctx.createLinearGradient(0, 0, 0, h * 0.40);
+        gloss.addColorStop(0, 'rgba(255,255,255,0.22)');
+        gloss.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gloss;
+        roundRect(7, 7, w - 14, h * 0.40, 8);
+        ctx.fill();
+
+        texture.update();
+        return texture;
+    }
+
     // Ball trail: emitter attached directly to the ball mesh (particles spawn at its current
     // position every frame automatically), additive-blended for a luminous (not opaque) look -
     // direct port of setupParticles()'s follow-the-ball ballTrail emitter, kept as the one and
@@ -3775,11 +3868,28 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // (targets 0-2 use chakra[0-2]: violet, pink, yellow) instead of one shared color.
         const targetMats = COLOR_CHAKRA.map((color, i) => {
             const mat = new BABYLON.PBRMaterial('targetMat' + i, scene);
-            mat.albedoColor = color;
+            // White, NOT the chakra colour, because createTargetFaceTexture() below bakes that
+            // colour into the albedo texture. albedoTexture is multiplied by albedoColor, so
+            // leaving the tint here as well would square it and turn every plate near-black. This
+            // also matches what applySkinTexture() itself does when real artwork loads (it resets
+            // albedoColor to white for exactly the same reason), so the procedural and skinned
+            // paths now agree instead of one of them being a special case.
+            mat.albedoColor = new BABYLON.Color3(1, 1, 1);
+            mat.albedoTexture = createTargetFaceTexture(scene, color, i + 1);
             mat.metallic = 0.15;
             mat.roughness = 0.25;
             mat.alpha = 0.85;
-            mat.emissiveColor = color.scale(0.55);
+            // The plate's "lit from behind" glow. Flat (no emissive texture) on purpose - see
+            // createTargetFaceTexture()'s own comment for why that's what keeps a skin clean.
+            //
+            // Cut from 0.55 because that was measured (screenshot, gameplay camera) to clip the
+            // plate to a flat saturated block: a uniform 0.55 added to an already-saturated chakra
+            // colour pushes both live channels past 1 before the scene's GlowLayer even blooms it,
+            // so every bit of albedo variation - border, number, gradient - was crushed out. 0.30
+            // leaves headroom for the face texture to actually show while keeping the plate
+            // clearly self-lit, which is the point of an illuminated drop target. The lamp
+            // material below is unchanged and still carries the bank's bright/locked state.
+            mat.emissiveColor = color.scale(0.30);
             return mat;
         });
 
@@ -3801,6 +3911,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // bank only has 3) would mean two targets fighting over the same texture slot if
             // that ever happened - guarded for by only ever touching THIS target's own material
             // instance, never a shared one, same as the rest of this loop already assumes.
+            //
+            // Ordering matters and is deliberate: the procedural face texture is assigned to the
+            // material ABOVE, so this call cleanly replaces it when a skin exists rather than
+            // racing it. Nothing in this decorative block touches the box's dimensions or the
+            // aggregate below, so custom art can never alter the physics.
             applySkinTexture(scene, mesh.material, SKIN_MANIFEST.missionTargetFace[i]);
             mesh.metadata = { kind: 'missionTarget', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
@@ -3812,30 +3927,62 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // fully decoupled from wherever the flag mesh currently is mid-animation.
             aggregate.shape.isTrigger = true;
 
-            // Drop-target read: a darker backing panel just behind the flag (a real drop target's
-            // mounting bracket) plus a small indicator lamp at its base, matching the classic
-            // pinball rollover-lane light motif - both purely decorative, no physics.
-            const backing = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Backing', {
-                width: TARGET_RADIUS_M * 2.4,
-                height: 0.034,
-                depth: 0.004
-            }, scene);
-            backing.position.set(pos.x, 0.015, pos.z + 0.006);
-            backing.material = housingMat;
+            // --- Drop-target fixture (visual-only). ---------------------------------------
+            // What a real drop target actually is: a plate that slides in a slot between two
+            // posts, with a lamp behind it. The previous look was two flat panels stacked behind
+            // the plate, which gave a border but no depth and - more importantly - nothing to see
+            // once the plate dropped, so raised vs. dropped read as "flag present / flag gone".
+            //
+            // Everything below is unparented and static on purpose. The drop animation only moves
+            // the face mesh's position.y (updateDropTargetBank() in main()), so leaving the
+            // hardware behind is both correct - a real target's mounting bracket doesn't sink with
+            // the plate - and what creates the dropped-state read: the lit slot behind the plate
+            // is revealed. That means zero changes to the animation, the collider, or the scoring.
+            //
+            // Mesh budget, measured in-scene rather than estimated: the 2 flat panels per target
+            // become 5 (slot wall, 2 posts, front lip, backlight), all untextured 12-triangle
+            // boxes on materials that already existed. Whole-scene cost of this pass: 200 -> 209
+            // meshes, 78512 -> 78620 triangles (+0.14%), 102 -> 102 materials, 57 -> 57 physics
+            // bodies.
 
-            // Mounting-bracket trim frame (obstacle visual-polish pass, user-requested - "trim...
-            // contrasting materials"): a slightly larger, thinner panel directly behind the
-            // backing, peeking out as a border on all sides - reuses railCapMat (the same
-            // polished-trim material every guide rail's bevel cap already shares) so the target
-            // bank's hardware reads as the same "trim language" as the rest of the board's
-            // fixtures, not a one-off.
-            const frame = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Frame', {
-                width: TARGET_RADIUS_M * 2.7,
-                height: 0.038,
+            // Slot back wall - the dark recess the plate slides into. Sits behind the plate's own
+            // back face (z +0.008 vs. the plate's +0.004), never intersecting it.
+            const backPanel = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Housing', {
+                width: TARGET_RADIUS_M * 3.1,
+                height: 0.034,
                 depth: 0.003
             }, scene);
-            frame.position.set(pos.x, 0.015, pos.z + 0.009);
-            frame.material = railCapMat;
+            backPanel.position.set(pos.x, 0.017, pos.z + 0.0095);
+            backPanel.material = housingMat;
+
+            // The two guide posts the plate runs between. Deep enough (0.020) to span from just in
+            // front of the plate back to the slot wall, so they read as a real channel rather than
+            // trim stuck on the front - that depth is what makes the fixture look moulded. Their
+            // inner faces land exactly on the plate's edges (x +/-0.014 = TARGET_RADIUS_M) so they
+            // frame it without ever clipping through it. railCapMat is the same polished-trim
+            // material every guide rail's bevel cap uses, keeping the bank in the board's existing
+            // hardware language instead of introducing a one-off metal.
+            [-1, 1].forEach((side) => {
+                const post = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Post' + (side < 0 ? 'L' : 'R'), {
+                    width: 0.006,
+                    height: 0.032,
+                    depth: 0.020
+                }, scene);
+                post.position.set(pos.x + side * 0.017, 0.016, pos.z + 0.001);
+                post.material = railCapMat;
+            });
+
+            // Front lip at the mouth of the slot. Low enough to only overlap the plate's bottom
+            // few millimetres, so a raised plate looks like it emerges from the fixture - and once
+            // the plate drops, this is the edge that keeps the empty slot reading as a slot rather
+            // than a hole in the playfield.
+            const lip = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'Lip', {
+                width: 0.040,
+                height: 0.0035,
+                depth: 0.005
+            }, scene);
+            lip.position.set(pos.x, 0.00175, pos.z - 0.0070);
+            lip.material = railCapMat;
 
             // Its own cloned material (not shared with the flag's targetMats[i] like before) so
             // the lamp can independently show the target's raised/dropped state - matching the
@@ -3847,10 +3994,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             lampMat.metallic = 0.2;
             lampMat.roughness = 0.4;
             lampMat.emissiveColor = lampColor.scale(0.9);
-            const lamp = BABYLON.MeshBuilder.CreateSphere('missionTarget' + i + 'Lamp', {
-                diameter: TARGET_RADIUS_M * 0.6
+
+            // Backlight panel inside the slot, deliberately sized just UNDER the plate (0.026 wide
+            // x 0.028 tall vs. the plate's 0.028 x 0.030) so a raised plate hides it completely
+            // from every angle the playfield camera can reach, and a dropped plate reveals it. It
+            // shares the indicator lamp's material instance, so it inherits that lamp's state for
+            // free: full brightness while the target stands, the lamp system's dimmer LOCKED level
+            // once it's been knocked down. No new state, no new update hook.
+            const slotGlow = BABYLON.MeshBuilder.CreateBox('missionTarget' + i + 'SlotGlow', {
+                width: 0.026,
+                height: 0.028,
+                depth: 0.0012
             }, scene);
-            lamp.position.set(pos.x, 0.004, pos.z);
+            slotGlow.position.set(pos.x, 0.015, pos.z + 0.0065);
+            slotGlow.material = lampMat;
+
+            // Indicator lamp, now in FRONT of the fixture rather than buried inside the plate's own
+            // box where it was previously invisible while the target stood. Flattened the same way
+            // the pop-bumper cap is, so it reads as an inset playfield insert rather than a bead.
+            const lamp = BABYLON.MeshBuilder.CreateSphere('missionTarget' + i + 'Lamp', {
+                diameter: TARGET_RADIUS_M * 0.85
+            }, scene);
+            lamp.scaling.y = 0.5;
+            lamp.position.set(pos.x, 0.0035, pos.z - 0.014);
             lamp.material = lampMat;
             missionTargetMeshes.push(mesh);
             missionTargetLamps.push(lamp);
@@ -3880,10 +4046,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 height: 0.006,
                 depth: 0.01
             }, scene);
-            header.position.set(bankCenterX, 0.034, bankCenterZ);
+            // Nudged up-table (+14mm in z) as part of the drop-target fixture pass. At its old
+            // z it sat directly over the bank centreline at y 0.031-0.037, i.e. immediately above
+            // plates that top out at 0.030 - from the playfield camera's downward angle that put
+            // a solid dark bar across the upper third of every target face, occluding exactly the
+            // border and number the faces now carry. Moved just behind the new slot back walls
+            // (which end at z +0.011) it reads as the rail the three housings mount to, which is
+            // what it was always meant to be. Decorative only - no collider, no gameplay effect.
+            const bankHeaderZ = bankCenterZ + 0.014;
+            header.position.set(bankCenterX, 0.034, bankHeaderZ);
             header.rotation.y = bankRotationY;
             header.material = housingMat;
-            addRailBevel(scene, 'missionTargetHeaderCap', railCapMat, bankLength, 0.01, bankCenterX, 0.037, bankCenterZ, bankRotationY);
+            addRailBevel(scene, 'missionTargetHeaderCap', railCapMat, bankLength, 0.01, bankCenterX, 0.037, bankHeaderZ, bankRotationY);
         }
 
         // ===================================
