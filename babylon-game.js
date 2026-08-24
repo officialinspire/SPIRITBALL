@@ -1303,7 +1303,35 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             scene
         );
         aggregate.body.setMotionType(BABYLON.PhysicsMotionType.ANIMATED);
-        aggregate.body.disablePreStep = false; // same reasoning as the flippers - Havok needs to read this mesh's transform every step, not just once
+        // PLAYTEST BUG FIX (user-reported: "hold the plunger and release and it wouldn't hit the
+        // ball with enough force, and it would constantly be stuck in a draining loop").
+        //
+        // This was `false`, copied from the flippers with their comment ("Havok needs to read this
+        // mesh's transform every step"). For a flipper that is essential - the bat has to sweep
+        // physically. For the plunger it was wrong, and it is the bug the player was hitting:
+        //
+        // updatePlungerVisual() pulls this mesh back along -Z by up to PLUNGER_TRAVEL_M as charge
+        // builds. With prestep enabled that dragged the COLLIDER back too, and on a tilted table
+        // the resting ball simply followed it down the lane - measured, holding for 2.4s walked
+        // the ball from z -0.2525 to -0.2975 while the rod went -0.2806 to -0.3256. Then release
+        // set chargePercent = 0, teleporting the collider forward THROUGH the ball, and Havok
+        // resolved that penetration by ejecting the ball down-table: recorded leaving the lane at
+        // -0.355 and running off the bottom of the table to -0.92 before the reset caught it. The
+        // launch impulse was applied correctly every time and was simply overwhelmed by the
+        // ejection, which is exactly why it read as "not enough force" followed by an endless
+        // drain loop. A quick tap mostly escaped it because the rod barely moved.
+        //
+        // This is the primary cause but not the whole report: with it fixed the ball leaves the
+        // lane properly, and PLUNGER_HORIZONTAL_BASE_MS's own comment covers the second half -
+        // where it went from there, and why no charge level used to reach a flipper.
+        //
+        // The rod's stroke is animation, not mechanism - the launch is an impulse in
+        // handleLaunchRelease(), never a rod strike - so the collider has no business moving.
+        // Disabling prestep leaves the body at the transform it was created with (the rest pose
+        // set just above) while the visible rod still animates freely. The ball now rests against
+        // a stop that cannot retract out from under it, which is what createPlunger()'s own
+        // "mechanical stop the resting ball leans on" description always claimed it was.
+        aggregate.body.disablePreStep = true;
         aggregate.shape.filterCollideMask = COLLISION_CATEGORY_BALL; // only the ball needs to collide with the plunger
         plunger.aggregate = aggregate;
 
