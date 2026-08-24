@@ -1003,8 +1003,45 @@ export const PLUNGER_MAX_POWER_MS = 1600 * PX_TO_M; // ~1.51 m/s - comfortably u
 // launchBall()'s horizontal kick (-(150 + power*0.08)) ported the same way: a fixed base plus
 // a ratio of the power itself, so proportionally weaker/stronger launches still curve the same
 // relative amount.
-export const PLUNGER_HORIZONTAL_BASE_MS = 150 * PX_TO_M;
-export const PLUNGER_HORIZONTAL_RATIO = 0.08;
+//
+// PLAYTEST BUG FIX, second half (user-reported: "hold the plunger and release and it wouldn't
+// hit the ball with enough force, and it would constantly be stuck in a draining loop"). The
+// primary cause of that report was createPlunger()'s prestep setting - see its own comment -
+// but with that fixed the launch still never gave the player a ball to hit, and this is why.
+//
+// The cause is geometric, not a matter of force. rightGuide's lower end (a rotated bar; its two
+// lower vertices measure to ~(0.186, -0.020) and ~(0.173, -0.025)) sits directly above the
+// shooter lane's exit, and the ball leaves that lane at x=0.196 with a 0.0135 radius. At the old
+// -(0.1417 + power*0.08) the ball drifted inboard just far enough to clip that end, rode its
+// inboard face back OUTBOARD, and then ran the wall-hugging channel between the guide and
+// rightWall - the same channel ORBIT_RAIL_BOTTOM_Z_M's comment already rejects as "not a
+// reliable guided channel" - up to about z=0.10 and straight back down into the right outlane.
+//
+// Measured on the real build, real Space hold-and-release, flipper reach taken from the bats'
+// own meshes at runtime (x +-0.150, z -0.433..-0.334), n=5-6 per cell. "reach" is the only
+// metric the player actually feels: did the ball ever come down somewhere a flipper could hit it?
+//
+//   base/ratio      tap (250-400ms)     mid (1200-1400ms)      full (2400ms)
+//   150 / 0.08          0/6                   0/6                  0/6      flat 500 pts every time
+//   106 / 0.05          0/6                   6/6                  6/6      3917 pts mid, 800 full
+//   118 / 0.05          0/5                   1/5                  0/5
+//     0 / 0             0/6                   0/6                   -
+//
+// The old values put the ball in front of a flipper 0 times out of 18, at every charge level -
+// which is both halves of the report at once: nothing to hit ("not enough force") and an
+// unreachable outlane drain on every single launch ("draining loop"). Charge length made no
+// difference to the outcome, which is exactly why holding longer felt like it did nothing.
+//
+// Backing the kick off to 106/0.05 keeps the ball clear of that guide end, so it carries on
+// inboard and fans into the playfield. Note that removing the kick entirely is NOT the fix: at
+// 0/0 the ball runs the same outboard channel all the way to the comet (z=0.26-0.33, 1500 pts a
+// launch) and then returns down the shooter lane into that same unreachable outlane, 0/12.
+//
+// This is a narrow empirical pocket, not a smooth optimum - 118 with the same ratio collapses
+// back to 1/20. Do not nudge either constant without re-running that reach measurement. The
+// formula's shape is unchanged; both constants keep their original meaning, just gentler.
+export const PLUNGER_HORIZONTAL_BASE_MS = 106 * PX_TO_M; // was 150 - see the block comment above
+export const PLUNGER_HORIZONTAL_RATIO = 0.05; // was 0.08
 
 // ===================================
 // Upper-lane skill shot (user-requested) - turns the plunger's existing variable charge

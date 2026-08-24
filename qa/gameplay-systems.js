@@ -148,12 +148,24 @@ function check(name, ok, detail) {
   await page.keyboard.down('Space');
   await page.waitForTimeout(700);
   await page.keyboard.up('Space');
+  // Sampled ACROSS the window, not just at the end of it. This check is about the launch -
+  // did Space actually put the ball into play - and reading inPlay only on the final frame
+  // quietly turned it into a survival test: a deliberately weak 700ms plunge (35% charge) is
+  // a bad shot, and a bad shot is allowed to drain inside the observation window. It started
+  // doing exactly that once PLUNGER_HORIZONTAL_BASE_MS was retuned, which made this check fail
+  // for a launch that had demonstrably worked (the ball left the plunger and climbed 0.22m).
+  // stillInPlay is still reported alongside it, so a genuine "never launched at all" and a
+  // "launched then drained" stay distinguishable in the failure output.
   const postLaunch = await page.evaluate(async () => {
-    let maxZ = -99;
-    for (let f = 0; f < 40; f++) { await window.__gp.frame(); maxZ = Math.max(maxZ, window.__gp.ballPos().z); }
-    return { inPlay: window.__gp.inPlay(), z: +maxZ.toFixed(3) };
+    let maxZ = -99, entered = false;
+    for (let f = 0; f < 40; f++) {
+      await window.__gp.frame();
+      maxZ = Math.max(maxZ, window.__gp.ballPos().z);
+      if (window.__gp.inPlay()) entered = true;
+    }
+    return { enteredPlay: entered, stillInPlay: window.__gp.inPlay(), z: +maxZ.toFixed(3) };
   });
-  check('Space launches: the ball leaves the plunger and enters play', postLaunch.inPlay === true, postLaunch);
+  check('Space launches: the ball leaves the plunger and enters play', postLaunch.enteredPlay === true, postLaunch);
   check('the launched ball travels up-table out of the shooter lane', postLaunch.z > preLaunch.z + 0.1, { from: +preLaunch.z.toFixed(3), maxZ: postLaunch.z });
 
   // =====================================================================================
