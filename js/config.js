@@ -1293,10 +1293,40 @@ export const RANK_NAMES = [
 //     fits at the 12px desktop size and is ellipsised at the 11px <=480px size - which is
 //     exactly what 'RE-ENTRY CIRCUIT' (also 16 chars) already did, so phone behaviour is
 //     unchanged. See that rule's own comment for the numbers.
+//
+// `objective` (user-requested) is a SHORT player-facing "what do I actually shoot" line. Pure
+// display data - nothing reads it but the activation message in startMission(). It is not a
+// second mechanic: progress still comes from `type` alone.
+//
+// It is shown at ONE surface, and that was decided by measuring the three places a vision name
+// reaches the player rather than by taste:
+//
+//   activation message plate   ~294px tall, wraps to two lines, shrinks 150 -> 48px.  SHOWN
+//                              'VISION: <name>: <objective>' lands at 58/62/54px with the wrap
+//                              breaking exactly between name and objective for all three. No
+//                              overflow, comfortably above the 48px floor.
+//   steady VISION window       NOT SHOWN. There is no room at all: the 84px name ends at y=412
+//                              and the progress bar starts at y=414 - a 2px gap - inside a
+//                              window whose bottom edge is y=466.
+//   #mission-hud (index.html)  NOT SHOWN. Two of the three objectives already ellipsise at the
+//                              DESKTOP width ('HIT THE POP BUMPERS' 137px into 123px,
+//                              'COMPLETE THE RE-ENTRY LANES' 194px into 123px), before the
+//                              narrower <=480px size is even reached.
+//
+// Cost worth knowing about, since it is the reason this is a judgement call and not a free win:
+// carrying the objective drops the activation flash from 106px to 54-62px, i.e. roughly 26 to
+// 17 CSS px on screen. drawMessage()'s own comment sets this plate's bar at "about 34 CSS px on
+// screen, against the 18 the old treatment managed" - so the combined line sits at the bottom of
+// that range. Showing the objective ALONE would hold ~106px (the name is still carried by the
+// VISION window and #mission-hud the moment the flash clears); that is a one-line change here if
+// the bigger flash is worth more than naming the vision twice.
+//
+// Keep these short. The plate is the constraint: 27 characters ('COMPLETE THE RE-ENTRY LANES')
+// is what pins the size to 54px, and anything longer will shrink it further.
 export const MISSION_DEFS = [
-    { type: 'bumper', name: 'CHAKRA AWAKENING' },
-    { type: 'comet', name: 'ASTRAL PURSUIT' },
-    { type: 'lane', name: 'RETURN TO BODY' }
+    { type: 'bumper', name: 'CHAKRA AWAKENING', objective: 'HIT THE POP BUMPERS' },
+    { type: 'comet', name: 'ASTRAL PURSUIT', objective: 'STRIKE THE COMET' },
+    { type: 'lane', name: 'RETURN TO BODY', objective: 'COMPLETE THE RE-ENTRY LANES' }
 ];
 export function missionRequiredCount(rank) {
     return 3 + rank; // scales with rank so later missions take deliberately more effort

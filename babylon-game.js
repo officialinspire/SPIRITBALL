@@ -7868,7 +7868,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             backglass.state.missionName = MISSION_DEFS[index].name;
             backglass.state.missionProgress = 0;
             backglass.state.missionRequired = mission.required;
-            backglass.showMessage('VISION: ' + MISSION_DEFS[index].name, 900);
+            // Name AND objective (user-requested). One string, not a second showMessage() call:
+            // showMessage() has no queue, so a follow-up would just silently overwrite this one
+            // (see its own comment). The trailing colon after the name is what makes
+            // drawMessage()'s greedy two-line wrap break exactly on the name/objective boundary
+            // for all three visions - measured; a dash or a slash there orphans the separator at
+            // the start of line 2. See MISSION_DEFS for the full surface-by-surface measurement,
+            // including why the steady VISION window and #mission-hud do NOT carry this.
+            backglass.showMessage(
+                'VISION: ' + MISSION_DEFS[index].name + ': ' + MISSION_DEFS[index].objective,
+                900
+            );
         }
 
         // Called from the hit handlers below with the scoring category that just happened
