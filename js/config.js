@@ -1222,13 +1222,39 @@ export const COMBO_DEFS = [
     { name: 'BANK RUSH', steps: ['laneBankComplete', COMBO_ORBIT_TYPES], stepWindowMs: COMBO_STEP_WINDOW_MS }
 ];
 
-// Rank names ported from the classic "3D Pinball for Windows - Space Cadet" progression this
-// table's own layout is explicitly modeled on (see buildObstacles()'s "authentic
-// Space-Cadet-inspired" comment) - the same rank ladder archive/KNOWN_ISSUES.md item 3
-// references ("LT Commander -> Fleet Admiral", ranks 4-8 there matching indices 4-8 here).
+// Rank ladder (user-requested retheme). Was the naval ladder ported from "3D Pinball for
+// Windows - Space Cadet" ('Cadet' ... 'Fleet Admiral'), which this table's layout is still
+// modeled on (see buildObstacles()'s "authentic Space-Cadet-inspired" comment) - the ranks
+// themselves now follow the game's own DMT-vision-quest theme instead. archive/KNOWN_ISSUES.md
+// item 3's "LT Commander -> Fleet Admiral" refers to the old naval names at indices 4-8.
+//
+// PURELY THE DISPLAYED STRINGS. Index order, length (10), and therefore every consumer of it is
+// unchanged: missionRequiredCount(rank) still scales 3+rank, completeMission()'s
+// Math.min(rank + 1, RANK_NAMES.length - 1) still caps at index 9, and nothing persists a rank
+// (localStorage holds only spiritball-highscore and spiritball-muted), so no saved state can
+// carry an old name forward.
+//
+// Length matters here, not just wording: the backglass draws the rank with a shrink-to-fit loop
+// that bottoms out at 45px (see the rank row in babylon-game.js), and a name still too wide at
+// that floor runs under the multiplier/bonus badges. Measured by replaying that row's own layout
+// maths against a 1024px canvas with the same font stack, in the monospace fallback (the widest
+// case - a machine with Bahnschrift/DIN Condensed renders narrower):
+//
+//   badges showing      old ladder                    this ladder
+//   none                all fit (widest 610/760)      all fit (widest 517/760)
+//   multiplier only     all fit (widest 564/577)      all fit (widest 517/577)
+//   BOTH badges         4 of 10 overflow, up to       4 of 10 overflow, up to 46px
+//                       100px ('Lieutenant JG',       ('DREAMWALKER'/'COSMIC SELF' 46px,
+//                       'Lt. Commander',              'PSYCHONAUT'/'GATEKEEPER' 18px)
+//                       'Fleet Admiral')
+//
+// So the both-badges overflow is a PRE-EXISTING limit of that row's 45px floor, not something
+// this retheme introduces - and these names more than halve its worst case. Left alone here
+// deliberately: fixing it means changing the row's layout, which is not a content change. If it
+// is ever worth fixing, the lever is that floor (or letting the rank wrap), not these strings.
 export const RANK_NAMES = [
-    'Cadet', 'Ensign', 'Lieutenant JG', 'Lieutenant', 'Lt. Commander',
-    'Commander', 'Captain', 'Commodore', 'Admiral', 'Fleet Admiral'
+    'INITIATE', 'SEEKER', 'DREAMER', 'WITNESS', 'DREAMWALKER',
+    'VISIONARY', 'PSYCHONAUT', 'GATEKEEPER', 'ASCENDANT', 'COSMIC SELF'
 ];
 
 // One mission slot per mission-target index (0-2, see MISSION_TARGET_BANK), each tied to a

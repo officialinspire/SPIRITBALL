@@ -7881,11 +7881,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.state = 'idle';
             mission.selectedIndex = null;
             mission.progress = 0;
-            // Bug fix (playtest audit): at max rank (Fleet Admiral), mission.rank was already
-            // capped by this same Math.min() below, but the message always read "RANK UP: Fleet
-            // Admiral" regardless - misleading every time a mission completed after reaching max
-            // rank, since no rank-up actually happened. Confirmed via a forced-max-rank Playwright
-            // test. Now only shown when the rank index genuinely changed.
+            // Bug fix (playtest audit): at the top rank (index RANK_NAMES.length - 1), mission.rank
+            // was already capped by this same Math.min() below, but the message still read
+            // "RANK UP: <top rank>" regardless - misleading every time a mission completed after
+            // reaching max rank, since no rank-up actually happened. Confirmed via a forced-max-
+            // rank Playwright test. Now only shown when the rank index genuinely changed. (Written
+            // against the old naval ladder, where the top rank was 'Fleet Admiral'; the ladder has
+            // since been rethemed - see RANK_NAMES - and the index arithmetic is what matters.)
             const rankedUp = mission.rank < RANK_NAMES.length - 1;
             mission.rank = Math.min(mission.rank + 1, RANK_NAMES.length - 1);
             stats.missionsCompleted++;
