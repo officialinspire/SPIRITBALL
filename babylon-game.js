@@ -2748,7 +2748,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 badgeX -= 14;
             }
 
-            const rankLegendEnd = drawLegend('RANK', PAD + 4, ROW_Y + 6, 46, 'rgba(150, 245, 255, 0.8)', 7);
+            // Legend reads STATE, not RANK (user-requested terminology pass). This is the widest
+            // of the retheme's string changes in consequence, not just in characters: drawLegend()
+            // returns where it stopped, and rankX is that + 22, so a longer legend eats directly
+            // into the room the shrink-to-fit below has for the value. Re-measured after the
+            // change - see RANK_NAMES' fit note in js/config.js for the numbers.
+            const rankLegendEnd = drawLegend('STATE', PAD + 4, ROW_Y + 6, 46, 'rgba(150, 245, 255, 0.8)', 7);
             const rankX = rankLegendEnd + 22;
             // Shrink-to-fit against whatever the badges left. Without this a long rank name runs
             // straight underneath them - "Ascendant" alongside both badges was overlapping in a
@@ -2770,7 +2775,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const missionActive = !!state.missionName;
             drawWindow(PAD, MI_Y, width - PAD * 2, MI_H,
                 missionActive ? 'rgba(255, 170, 0, 0.45)' : 'rgba(120, 245, 255, 0.16)');
-            drawLegend('MISSION', PAD + 26, MI_Y + 18, 46,
+            // VISION, not MISSION (user-requested). The window's value line below is drawn at a
+            // fixed PAD + 26, so unlike the STATE legend above this one's width does not constrain
+            // the name it labels.
+            drawLegend('VISION', PAD + 26, MI_Y + 18, 46,
                 missionActive ? 'rgba(255, 210, 140, 0.9)' : 'rgba(150, 245, 255, 0.45)', 7);
             if (missionActive) {
                 // Shrink-to-fit so a long mission name never spills past the window's bezel.
@@ -7860,7 +7868,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             backglass.state.missionName = MISSION_DEFS[index].name;
             backglass.state.missionProgress = 0;
             backglass.state.missionRequired = mission.required;
-            backglass.showMessage('MISSION: ' + MISSION_DEFS[index].name, 900);
+            backglass.showMessage('VISION: ' + MISSION_DEFS[index].name, 900);
         }
 
         // Called from the hit handlers below with the scoring category that just happened
@@ -7883,7 +7891,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.progress = 0;
             // Bug fix (playtest audit): at the top rank (index RANK_NAMES.length - 1), mission.rank
             // was already capped by this same Math.min() below, but the message still read
-            // "RANK UP: <top rank>" regardless - misleading every time a mission completed after
+            // "ASCENSION: <top state>" regardless - misleading every time a vision completed after
             // reaching max rank, since no rank-up actually happened. Confirmed via a forced-max-
             // rank Playwright test. Now only shown when the rank index genuinely changed. (Written
             // against the old naval ladder, where the top rank was 'Fleet Admiral'; the ladder has
@@ -7899,7 +7907,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // hidden end-of-ball pool, on top of (not instead of) the immediate MISSION_COMPLETE_
             // BONUS above. Doesn't touch mission/rank state or messaging at all - purely additive.
             ballBonus.points += BONUS_MISSION_COMPLETE_AMOUNT;
-            backglass.showMessage(rankedUp ? 'RANK UP: ' + RANK_NAMES[mission.rank] : 'MISSION COMPLETE!', 1600);
+            backglass.showMessage(rankedUp ? 'ASCENSION: ' + RANK_NAMES[mission.rank] : 'VISION COMPLETE!', 1600);
             // A stronger beat than any regular hit's - completing a mission and ranking up is the
             // single biggest moment the game currently has, deserves to read as one.
             triggerCameraShake(500, 0.01);
@@ -9005,10 +9013,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // mounted-panel treatment is reserved for the in-gameplay backglass, 09-*.md, which earns
         // its 3D-ness by being part of the cabinet during play).
         //
-        // Final Rank and a Missions Completed stat line (see showGameOverScreen() below) were
-        // deliberately NOT shown when this stage was built - no mission FSM existed yet, so a
-        // "Final Rank" would've just been a permanently-fake "Rookie." Both now show real,
-        // earned values - see improvement-prompts/05-*.md.
+        // The FINAL STATE line and a Visions Completed stat line (see showGameOverScreen() below)
+        // were deliberately NOT shown when this stage was built - no mission FSM existed yet, so a
+        // final state would've just been a permanently-fake placeholder. Both now show real,
+        // earned values - see improvement-prompts/05-*.md. (Both read "Final Rank"/"Missions
+        // Completed" until the user-requested terminology pass; the state itself is still
+        // mission.rank internally.)
         const menuOverlay = document.getElementById('menu-overlay');
         // Visual length of the title screen's exit fade. Must match #menu-overlay.is-starting's
         // transition-duration in index.html; nothing about gameplay is gated on it.
@@ -9400,7 +9410,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // Final Rank (improvement-prompts/05-*.md) - previously deliberately omitted per
             // Stage 12's implementation note, since no real rank-progression system existed yet
             // to back it; backglass.state.rank now holds this run's genuine final rank.
-            document.getElementById('gameover-rank-line').textContent = 'FINAL RANK: ' + backglass.state.rank;
+            document.getElementById('gameover-rank-line').textContent = 'FINAL STATE: ' + backglass.state.rank;
 
             // High-score audit fix - see newHighScoreThisGame's own declaration comment for why
             // this can't just compare score to backglass.state.highScore here (addScore() already
@@ -9417,7 +9427,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const statsEl = document.getElementById('gameover-stats');
             statsEl.innerHTML = '';
             const statLines = [
-                ['Missions Completed', stats.missionsCompleted],
+                ['Visions Completed', stats.missionsCompleted],
                 ['Bumper Hits', stats.bumperHits],
                 ['Comet Hits', stats.cometHits],
                 ['Saturn Hits', stats.saturnHits],

@@ -1240,18 +1240,27 @@ export const COMBO_DEFS = [
 // maths against a 1024px canvas with the same font stack, in the monospace fallback (the widest
 // case - a machine with Bahnschrift/DIN Condensed renders narrower):
 //
-//   badges showing      old ladder                    this ladder
-//   none                all fit (widest 610/760)      all fit (widest 517/760)
-//   multiplier only     all fit (widest 564/577)      all fit (widest 517/577)
-//   BOTH badges         4 of 10 overflow, up to       4 of 10 overflow, up to 46px
-//                       100px ('Lieutenant JG',       ('DREAMWALKER'/'COSMIC SELF' 46px,
-//                       'Lt. Commander',              'PSYCHONAUT'/'GATEKEEPER' 18px)
-//                       'Fleet Admiral')
+// RE-MEASURED after the terminology pass renamed that row's legend from RANK to STATE. That is
+// not cosmetic for this table: drawLegend() returns where it stopped and the value starts 22px
+// after it, so the wider legend moved the value's left edge 196 -> 221 and took 25px off every
+// figure in the right-hand column below.
 //
-// So the both-badges overflow is a PRE-EXISTING limit of that row's 45px floor, not something
-// this retheme introduces - and these names more than halve its worst case. Left alone here
-// deliberately: fixing it means changing the row's layout, which is not a content change. If it
-// is ever worth fixing, the lever is that floor (or letting the rank wrap), not these strings.
+//   badges showing   old ladder + RANK     this ladder + RANK    this ladder + STATE (shipping)
+//   none             all fit (610/760)     all fit (517/760)     all fit (517/735)
+//   multiplier only  all fit (564/577)     all fit (517/552)     all fit (517/552)
+//   BOTH badges      4/10 over, max 100px  4/10 over, max 46px   6/10 over, max 70px
+//                    ('Lieutenant JG',     ('DREAMWALKER',       (adds 'VISIONARY' and
+//                    'Lt. Commander',      'COSMIC SELF' 46px,   'ASCENDANT' at 16px each;
+//                    'Fleet Admiral')      'PSYCHONAUT',         'DREAMWALKER'/'COSMIC SELF'
+//                                          'GATEKEEPER' 18px)    70px, the other two 43px)
+//
+// So: the both-badges overflow is a PRE-EXISTING limit of that row's 45px floor - the old naval
+// ladder overflowed further than anything here does - but the STATE legend genuinely made it
+// worse, 4 of 10 to 6 of 10. It only shows while the 2X score power-up and a bonus multiplier
+// above 1X are BOTH lit, which is an uncommon state, and it is a layout problem rather than a
+// content one, so it is recorded rather than worked around by picking shorter words. The lever,
+// if it is ever worth pulling, is that 45px floor (or letting the value wrap) in the rank row
+// itself - not these strings and not the legend.
 export const RANK_NAMES = [
     'INITIATE', 'SEEKER', 'DREAMER', 'WITNESS', 'DREAMWALKER',
     'VISIONARY', 'PSYCHONAUT', 'GATEKEEPER', 'ASCENDANT', 'COSMIC SELF'
