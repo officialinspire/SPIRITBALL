@@ -8695,8 +8695,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 backglass.showMessage('RE-ENTRY!', 800);
                 triggerCameraShake(80, 0.003); // matches hitReentryLane()'s cameraShake(80, 0.003)
                 playRolloverClickSound(990); // rollover switch click layer, distinct from the generic playHitSound()
-                // Unchanged from before this upgrade - still feeds the 'RE-ENTRY CIRCUIT' mission
-                // on every scoring hit, lit or not. Kept fully separate from the bank-complete
+                // Unchanged from before this upgrade - still feeds the 'lane' mission (displayed
+                // as 'RETURN TO BODY', see MISSION_DEFS) on every scoring hit, lit or not. What is
+                // passed here is the TYPE, never the name. Kept fully separate from the bank-complete
                 // check below (see laneBank's own block comment for why).
                 progressMission('lane');
                 if (newlyLit && laneBank.every((lane) => lane.lit)) {

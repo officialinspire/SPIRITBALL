@@ -1264,10 +1264,30 @@ export const RANK_NAMES = [
 // separate launch-ramp "start" step, which has no equivalent object in this 3D build (a
 // mission-target hit selects AND starts in one action here - a deliberate simplification,
 // not an oversight).
+//
+// Mission NAMES rethemed (user-requested) to match the game's own vision-quest register, the
+// same pass that rethemed RANK_NAMES above. `type` is the mechanic and is UNTOUCHED: it is what
+// progressMission() matches against ('bumper'/'comet'/'lane', see its own comment), what the
+// bumper/comet/re-entry-lane hit handlers pass in, and the array ORDER is what binds each entry
+// to its mission target, since startMission() is called with the struck target's own index. Only
+// the display strings below moved:
+//   bumper -> was 'BUMPER RUN'        (and 'satellite'/'SATELLITE SWEEP' before the comet reskin)
+//   comet  -> was 'COMET CHASE'
+//   lane   -> was 'RE-ENTRY CIRCUIT'
+//
+// Both surfaces that show a mission name were measured against the new strings rather than
+// assumed - see the fit note at RANK_NAMES for why that matters here:
+//   - backglass MISSION window: shrink-to-fit from 84px, floor 52px, 920px of room. All three
+//     names fit at the full 84px with no shrinking, same as the old ones (widest 809px, in the
+//     monospace fallback, which is the widest the stack can render).
+//   - #mission-hud (index.html): a 150px cap with text-overflow:ellipsis. 'CHAKRA AWAKENING'
+//     fits at the 12px desktop size and is ellipsised at the 11px <=480px size - which is
+//     exactly what 'RE-ENTRY CIRCUIT' (also 16 chars) already did, so phone behaviour is
+//     unchanged. See that rule's own comment for the numbers.
 export const MISSION_DEFS = [
-    { type: 'bumper', name: 'BUMPER RUN' },
-    { type: 'comet', name: 'COMET CHASE' }, // was 'satellite'/'SATELLITE SWEEP' - renamed alongside the board redesign's satellite->comet reskin
-    { type: 'lane', name: 'RE-ENTRY CIRCUIT' }
+    { type: 'bumper', name: 'CHAKRA AWAKENING' },
+    { type: 'comet', name: 'ASTRAL PURSUIT' },
+    { type: 'lane', name: 'RETURN TO BODY' }
 ];
 export function missionRequiredCount(rank) {
     return 3 + rank; // scales with rank so later missions take deliberately more effort

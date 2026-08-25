@@ -464,10 +464,14 @@
                resolves to), so at 200% zoom on a narrow phone width a vw-sized box rendered
                visually TWICE as large collided with the score/lives+pause cluster in the opposite
                corner - confirmed via Playwright at 390px + zoom:2. A small fixed cap keeps this
-               box's max footprint predictable and small regardless of zoom; the longest real
-               mission name (RE-ENTRY CIRCUIT, MISSION_DEFS) still comfortably fits inside it, and
-               #mission-hud-name's own overflow:ellipsis (below) is the real safety net for
-               anything longer, not this number. */
+               box's max footprint predictable and small regardless of zoom. Measured against the
+               real element: the longest mission name (CHAKRA AWAKENING, MISSION_DEFS - 16 chars,
+               the same length as the RE-ENTRY CIRCUIT it replaced) fits at the 12px desktop size
+               (115px of 115), and is ELLIPSISED at the 11px <=480px size (106px wanted, 96px of
+               room) - exactly as the old longest name already was, unchanged by the retheme. That
+               is what #mission-hud-name's overflow:ellipsis (below) is for, and it, not this
+               number, is the real safety net. Widening the cap here would trade back the width
+               this rule's whole comment exists to protect. */
             max-width: 150px;
             display: flex;
             align-items: baseline;
