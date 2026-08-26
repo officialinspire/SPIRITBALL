@@ -869,10 +869,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // configured-but-broken slot; that's expected, standard browser diagnostic behavior for any
     // failed HTTP request, not a bug in this function.
     //
-    // entry: one SKIN_MANIFEST value, i.e. { path, kind } - kind picks which material property
-    // gets the loaded texture ('albedo' -> albedoTexture/diffuseTexture, 'emissive' ->
-    // emissiveTexture), matching whichever of those properties that material's own procedural
-    // look already relies on for its base color. Passing a falsy entry (e.g. an out-of-range
+    // entry: one SKIN_MANIFEST value, i.e. { path, kind } (plus an optional albedoScale) - kind
+    // picks which material property gets the loaded texture ('albedo' -> albedoTexture/
+    // diffuseTexture, 'emissive' -> emissiveTexture), matching whichever of those properties that
+    // material's own procedural look already relies on for its base color; albedoScale, where a
+    // slot declares one, caps how bright the loaded artwork is allowed to render (see below, and
+    // js/skins.js for why a slot would want that). Passing a falsy entry (e.g. an out-of-range
     // missionTargetFace index) is a safe no-op, not an error - callers don't need to guard first.
     function applySkinTexture(scene, material, entry) {
         if (!entry || !entry.path || !material) return;
@@ -898,9 +900,21 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     // Only for 'albedo': an emissive texture is additive light output, not a
                     // multiplied tint, so emissiveColor staying at its current (usually lamp-
                     // system-controlled) value is correct as-is.
+                    //
+                    // entry.albedoScale (see js/skins.js) replaces that white with a flat grey
+                    // when a slot declares one, which is the same multiply - just at a documented
+                    // ceiling instead of wide open. It exists for surfaces whose place in the
+                    // board's visual hierarchy is not the artwork's decision to make (cabinetRails
+                    // is the case today: structural boundary, must stay under the gameplay
+                    // elements it frames). Clamped rather than trusted: a slot is data, and data
+                    // outside 0..1 here would either black the surface out or push it back above
+                    // the plain-white default this is supposed to sit below.
                     if (entry.kind !== 'emissive') {
-                        if (material.albedoColor) material.albedoColor.set(1, 1, 1);
-                        else if (material.diffuseColor) material.diffuseColor.set(1, 1, 1);
+                        const level = typeof entry.albedoScale === 'number'
+                            ? Math.max(0, Math.min(1, entry.albedoScale))
+                            : 1;
+                        if (material.albedoColor) material.albedoColor.set(level, level, level);
+                        else if (material.diffuseColor) material.diffuseColor.set(level, level, level);
                     }
                 },
                 () => {
@@ -982,6 +996,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Cabinet/table artwork skin slot (visual-architecture pass, user-requested) - shared by
         // every structural boundary wall below. No-op until assets/skins/cabinet/cabinet-rails.png
         // actually exists (see SKINS.md) - the chrome look above stays exactly as-is either way.
+        //
+        // Placed AFTER albedoColor/albedoTexture above, not before, and that order is load-bearing
+        // in both directions. On a successful load this overwrites both (the artwork's own colours
+        // replace the baked-in COLOR_WALL profile, and albedoColor drops to the slot's albedoScale
+        // so the rails stay under the gameplay elements they frame). On no path or a failed load
+        // it touches neither, so the procedural profile above IS the shipped look rather than a
+        // placeholder waiting on a fetch that may never resolve.
+        //
+        // One shared material across all 7 walls below is also what constrains the artwork itself:
+        // every wall is a CreateBox carrying the default full-square UV on all 6 faces, so a single
+        // clamped image is stretched onto 42 faces spanning 0.36:1 to 22.67:1. Only detail that
+        // varies along v survives that intact - which is precisely why createCabinetRailTexture()
+        // draws a V-only profile, and why the slot's artwork spec is a vertical strip. Both the
+        // manifest entry in js/skins.js and SKINS.md carry the measurements.
         applySkinTexture(scene, wallMat, SKIN_MANIFEST.cabinetRails);
 
         // [x2d, y2d, width2d, height2d, rotation2d] - lifted directly from setupTable() in
@@ -3074,6 +3102,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // material, so real artwork replaces this wholesale (applySkinTexture() runs after it is
     // assigned). The caller sets albedoColor to white for the usual reason - albedoTexture is
     // multiplied by it, and keeping the cyan tint would square it.
+    //
+    // This function is also the reference the artwork spec is written against: the V-only band
+    // layout below (crown 0.000-0.055, falloff -0.130, body -0.700, lower body -0.860, base band
+    // -1.000) is the profile a real cabinet-rails image has to reproduce to sit correctly on the
+    // same 42 faces, and its v=0-is-the-top orientation is the one the artwork inherits. A file
+    // that ignores it does not fail - it just lands its highlight somewhere down the wall. See
+    // SKINS.md's cabinetRails section, which quotes these band boundaries as pixel rows.
     function createCabinetRailTexture(scene, color) {
         const w = 32, h = 128;
         const texture = new BABYLON.DynamicTexture('cabinetRailTex', { width: w, height: h }, scene, true);

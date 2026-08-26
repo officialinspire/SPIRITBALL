@@ -6,6 +6,11 @@ work-in-progress snapshot - see "Why every slot defaults to `path: null`" below 
 document describes how to actually add artwork (playfieldBackground already shows the full
 worked example), and the folder/image spec that artwork needs to follow.
 
+`cabinetRails` is unpopulated but its integration path is finalized and guarded: see
+"Slot spec: `cabinetRails`" below for the artwork spec to author against, and
+`qa/skin-integration.js` for the test that exercises the whole path - unset, broken and valid -
+on every run.
+
 ## What this is for
 
 SPIRITBALL's playfield, obstacles, and lamps are built entirely from procedural Babylon.js
@@ -17,7 +22,7 @@ procedural look, automatically, the moment a matching image file is dropped into
 change - no other file ever hardcodes an asset path, and no gameplay code reads this system at
 all.
 
-## The three pieces
+## The pieces
 
 1. **`js/skins.js`** - pure data. `SKIN_ASSET_BASE` (the folder everything below is relative to)
    and `SKIN_MANIFEST` (one entry per skin slot: `{ path, kind }`, or an array of those for
@@ -47,11 +52,28 @@ all.
      dark cosmic tint would otherwise noticeably wash out real playfield artwork layered under
      it).
    - Sets `wrapU`/`wrapV` to `CLAMP_ADDRESSMODE` (every skin slot is a single "cover this surface"
-     image, never a tiling pattern) and `anisotropicFilteringLevel` (capped at 8, only when the
-     engine reports hardware support) on every loaded texture - sharpens texture detail at a
-     raking viewing angle, which is exactly how this game's fixed camera sees the playfield.
+     image, never a tiling pattern - **nothing in this system ever tiles or repeats**) and
+     `anisotropicFilteringLevel` (capped at 8, only when the engine reports hardware support) on
+     every loaded texture - sharpens texture detail at a raking viewing angle, which is exactly
+     how this game's fixed camera sees the playfield.
+   - Honours an optional per-slot `albedoScale` (0..1, clamped, `kind: 'albedo'` only): where a
+     slot declares one, that flat grey is written into `albedoColor` on a successful load instead
+     of the plain white above, capping how bright the loaded artwork is allowed to render. It
+     exists because a skin slot is otherwise a hole in the board's visual hierarchy - the artwork's
+     exposure is whatever the artist happened to author, and on some surfaces that is not a free
+     choice. Only `cabinetRails` sets it today (see its section below).
 
-3. **`assets/skins/`** - where the actual image files go, in the subfolders described below.
+4. **`qa/skin-integration.js`** - the guard. Exercises all three states of the `cabinetRails`
+   slot on every run (unset / configured-but-missing / configured-and-valid), by intercepting
+   `js/skins.js` in the browser and rewriting the one slot - the shipped manifest is never edited
+   and the test leaves no residue. It pins that an unset slot issues no request, that a failed load
+   cannot break boot, that a valid load actually swaps in and gets its `albedoScale` applied, that
+   the wall UV layout the artwork spec depends on is intact, that wall colliders are byte-identical
+   across all three states, and that no file outside `js/skins.js` contains an `assets/skins/` path
+   literal in code (comments are stripped first - the cross-references in `babylon-game.js` are
+   documentation, and are meant to stay).
+
+5. **`assets/skins/`** - where the actual image files go, in the subfolders described below.
 
 ## Why every slot defaults to `path: null`, not a real-looking filename
 
@@ -108,6 +130,109 @@ full pipeline described above:
   no seams at the boundary), that removing the file falls back cleanly to the original flat cosmic
   tint with zero console/page errors, and that the playfield mesh's position and physics body are
   byte-for-byte unchanged from before this pass.
+
+## Slot spec: `cabinetRails`
+
+**Not populated.** The integration path is finished and guarded; this section is the spec real
+artwork has to be authored against.
+
+### Required file
+
+| | |
+|---|---|
+| Path | `assets/skins/cabinet/cabinet-rails.png` (`.webp` also fine - opaque slot, no alpha used) |
+| Dimensions | **64 x 512**, portrait |
+| Orientation | `v = 0` is the **top** of the wall (the polished crown); `v = 1` is where it meets the playfield |
+| Content along the width | **constant** - see "Why a strip" below |
+| Brightness | authored freely; the slot applies a 0.55 ceiling on load (`albedoScale`) |
+
+Then set the slot in `js/skins.js` to
+`cabinetRails: { path: 'cabinet/cabinet-rails.png', kind: 'albedo', albedoScale: 0.55 }`.
+Nothing else, anywhere, needs to change.
+
+### Why a strip, and not the 512x512 tileable pattern this document used to ask for
+
+The previous spec here was wrong on three counts, and an artist following it would have produced a
+file that could not work: it asked for a tileable pattern, said the image "repeats at each wall's
+own aspect ratio", and gave a square target. **Nothing in this system tiles** -
+`applySkinTexture()` sets `CLAMP_ADDRESSMODE` on every texture it loads. One image is *stretched*
+to fit, not repeated.
+
+And it is stretched onto a lot of very different shapes. `wallMat` is a **single material instance
+shared by all 7 boundary walls**, each a `CreateBox` whose every face carries the default full
+`u[0,1] / v[0,1]` square - 42 faces in total, all showing the same image. Measured from the live
+scene:
+
+| Wall | Long visible face (m) | Aspect | Top face aspect |
+|---|---|---|---|
+| `leftWall` / `rightWall` | 0.9067 x 0.0400 | **22.67 : 1** | 0.03 : 1 |
+| `topWall` | 0.5100 x 0.0400 | 12.75 : 1 | 18.02 : 1 |
+| `leftSlant` | 0.1700 x 0.0400 | 4.25 : 1 | 8.99 : 1 |
+| `leftGuide` / `rightGuide` | 0.1483 x 0.0400 | 3.71 : 1 | 10.44 : 1 |
+| `rightSlant` | 0.0803 x 0.0400 | **2.01 : 1** | 4.25 : 1 |
+
+The visible long faces alone span 2.01:1 to 22.67:1 - an **11.3x spread**. Across all side faces
+it is 0.36:1 to 22.67:1, a 63.9x spread. And on the top faces `u` and `v` swap axes outright:
+`topWall`'s top is 18.02:1 while the side walls' tops are 0.03:1, i.e. the same image laid down
+rotated 90 degrees relative to each other.
+
+So **any detail that varies along `u` is stretched by a different factor on every wall and cannot
+be made to line up.** A logo, lettering, a repeating motif, a fixed scene - all of them break.
+
+What maps cleanly onto all 42 faces is detail that varies **only along `v`**: a vertical rail
+cross-section, constant across its width. That is what `createCabinetRailTexture()` already draws
+procedurally, and it is why the target is a narrow portrait strip rather than a square.
+
+(A per-wall `faceUV` layout, or one material per wall with `uScale` proportional to wall length,
+would lift this constraint and allow length-wise detail. That is a real option, but it is a change
+to how the table is built rather than to how a texture is loaded, so it is deliberately out of
+scope for the skin path - noted here so the constraint reads as a decision rather than an
+oversight.)
+
+### Band layout to reproduce
+
+Match `createCabinetRailTexture()`'s profile, quoted here as pixel rows for a 512-tall image:
+
+| `v` range | Rows (of 512) | Band |
+|---|---|---|
+| 0.000 - 0.055 | 0 - 28 | Polished crown - the bright edge highlight that catches the light |
+| 0.055 - 0.130 | 28 - 67 | Highlight fall-off |
+| 0.130 - 0.700 | 67 - 358 | Wall body, darkening gently downward the way a lit vertical face does |
+| 0.700 - 0.860 | 358 - 440 | Lower body, in shadow |
+| 0.860 - 1.000 | 440 - 512 | Dark base band - the shadow line that stops playfield art running straight into the wall |
+
+Artwork that ignores this does not fail; it just lands its highlight somewhere down the wall
+instead of on the crown. Fine horizontal machining lines (or any other `v`-varying detail) are
+free to be added on top - the procedural version carries a 34-cycle sine ripple for exactly that
+reason.
+
+### Why the brightness ceiling
+
+The rails are structure, not gameplay, and they are already the brightest large surfaces in frame -
+`HEX_WALL` is `0x00ccff`, and the board-graphics audit measured the right inner wall at mean
+luminance 159.6/255 with 15.4% of its pixels clipped to pure white against a playfield at 31.4.
+Artwork here has to come in *under* the bumpers, inserts and targets it frames rather than out-
+shouting them, and that is not something an artwork file should have to remember on every
+revision - so the slot declares it as data instead.
+
+`qa/skin-integration.js` measures the result from real pixels (pick-verified, so it samples the
+walls themselves rather than their projected bounding boxes):
+
+| | rails | dimmest lamp-lit gameplay element |
+|---|---|---|
+| Procedural fallback | 113.7 | 119.5 (`bumper0`) |
+| With artwork + `albedoScale: 0.55` | 103.0 | 119.5 |
+
+The ceiling is doing real work: without it the rails clear the dimmest lamp-lit element by only
+5.8 luminance, with it by 16.5.
+
+One number the guard prints but deliberately does not assert on: the **flipper mesh** medians 84.8,
+i.e. *below* the rails. That is not the rails being too bright relative to the flippers - it is
+that a flipper's brightness does not live on the flipper. Its glow blooms onto the surrounding lane
+geometry, so the bat's own pixels read dark while the flipper *area* reads far brighter (the audit
+measured the flipper meshes owning 0.6% of the frame's top-1% brightest pixels at 1.04% screen
+coverage, against 40.7% for the lane geometry the halo lands on). Asserting a minimum over the
+flipper mesh would be asserting against a number that does not describe what a player sees.
 
 ## How to add real artwork
 
@@ -174,7 +299,7 @@ Per slot:
 | Slot | Recommended size | Aspect | Mesh / default UV | Notes |
 |---|---|---|---|---|
 | `playfieldBackground` | 1024x1820 | matches `TABLE_WIDTH_M` : `TABLE_LENGTH_M` (~0.51 : 0.907, i.e. ~9:16) | `CreateBox` (playfield) | Top face only is ever seen (fixed camera looks down at the playfield); design the full image as a top-down playfield illustration. Portrait orientation, same as the table itself. |
-| `cabinetRails` | 512x512, tileable | 1:1 | `CreateBox` x7 (each boundary wall) | Applied once, shared by every wall segment (different sizes/orientations) - design as a seamlessly-tileable trim/rail pattern, not a single fixed scene, since it repeats at each wall's own aspect ratio. |
+| `cabinetRails` | **64x512 portrait strip** | 1:8 | `CreateBox` x7 (each boundary wall), 42 faces, one shared material | **Not a tileable pattern and not a scene** - a vertical rail *profile*, read top-to-bottom, constant across its width. See the dedicated `cabinetRails` section below for why, the band layout to reproduce, and the brightness ceiling. |
 | `bumperCap` | 512x512 | 1:1 | `CreateSphere` (flattened, `scaling.y = 0.55`) | Standard sphere UV (equirectangular-ish): design with the "face" content centered around the vertical middle band, since the cap is a shallow dome - only the top portion of the sphere is ever visible. |
 | `missionTargetFace[0..2]` | 256x384 | matches the flag mesh, 2:3 portrait (`TARGET_RADIUS_M * 2` wide by `0.03`m... tall relative to width) | `CreateBox` (thin flag) | Front face only is normally visible (angled slightly toward the camera). Keep important content centered - the box's default UV maps the full image to each face independently. |
 | `laneInsertInlane` / `-Outlane` / `-Orbit` | 128x128 | 1:1 | `CreateCylinder` (flat disc, height 0.003) | Only the flat top face is seen. Emissive slot - design these bright/high-contrast on a dark or transparent ground; they render additively over the lamp's own on/off emissive color, so a mid-gray image will look dim when the lamp is "off" and full-bright when "on," matching the existing lamp system automatically. |
@@ -201,4 +326,12 @@ Per slot:
   either way.
 - **No artwork was invented.** The one populated slot (`playfieldBackground`) uses artwork
   supplied directly by the user, not generated. Every other subfolder under `assets/skins/`
-  contains only a `.gitkeep` placeholder.
+  contains only a `.gitkeep` placeholder - `cabinet/` included. The `cabinetRails` pass finalized
+  and tested the path into that slot and wrote the spec above; it did not produce a file to put in
+  it, and `path` stays `null` until a real one exists.
+- **The `cabinetRails` pass changed no geometry, UV layout, collider or physics body.**
+  `albedoScale` is a new optional manifest field plus the multiply it feeds in
+  `applySkinTexture()`; everything else in that pass is comments, this document, and
+  `qa/skin-integration.js`. The guard asserts wall extents, positions, rotations and physics-body
+  presence are byte-identical across the unset, failed-load and loaded-artwork states, so that
+  claim is measured rather than asserted.

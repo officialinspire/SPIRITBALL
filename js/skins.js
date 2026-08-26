@@ -45,6 +45,16 @@ export const SKIN_ASSET_BASE = 'assets/skins/';
 // surfaces read like a backlit insert glowing on their own, independent of scene light -
 // matching which of those two treatments each slot's *current* procedural material already
 // uses (see each call site in babylon-game.js).
+//
+// albedoScale (optional, 'albedo' slots only, default 1): a flat 0..1 multiplier written into
+// albedoColor when the artwork loads, instead of the plain white this otherwise resets to. It
+// exists because a skin slot is a hole in this project's visual hierarchy: the loaded artwork's
+// own exposure is whatever the artist happened to author, and on some surfaces that is not a
+// free choice. Declaring the ceiling HERE, as data next to the path it applies to, is what makes
+// the hierarchy a property of the slot rather than an instruction an artist has to remember and
+// re-apply on every revision of the file. Only set it where a surface has a real reason to stay
+// subordinate to something else on the board (cabinetRails is the current case - see its own
+// comment); leaving it unset keeps the plain full-brightness reset every other slot wants.
 export const SKIN_MANIFEST = {
     // Playfield background/art - the ball-rolling surface itself (playfieldMat in buildTable()).
     // Populated (user-supplied artwork, visual-integration pass) - a portrait 887x1774 cosmic/
@@ -56,8 +66,36 @@ export const SKIN_MANIFEST = {
 
     // Cabinet/table artwork - the perimeter wall/rail material (wallMat in buildTable()), shared
     // by every structural boundary wall on the board (top/left/right/slants/guides).
+    //
+    // ARTWORK SHAPE IS CONSTRAINED HERE, and not in the way an artist would guess. wallMat is a
+    // SINGLE material instance on 7 CreateBox walls, every face of every one of them carrying the
+    // default full u[0,1]/v[0,1] square, and applySkinTexture() clamps (never repeats). So one
+    // image is STRETCHED to fit 42 faces of wildly different shapes rather than tiled across them:
+    // measured, the visible long faces alone span 2.01:1 (rightSlant) to 22.67:1 (leftWall), an
+    // 11.3x spread, and on the top faces u/v swap axes outright (topWall's top is 18.02:1, the
+    // side walls' tops are 0.03:1 - the same image laid down rotated 90 degrees relative to each
+    // other). Any detail that varies along u is therefore stretched by a different factor on every
+    // wall and cannot be made to line up.
+    //
+    // What DOES map cleanly on all 42 faces is detail that varies only along v - a vertical rail
+    // PROFILE (crown highlight, body falloff, shadowed base band), constant across u. That is
+    // exactly what createCabinetRailTexture() draws today and exactly what real artwork here must
+    // be: a narrow portrait strip, 64x512, read top-to-bottom as the wall's own cross-section.
+    // See SKINS.md's cabinetRails section for the full spec and the per-face measurements.
+    //
+    // albedoScale is set (and is the only slot that sets it) because the rails are already the
+    // brightest large surfaces in frame - HEX_WALL is 0x00ccff, and the right inner wall measures
+    // mean luminance 159.6/255 with 15.4% of its pixels clipped to pure white against a playfield
+    // at 31.4. They are the table's structural boundary, not a gameplay element, so artwork here
+    // has to come in UNDER the bumpers/inserts/flippers it frames rather than out-shouting them.
+    // Measured, 0.55 lands the textured rails at 103.0 against the procedural profile's 113.7,
+    // and the ceiling is doing real work rather than being decorative: the dimmest lamp-lit
+    // gameplay element on the board (bumper0) sits at 119.5, so the fallback clears it by only
+    // 5.8 luminance and the ceiling widens that to 16.5. qa/skin-integration.js re-measures all
+    // three numbers from real pixels on every run, so a future revision of this value is checked
+    // rather than assumed.
     // Future path: 'cabinet/cabinet-rails.png'
-    cabinetRails: { path: null, kind: 'albedo' },
+    cabinetRails: { path: null, kind: 'albedo', albedoScale: 0.55 },
 
     // Bumper caps - one shared texture. bumperCapMat (buildObstacles()) is already a single
     // material instance shared by all 4 bumpers' caps (see its own comment: real machines mold
