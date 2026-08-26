@@ -98,7 +98,7 @@ import {
     BONUS_MISSION_COMPLETE_AMOUNT, BONUS_MAJOR_SHOT_AMOUNT, BONUS_COUNT_TICKS, BONUS_COUNT_TICK_MS,
     BONUS_COUNT_REDUCED_MOTION_MS, COMBO_ORBIT_TYPES, COMBO_STEP_WINDOW_MS, COMBO_TRIPLE_STEP_WINDOW_MS,
     COMBO_CHAIN_WINDOW_MS, COMBO_MAX_TIER, COMBO_BASE_SCORE, COMBO_MESSAGE_MS,
-    COMBO_DEFS, RANK_NAMES, MISSION_DEFS, missionRequiredCount,
+    COMBO_DEFS, RANK_NAMES, STATE_COLORS, MISSION_DEFS, missionRequiredCount,
     COOLDOWN_BUMPER_MS, COOLDOWN_COMET_MS, COOLDOWN_SLINGSHOT_MS, COOLDOWN_MISSION_TARGET_MS,
     COOLDOWN_REENTRY_LANE_MS, COOLDOWN_SATURN_MS, COOLDOWN_SIDE_LANE_MS, COOLDOWN_ORBIT_MS,
     COOLDOWN_WALL_MS, COOLDOWN_FLIPPER_MS, DRAIN_ZONE_WIDTH_M, DRAIN_ZONE_DEPTH_PX,
@@ -2433,7 +2433,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             highScore: 0, message: '', messageTimer: null,
             // Mission/rank progression (improvement-prompts/05-*.md) - missionName is null when
             // no mission is active, matching the original 2D HUD's "Select Mission" idle state.
-            rank: RANK_NAMES[0], missionName: null, missionProgress: 0, missionRequired: 0,
+            rank: RANK_NAMES[0], rankColor: STATE_COLORS[0],
+            missionName: null, missionProgress: 0, missionRequired: 0,
             // Score-multiplier power-up (board redesign) - true while a collected orb's 2x
             // window is running (see updatePowerUp() in main()).
             multiplierActive: false,
@@ -2623,6 +2624,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const MI_Y = ROW_Y + ROW_H + 12;                // mission window
         const MI_H = height - MI_Y - 14;
 
+        // '#rrggbb' -> 'rgba(r, g, b, a)'. Needed because STATE_COLORS are CSS strings (canvas
+        // fillStyle takes those directly) while config's own hexToColor3() takes a NUMERIC hex
+        // and returns a BABYLON.Color3 - a different input and a different output, so this is a
+        // second small helper rather than a reuse. Only the tinted message halo calls it.
+        function hexToRgba(hex, alpha) {
+            const n = parseInt(hex.slice(1), 16);
+            return 'rgba(' + ((n >> 16) & 0xff) + ', ' + ((n >> 8) & 0xff) + ', ' + (n & 0xff) + ', ' + alpha + ')';
+        }
+
         // Greedy word wrap into AT MOST two lines - the remainder of a very long string all lands
         // on the second one rather than spilling into a third, because a third line on a panel
         // this size would have to be small enough to be pointless. Assumes ctx.font is already
@@ -2669,10 +2679,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 if ((!tooWide && !tooTall) || fontSize <= 48) break;
                 fontSize -= 4;
             }
-            ctx.fillStyle = '#ffffff';
+            // Tinted only when the caller asked for it; otherwise the same white/cyan-halo
+            // treatment every message has always had. The halo follows the glyph colour rather
+            // than staying fixed cyan - a gold ASCENSION sitting in a cyan halo reads as a
+            // rendering mistake, not a colour choice.
+            ctx.fillStyle = state.messageColor || '#ffffff';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.shadowColor = 'rgba(160, 250, 255, 0.55)';
+            ctx.shadowColor = state.messageColor ? hexToRgba(state.messageColor, 0.55) : 'rgba(160, 250, 255, 0.55)';
             ctx.shadowBlur = 10;
             const lineH = fontSize * 1.12;
             const firstY = mY + mH / 2 + 2 - ((lines.length - 1) * lineH) / 2;
@@ -2764,7 +2778,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 rankSize -= 3;
                 ctx.font = '700 ' + rankSize + 'px ' + BG_VALUE_FONT;
             }
-            ctx.fillStyle = '#7dffe0';
+            // Was a fixed '#7dffe0'. That exact value is still STATE_COLORS[0], so a fresh game
+            // is pixel-identical here; later states drift along the palette. state.rankColor is
+            // set beside state.rank at every site that assigns it, and falls back to index 0 so a
+            // missed site degrades to the old look rather than to an unset fillStyle.
+            ctx.fillStyle = state.rankColor || STATE_COLORS[0];
             ctx.textBaseline = 'middle';
             ctx.fillText(state.rank, rankX, ROW_Y + ROW_H / 2 - 2);
             ctx.textBaseline = 'top';
@@ -2813,9 +2831,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // acceptance criteria) - the tradeoff is a very quick second hit can cut the first
         // message's dwell time short, judged an acceptable simplification over building a real
         // message queue for a stage whose actual on-screen legibility can't be checked here.
-        function showMessage(text, durationMs) {
+        // `color` is optional and defaults to the white every message used before it existed -
+        // only the ASCENSION toast passes one, so this cannot quietly tint the other two dozen
+        // messages (see STATE_COLORS' own comment on keeping the panel quiet).
+        function showMessage(text, durationMs, color) {
             if (state.messageTimer) clearTimeout(state.messageTimer);
             state.message = text;
+            state.messageColor = color || null;
             // Dev diagnostics (?dev=1 only, see updateDevHud() in main()) - unlike state.message
             // above, this is never cleared back to '', so the dev HUD can always show "last
             // scoring/game event" even well after the toast itself has faded. Purely a diagnostic
@@ -2824,6 +2846,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             redraw();
             state.messageTimer = setTimeout(() => {
                 state.message = '';
+                state.messageColor = null;
                 state.messageTimer = null;
                 redraw();
             }, durationMs || 1100); // 1100ms matches showPopup()'s tween duration in ../index.js
@@ -7912,6 +7935,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             backglass.state.missionName = null;
             backglass.state.missionProgress = 0;
             backglass.state.rank = RANK_NAMES[mission.rank];
+            backglass.state.rankColor = STATE_COLORS[mission.rank];
             addScore(MISSION_COMPLETE_BONUS);
             // Bonus/multiplier subsystem (user-requested) - a "substantial" contribution to the
             // hidden end-of-ball pool, on top of (not instead of) the immediate MISSION_COMPLETE_
@@ -7923,7 +7947,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // gain, so it names the thing that WAS gained instead of repeating a state the
             // player already has. Was 'VISION COMPLETE!'; there is deliberately no plain
             // "vision complete" message, because every completion is one or the other of these.
-            backglass.showMessage(rankedUp ? 'ASCENSION: ' + RANK_NAMES[mission.rank] : 'INSIGHT GAINED', 1600);
+            backglass.showMessage(
+                rankedUp ? 'ASCENSION: ' + RANK_NAMES[mission.rank] : 'INSIGHT GAINED',
+                1600,
+                // Tinted with the state being announced - the one moment the ladder's colour is
+                // worth spending attention on. INSIGHT GAINED takes the top state's colour since
+                // that is the state the player is sitting at when it fires.
+                STATE_COLORS[mission.rank]
+            );
             // A stronger beat than any regular hit's - completing a mission and ranking up is the
             // single biggest moment the game currently has, deserves to read as one.
             triggerCameraShake(500, 0.01);
@@ -9325,6 +9356,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.required = 0;
             mission.rank = 0;
             backglass.state.rank = RANK_NAMES[0];
+            backglass.state.rankColor = STATE_COLORS[0];
             backglass.state.missionName = null;
             backglass.state.missionProgress = 0;
             // Power-up (board redesign) - also per-run state, same reasoning as mission/rank above.

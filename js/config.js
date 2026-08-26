@@ -1266,6 +1266,59 @@ export const RANK_NAMES = [
     'VISIONARY', 'PSYCHONAUT', 'GATEKEEPER', 'ASCENDANT', 'COSMIC SELF'
 ];
 
+// One colour per state index, parallel to RANK_NAMES above - the single source of truth for
+// "what colour is this state", so a future edit cannot leave two lists disagreeing. Indexed the
+// same way (STATE_COLORS[mission.rank]); the length is asserted against RANK_NAMES below rather
+// than trusted.
+//
+// The arc the user asked for: cool cyan -> violet (early), violet -> magenta -> amber (middle),
+// gold -> near-white -> spectral (late). Index 0 is deliberately the exact colour the state row
+// used before this existed (#7dffe0), so a fresh game looks untouched and the progression is
+// something the player discovers by earning it rather than a restyle they notice on load.
+//
+// Designed on SATURATION and HUE, not brightness. The obvious way to write "ascending" is to
+// make later states brighter, and that is the version that would have turned a quiet panel into
+// a beacon by COSMIC SELF; the late states desaturate toward white instead, so the ladder reads
+// as "cooling into light" rather than "getting louder".
+//
+// Brightness is NOT flat across the ladder, and an earlier draft of this comment wrongly claimed
+// it was. Measured WCAG relative luminance runs 0.813 at INITIATE down to 0.470 around
+// DREAMWALKER/VISIONARY and back up to 0.791 at COSMIC SELF - a 1.73x spread. That dip is a
+// property of the hues themselves: a saturated violet simply cannot reach the luminance of a
+// saturated cyan-mint, and forcing it to would mean desaturating it until it stopped being
+// violet. What IS held, and what qa/state-palette.js pins, is the part that actually protects the
+// panel:
+//   - nothing exceeds index 0's brightness, so no state is ever louder than this row already was
+//     before the palette existed (ASCENDANT and COSMIC SELF were pulled down from #ffe7b4 and
+//     #eff6ff, which both broke that ceiling, to the values below);
+//   - no adjacent pair jumps more than ~0.12 of luminance, which is what keeps the progression
+//     GRADUAL rather than a set of unrelated colours;
+//   - all ten clear 7:1 contrast against the panel's own face, sampled from the real texture
+//     (measured range 10.1:1 to 18.7:1).
+//
+// Used in exactly two places, both on the backglass: the STATE row's value, and the ASCENSION
+// message that announces a new state. Nothing on the playfield, nothing near the ball, and the
+// backglass mesh is already excluded from the GlowLayer (see its addExcludedMesh call), so none
+// of these can bloom into the scene or compete with the ball no matter how pale they get.
+export const STATE_COLORS = [
+    '#7dffe0', // 0 INITIATE     cyan-mint - the pre-existing state colour, unchanged
+    '#7be9ff', // 1 SEEKER       cool cyan
+    '#97ceff', // 2 DREAMER      cyan drifting blue
+    '#b7b4ff', // 3 WITNESS      blue-violet
+    '#cfa4ff', // 4 DREAMWALKER  violet
+    '#f09bea', // 5 VISIONARY    violet-magenta
+    '#ffae93', // 6 PSYCHONAUT   magenta warming toward amber
+    '#ffc96b', // 7 GATEKEEPER   gold
+    '#ffdc9e', // 8 ASCENDANT    near-white gold
+    '#d5e8ff'  // 9 COSMIC SELF  spectral - desaturated back to a cool white, past colour
+];
+// A mismatch here would silently hand STATE_COLORS[rank] === undefined to a canvas fillStyle,
+// which paints BLACK on a black panel rather than throwing - i.e. an invisible state row, found
+// only by looking. Cheap to assert at module load instead.
+if (STATE_COLORS.length !== RANK_NAMES.length) {
+    throw new Error('STATE_COLORS must have one entry per RANK_NAMES entry');
+}
+
 // One mission slot per mission-target index (0-2, see MISSION_TARGET_BANK), each tied to a
 // distinct scoring category so progress can only come from deliberate play toward the
 // selected mission, not incidental hits of other types - the spirit of the original
