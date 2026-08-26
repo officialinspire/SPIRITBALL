@@ -7917,7 +7917,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // hidden end-of-ball pool, on top of (not instead of) the immediate MISSION_COMPLETE_
             // BONUS above. Doesn't touch mission/rank state or messaging at all - purely additive.
             ballBonus.points += BONUS_MISSION_COMPLETE_AMOUNT;
-            backglass.showMessage(rankedUp ? 'ASCENSION: ' + RANK_NAMES[mission.rank] : 'VISION COMPLETE!', 1600);
+            // Two beats, one slot, chosen by which one actually happened (see rankedUp above).
+            // A normal completion IS the progression - it is what advanced the state - so it
+            // announces the state gained. At the top of the ladder there is no state left to
+            // gain, so it names the thing that WAS gained instead of repeating a state the
+            // player already has. Was 'VISION COMPLETE!'; there is deliberately no plain
+            // "vision complete" message, because every completion is one or the other of these.
+            backglass.showMessage(rankedUp ? 'ASCENSION: ' + RANK_NAMES[mission.rank] : 'INSIGHT GAINED', 1600);
             // A stronger beat than any regular hit's - completing a mission and ranking up is the
             // single biggest moment the game currently has, deserves to read as one.
             triggerCameraShake(500, 0.01);
@@ -9092,6 +9098,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function hideMenuScreen() {
             if (!menuUp) return;
             menuUp = false;
+            // Name the starting state here too, not only in startNewGame(). Dismissing the title
+            // screen never calls startNewGame() - it only hides the overlay and ends attract mode,
+            // because a page load already begins with fresh state - so putting the message solely
+            // there would have skipped the FIRST game of every session, which is exactly the run
+            // where the player has not seen the ladder yet. This function is the one thing both
+            // dismissal paths (Space and tap-anywhere) share, and its menuUp guard above means it
+            // cannot fire twice. startNewGame() covers restart and pause -> NEW GAME.
+            backglass.showMessage('STATE: ' + RANK_NAMES[0]);
             menuOverlay.classList.add('is-starting');
             // Matches the transition duration in index.html. Under prefers-reduced-motion that
             // transition is removed, so the overlay is already invisible well before this fires
@@ -9330,6 +9344,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const menuHighScoreEl = document.getElementById('menu-highscore');
             if (menuHighScoreEl) menuHighScoreEl.textContent = String(backglass.state.highScore);
             backglass.redraw();
+            // Name the starting state out loud (user-requested). Every other progression beat
+            // announces itself on this panel, so the run beginning at the bottom of the ladder
+            // should too - the STATE row alone changes silently. No duration passed: this takes
+            // showMessage()'s own 1100ms default rather than inventing a new number, and it is
+            // last-message-wins like every other toast, so the first launch's own message simply
+            // replaces it if the player is quick.
+            backglass.showMessage('STATE: ' + RANK_NAMES[0]);
             resetBallToPlunger();
             isPaused = false;
             scene.physicsEnabled = true;
