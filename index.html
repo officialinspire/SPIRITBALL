@@ -1700,88 +1700,184 @@
             gap: 10px;
         }
 
+        /* --- Button tiers -------------------------------------------------------------------
+           Three ACTIONS of three different weights, so they must not be three identical boxes.
+           The previous pass separated them by brightness alone, which left the geometry uniform
+           and the eye with nothing to sort by at a glance. Size, fill and border weight now carry
+           the ranking, and colour only reinforces it:
+
+             RESUME     primary    tallest, largest type, filled and lit, strongest border
+             CONTROLS   secondary  standard height, recessed but unlit, quieter border
+             NEW GAME   tertiary   shortest, smallest type, NO fill and NO border at rest -
+                                   a text action that only draws a box when you reach for it
+
+           The base rule below is deliberately geometry-free apart from what all three share; each
+           tier sets its own size. Hover is gated behind a real pointer, and :active is a separate
+           state from hover rather than sharing its rule, so a press reads as a press. */
         #pause-overlay .pause-btn {
             display: block;
             width: 100%;
             /* Overrides .screen-overlay button's min-width:min(240px,100%), which left a fixed
                240px button ragged inside a wider card instead of filling its column. */
             min-width: 0;
-            min-height: 46px;                 /* comfortably over the 44px touch-target floor */
             margin: 0;                        /* rhythm comes from .pause-actions' gap, not <br> */
-            padding: 13px 14px;
             box-sizing: border-box;
             font-family: var(--hud-label-font);
-            font-size: 13px;
             font-weight: 700;
-            letter-spacing: 0.18em;
-            text-indent: 0.18em;
             text-transform: uppercase;
-            color: rgba(206, 240, 250, 0.9);
-            /* A recess cut into the panel, same construction as the score window. */
-            background-color: rgba(0, 2, 6, 0.7);
-            background-image: radial-gradient(circle at 50% 50%,
-                rgba(130, 245, 255, 0.035) 0.5px, rgba(130, 245, 255, 0) 0.75px);
-            background-size: 3px 3px;
-            border: 1px solid rgba(126, 226, 236, 0.2);
             border-radius: 9px;
-            box-shadow:
-                inset 0 1px 2px rgba(0, 0, 0, 0.7),
-                inset 0 -1px 0 rgba(150, 255, 255, 0.06);
-            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.85);
             cursor: pointer;
+            /* Touch response. manipulation drops the double-tap-zoom wait so a tap registers
+               immediately; the tap highlight is turned off because :active below already gives a
+               deliberate pressed state, and the platform's grey flash on top of it reads as a
+               rendering fault rather than feedback. */
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
             transition: color 140ms ease, border-color 140ms ease,
-                        background-color 140ms ease, box-shadow 140ms ease;
+                        background-color 140ms ease, box-shadow 140ms ease,
+                        transform 90ms ease;
         }
 
-        /* Primary. One lit lamp in the stack rather than three equally shouting borders - the
-           difference is brightness and a contained glow, NOT a different hue, so the panel stays
-           one colour family. */
+        /* PRIMARY - the action almost every pause ends in. Tallest and largest in the stack, a
+           filled lit lamp rather than a recess: it is the only one that reads as illuminated. */
         #pause-overlay .pause-btn-primary {
+            min-height: 56px;
+            padding: 17px 14px;
+            font-size: 15px;
+            letter-spacing: 0.2em;
+            text-indent: 0.2em;
             color: #eafcff;
-            border-color: rgba(126, 226, 236, 0.55);
-            background-color: rgba(0, 26, 38, 0.72);
+            background-color: rgba(0, 30, 44, 0.78);
+            background-image: radial-gradient(circle at 50% 50%,
+                rgba(130, 245, 255, 0.05) 0.5px, rgba(130, 245, 255, 0) 0.75px);
+            background-size: 3px 3px;
+            border: 1px solid rgba(126, 226, 236, 0.62);
             box-shadow:
-                inset 0 1px 2px rgba(0, 0, 0, 0.6),
-                inset 0 0 0 1px rgba(120, 250, 255, 0.14),
-                inset 0 -1px 0 rgba(150, 255, 255, 0.14),
-                0 0 18px rgba(0, 200, 230, 0.16);
+                inset 0 1px 2px rgba(0, 0, 0, 0.55),
+                inset 0 0 0 1px rgba(120, 250, 255, 0.16),
+                inset 0 -1px 0 rgba(150, 255, 255, 0.16),
+                0 0 22px rgba(0, 200, 230, 0.18);
             text-shadow:
                 0 -1px 0 rgba(255, 255, 255, 0.22),
                 0 1px 0 rgba(0, 26, 38, 0.9),
                 0 0 1px rgba(120, 250, 255, 0.6);
         }
 
-        /* The one destructive control: last in the stack, pulled back toward violet and dimmer
-           than either sibling, so it is findable without ever being the thing the eye lands on. */
-        #pause-overlay .pause-btn-reset {
-            color: rgba(222, 196, 246, 0.72);
-            border-color: rgba(176, 132, 226, 0.24);
+        /* SECONDARY - a recess cut into the panel, same construction as the score window, but
+           unlit: no inner ring and no outer glow, which is what keeps it below the primary. */
+        #pause-overlay .pause-btn-secondary {
+            min-height: 46px;                 /* comfortably over the 44px touch-target floor */
+            padding: 13px 14px;
+            font-size: 13px;
+            letter-spacing: 0.18em;
+            text-indent: 0.18em;
+            color: rgba(206, 240, 250, 0.88);
+            background-color: rgba(0, 2, 6, 0.7);
+            background-image: radial-gradient(circle at 50% 50%,
+                rgba(130, 245, 255, 0.035) 0.5px, rgba(130, 245, 255, 0) 0.75px);
+            background-size: 3px 3px;
+            border: 1px solid rgba(126, 226, 236, 0.22);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.7),
+                inset 0 -1px 0 rgba(150, 255, 255, 0.06);
+            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.85);
         }
 
-        #pause-overlay .pause-btn:hover,
-        #pause-overlay .pause-btn:active {
+        /* TERTIARY / DESTRUCTIVE - the only control here that discards a run. Given the least
+           visual weight of the three on purpose: no fill, no border and the smallest label, so it
+           never competes for the eye. It is NOT hidden - it keeps a full 44px target, sits in the
+           same column, and grows a real border the moment it is hovered, focused or pressed. The
+           violet is the one hue departure in the panel, and it is spent here rather than on
+           decoration. */
+        #pause-overlay .pause-btn-reset {
+            min-height: 44px;
+            padding: 12px 14px;
+            font-size: 11px;
+            letter-spacing: 0.2em;
+            text-indent: 0.2em;
+            color: rgba(226, 202, 248, 0.72);
+            background-color: transparent;
+            background-image: none;
+            border: 1px solid transparent;
+            box-shadow: none;
+            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.85);
+        }
+        /* Grouping by proximity. RESUME and CONTROLS are both "carry on" actions and stay a
+           tight pair; the one control that throws the run away gets extra air above it, so
+           reaching it is a deliberate move down rather than the next thing under your thumb.
+           Declared HERE, after the base rule: `.pause-btn` sets margin:0 and both selectors have
+           the same specificity, so source order is what decides - stated first, this silently
+           lost and the gap never appeared. */
+        #pause-overlay .pause-btn-reset { margin-top: 8px; }
+
+        /* Hover is gated behind a REAL pointer. Left ungated it sticks after a tap on touch -
+           the button keeps its hover paint until something else is touched, which reads as a
+           stuck control. Touch devices get :active below instead, which is the correct state
+           for them anyway. */
+        @media (hover: hover) and (pointer: fine) {
+            #pause-overlay .pause-btn-primary:hover {
+                color: #f6ffff;
+                border-color: rgba(170, 250, 255, 0.85);
+                background-color: rgba(0, 38, 54, 0.85);
+                box-shadow:
+                    inset 0 1px 2px rgba(0, 0, 0, 0.5),
+                    inset 0 0 0 1px rgba(150, 253, 255, 0.24),
+                    inset 0 -1px 0 rgba(170, 255, 255, 0.2),
+                    0 0 28px rgba(0, 210, 240, 0.28);
+            }
+            #pause-overlay .pause-btn-secondary:hover {
+                color: #eafcff;
+                border-color: rgba(150, 245, 255, 0.5);
+                background-color: rgba(0, 16, 26, 0.8);
+                box-shadow:
+                    inset 0 1px 2px rgba(0, 0, 0, 0.6),
+                    inset 0 0 0 1px rgba(120, 250, 255, 0.12),
+                    inset 0 -1px 0 rgba(150, 255, 255, 0.1);
+            }
+            #pause-overlay .pause-btn-reset:hover {
+                color: #f4e9ff;
+                border-color: rgba(198, 150, 245, 0.55);
+                background-color: rgba(24, 8, 38, 0.6);
+            }
+        }
+
+        /* Pressed. A separate state from hover, and the only one that MOVES: 1px down with the
+           recess deepened and the glow pulled back, so the surface reads as pushed into the panel
+           rather than merely lit. This is what a touch player sees, since they never get hover. */
+        #pause-overlay .pause-btn:active { transform: translateY(1px); }
+        #pause-overlay .pause-btn-primary:active {
+            color: #ffffff;
+            background-color: rgba(0, 22, 34, 0.9);
+            border-color: rgba(170, 250, 255, 0.9);
+            box-shadow:
+                inset 0 2px 5px rgba(0, 0, 0, 0.8),
+                inset 0 0 0 1px rgba(150, 253, 255, 0.2),
+                0 0 10px rgba(0, 200, 230, 0.12);
+        }
+        #pause-overlay .pause-btn-secondary:active {
             color: #f2ffff;
-            background-color: rgba(0, 30, 44, 0.8);
-            border-color: rgba(150, 245, 255, 0.6);
-            box-shadow:
-                inset 0 1px 2px rgba(0, 0, 0, 0.55),
-                inset 0 0 0 1px rgba(120, 250, 255, 0.18),
-                inset 0 -1px 0 rgba(150, 255, 255, 0.14),
-                0 0 20px rgba(0, 200, 230, 0.2);
+            background-color: rgba(0, 8, 14, 0.9);
+            border-color: rgba(150, 245, 255, 0.55);
+            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.85);
         }
-        #pause-overlay .pause-btn-reset:hover,
         #pause-overlay .pause-btn-reset:active {
-            color: #f6ecff;
-            border-color: rgba(198, 150, 245, 0.62);
-            box-shadow:
-                inset 0 1px 2px rgba(0, 0, 0, 0.55),
-                inset 0 0 0 1px rgba(198, 150, 245, 0.18),
-                inset 0 -1px 0 rgba(214, 180, 255, 0.12),
-                0 0 20px rgba(150, 80, 220, 0.22);
+            color: #ffffff;
+            background-color: rgba(30, 10, 48, 0.8);
+            border-color: rgba(206, 160, 250, 0.7);
+            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.8);
         }
+
+        /* Keyboard focus. One ring for all three tiers - a focus indicator is a wayfinding
+           affordance, not a tier badge, and it has to look the same wherever it lands. Doubled:
+           a solid outline for forced-colors and high-contrast users plus a soft halo, because a
+           thin ring alone is easy to lose against a near-black panel over a lit playfield. The
+           3px offset clears the tertiary's own hover border so the two never overlap into a
+           muddy double line. */
         #pause-overlay .pause-btn:focus-visible {
-            outline: 2px solid rgba(150, 245, 255, 0.75);
-            outline-offset: 2px;
+            outline: 2px solid #9df3ff;
+            outline-offset: 3px;
+            border-color: rgba(170, 250, 255, 0.8);
+            box-shadow: 0 0 0 5px rgba(90, 220, 250, 0.16), 0 0 22px rgba(0, 200, 230, 0.22);
         }
 
         /* Status footer. Legend/readout split and tracking straight off #player-hud's .hud-label
@@ -1848,7 +1944,11 @@
             .pause-panel { max-width: 364px; gap: 22px; padding: 24px 22px 16px; }
             .pause-wordmark { font-size: 12px; }
             #pause-overlay h1 { font-size: 22px; }
-            #pause-overlay .pause-btn { font-size: 14px; padding: 15px 16px; min-height: 50px; }
+            /* Scale-up keeps the RATIO between tiers, rather than growing them uniformly and
+               flattening the hierarchy back out. */
+            #pause-overlay .pause-btn-primary { font-size: 17px; padding: 19px 16px; min-height: 62px; }
+            #pause-overlay .pause-btn-secondary { font-size: 14px; padding: 15px 16px; min-height: 50px; }
+            #pause-overlay .pause-btn-reset { font-size: 12px; padding: 13px 16px; min-height: 46px; }
             .pause-status-sep { display: block; }
         }
         @media (min-width: 900px) {
@@ -1979,7 +2079,11 @@
             /* The pause buttons' feedback is colour and brightness only - no transform, nothing
                that moves - but the cross-fade is still animation, so it becomes an instant change
                here rather than being removed. The feedback itself must not disappear. */
+            /* The pause buttons' hover/press feedback is colour and depth, which stays - but the
+               cross-fade and the 1px press travel are motion, so the change becomes instant and
+               the button no longer moves. The pressed state itself is untouched. */
             #pause-overlay .pause-btn { transition: none; }
+            #pause-overlay .pause-btn:active { transform: none; }
             .launch-btn.ready { animation: none; }
             .rotate-icon { animation: none; }
             .screen-overlay .pulse-text, #loading-panel h1 { animation: none; }
@@ -2215,7 +2319,7 @@
             </div>
             <div class="pause-actions">
                 <button id="pause-resume-btn" class="pause-btn pause-btn-primary">RESUME</button>
-                <button id="pause-controls-btn" class="pause-btn">CONTROLS</button>
+                <button id="pause-controls-btn" class="pause-btn pause-btn-secondary">CONTROLS</button>
                 <!-- "NEW GAME", not "NEW VISION", of the two the prompt offered: a vision IS a
                      mission in this game (MISSION_DEFS), and the HUD says "VISION: CHAKRA
                      AWAKENING" while one is running - so "NEW VISION" on the one destructive

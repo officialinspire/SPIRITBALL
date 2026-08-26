@@ -16,6 +16,18 @@
 //   node qa/pause-panel.js
 //   PORT=8971 node qa/pause-panel.js
 const { chromium } = require('/opt/node22/lib/node_modules/playwright');
+
+// WCAG contrast, with alpha COMPOSITED rather than ignored. A first pass read the tertiary
+// label's declared rgba() straight and reported 13.7:1; the label is 72% opaque over the panel
+// face, and the real composited figure is a good deal lower. Measuring the declared colour of a
+// translucent element is measuring a colour nobody can see.
+const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+const relLum = ([r, g, b]) => 0.2126 * lin(r / 255) + 0.7152 * lin(g / 255) + 0.0722 * lin(b / 255);
+const parseRgb = (css) => { const n = css.match(/[\d.]+/g).map(Number);
+  return { rgb: n.slice(0, 3), a: n.length > 3 ? n[3] : 1 }; };
+const over = (fg, bg) => fg.rgb.map((c, i) => c * fg.a + bg.rgb[i] * (1 - fg.a));
+const contrast = (a, b) => { const la = relLum(a), lb = relLum(b);
+  const hi = Math.max(la, lb), lo = Math.min(la, lb); return (hi + 0.05) / (lo + 0.05); };
 const IPHONE='Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 // Every pause/resume path, exercised for real. The redesign must not have moved any of it.
 let pass=0, fail=0;
@@ -63,6 +75,57 @@ const check=(l,ok,d)=>{ ok?pass++:fail++; console.log(`  ${ok?'OK  ':'FAIL'} ${l
     await p.click('#controls-back-btn'); await p.waitForTimeout(500);
     check('BACK returns to pause', await vis('pause-overlay') && !(await vis('controls-overlay')));
     check('still paused after the Controls detour', !(await phys()));
+
+    // --- button hierarchy -------------------------------------------------------------------
+    // Three actions of three weights must not be three identical boxes. Size and treatment carry
+    // the ranking; colour only reinforces it. These assert the RANKING, not exact pixel values,
+    // so the tiers can be retuned without the file becoming a second copy of the stylesheet.
+    const tiers = await p.evaluate(() => ['pause-resume-btn', 'pause-controls-btn', 'pause-newgame-btn']
+      .map((id) => { const e = document.getElementById(id), c = getComputedStyle(e), r = e.getBoundingClientRect();
+        return { id, h: Math.round(r.height), top: Math.round(r.top), size: parseFloat(c.fontSize),
+                 color: c.color, bg: c.backgroundColor, borderColor: c.borderColor,
+                 marginTop: parseFloat(c.marginTop) }; }));
+    const [primary, secondary, reset] = tiers;
+    check('the three buttons are not the same height', primary.h > secondary.h && secondary.h > reset.h,
+      tiers.map((t) => t.h));
+    check('type size ranks the same way', primary.size > secondary.size && secondary.size > reset.size,
+      tiers.map((t) => t.size));
+    check('every button still clears the 44px touch target', tiers.every((t) => t.h >= 44),
+      tiers.map((t) => t.h));
+    check('the primary is the only filled one; the destructive has no fill at rest',
+      parseRgb(primary.bg).a > 0.5 && parseRgb(reset.bg).a === 0, { primary: primary.bg, reset: reset.bg });
+    check('the destructive has no border at rest, the others do',
+      parseRgb(reset.borderColor).a === 0 && parseRgb(primary.borderColor).a > 0.4
+        && parseRgb(secondary.borderColor).a > 0, tiers.map((t) => t.borderColor));
+    const gapAB = secondary.top - (primary.top + primary.h);
+    const gapBC = reset.top - (secondary.top + secondary.h);
+    check('the destructive action is separated by more air than the pair above it', gapBC > gapAB,
+      { gapAB, gapBC });
+    // The quietest control still has to be readable - that is the line between "de-emphasised"
+    // and "hidden". Composited over the panel face it sits on.
+    const surf = await p.evaluate(() => getComputedStyle(document.querySelector('.pause-panel')).backgroundColor);
+    const resetRatio = contrast(over(parseRgb(reset.color), parseRgb(surf)), parseRgb(surf).rgb);
+    check('the de-emphasised destructive label still clears 4.5:1 on the panel',
+      resetRatio >= 4.5, { ratio: +resetRatio.toFixed(1), label: reset.color, panel: surf });
+    // Keyboard focus has to be one consistent, obvious affordance on every tier.
+    // :focus-visible keys off the last interaction MODALITY, so a bare element.focus() leaves
+    // the ring off and the check reads a failure a keyboard user would never see. Tabbing in from
+    // the top does not work either - the pause buttons sit late in the document behind the
+    // canvas, the touch controls and the menu overlay, so Tab never reaches them in a sane number
+    // of presses. Seed the position with focus(), then move with REAL keys (out and back, net
+    // zero) so the browser is in keyboard modality when the ring is read.
+    for (const id of ['pause-resume-btn', 'pause-controls-btn', 'pause-newgame-btn']) {
+      await p.evaluate((i) => document.getElementById(i).focus(), id);
+      await p.keyboard.press('Shift+Tab');
+      await p.keyboard.press('Tab');
+      const f = await p.evaluate((i) => { const e = document.getElementById(i), c = getComputedStyle(e);
+        return { focused: document.activeElement === e,
+                 outline: c.outlineWidth + ' ' + c.outlineStyle, offset: c.outlineOffset }; }, id);
+      check(`${id} shows a keyboard focus ring`,
+        f.focused && parseFloat(f.outline) >= 2 && f.outline.includes('solid') && f.offset === '3px', f);
+    }
+    await p.evaluate(() => document.activeElement && document.activeElement.blur());
+
     // RESUME
     await p.click('#pause-resume-btn'); await p.waitForTimeout(600);
     check('RESUME closes the panel and restarts physics', !(await vis('pause-overlay')) && await phys());
