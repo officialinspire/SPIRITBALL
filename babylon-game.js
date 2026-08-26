@@ -9886,10 +9886,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // satisfy the doc's "no charge-time or physics-state corruption from the pause
             // duration" requirement. Camera effects and the dev-panel status readouts are left
             // running during pause - harmless either way, and simpler than guarding everything.
-            updateSaturnRotation(obstacles.saturnRings, deltaMs);
-            updateSkyboxLayers(skybox, deltaMs);
-
+            //
+            // Saturn's spin and the skybox parallax used to sit HERE, outside the gate, on the
+            // same "harmless either way" reasoning. They are not harmless behind the pause menu:
+            // that scene is the pause screen's background, and a rotating planet and drifting
+            // starfield behind a paused game are the game still animating. Moved inside the gate
+            // as part of the pause-background pass. Both are delta-driven per frame rather than
+            // read off an absolute clock, so skipping frames costs nothing on resume - they carry
+            // on from where they stopped instead of jumping. Attract mode and the title screen are
+            // unaffected: neither is paused.
             if (!isPaused) {
+                updateSaturnRotation(obstacles.saturnRings, deltaMs);
+                updateSkyboxLayers(skybox, deltaMs);
                 // Timer audit fix - accumulates only while unpaused, see gameplayClockMs' own
                 // declaration comment for why the orbit/combo windows read this instead of
                 // performance.now().

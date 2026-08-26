@@ -89,6 +89,39 @@ const check=(l,ok,d)=>{ ok?pass++:fail++; console.log(`  ${ok?'OK  ':'FAIL'} ${l
     check('the summary is subordinate to RESUME',
       sum.valueSize < sum.primarySize && sum.labelSize < sum.valueSize, sum);
     check('the summary is three rows, not a second HUD', sum.rows === 3, { rows: sum.rows });
+    // --- pause background --------------------------------------------------------------------
+    // The scrim is presentation, but two things behind it are contracts.
+    const scrim = await p.evaluate(()=>{ const c=getComputedStyle(document.getElementById('pause-overlay'));
+      return { image: c.backgroundImage, overlayBlur: c.backdropFilter || c.webkitBackdropFilter,
+               panelBlur: getComputedStyle(document.querySelector('.pause-panel')).backdropFilter,
+               transition: c.transitionProperty, animation: c.animationName }; });
+    const layers = (scrim.image.match(/gradient\(/g) || []).length;
+    check('the scrim is layered, not a flat wash', layers >= 4, { layers });
+    check('nothing about the scrim animates while paused',
+      (scrim.animation === 'none' || !scrim.animation) &&
+      (scrim.transition === 'all' || scrim.transition === 'none' || !/background/.test(scrim.transition)),
+      { animation: scrim.animation, transition: scrim.transition });
+    // The blur is a desktop-only refinement; phones get the gradients alone. Exactly one blur is
+    // ever active - the overlay's on desktop, the panel's on touch - never both nested.
+    const blurOn = (v) => !!v && v !== 'none';
+    if (tag === 'desktop') {
+      check('desktop gets the full-screen backdrop blur', blurOn(scrim.overlayBlur), scrim);
+      check('the panel does not nest a second blur inside it', !blurOn(scrim.panelBlur), scrim);
+    } else {
+      check('phone falls back to gradients only, no full-screen blur', !blurOn(scrim.overlayBlur), scrim);
+    }
+    // The frozen scene must actually be frozen: the render loop's decorative updates used to run
+    // outside the pause gate, so a planet rotated and a starfield drifted behind the menu.
+    const still = await p.evaluate(async ()=>{
+      const sc=BABYLON.EngineStore.LastCreatedScene;
+      const ring=sc.meshes.find(m=>m.name==='saturnRing1'), near=sc.meshes.find(m=>m.name==='nearSky');
+      const a=[ring?ring.rotation.y:0, near?near.position.x:0];
+      const t0=performance.now(); let n=0;
+      while(performance.now()-t0<1200){ await new Promise(r=>requestAnimationFrame(r)); n++; }
+      return { frames:n, saturn:+Math.abs((ring?ring.rotation.y:0)-a[0]).toFixed(6),
+               sky:+Math.abs((near?near.position.x:0)-a[1]).toFixed(6) }; });
+    check('the scene is genuinely frozen behind the menu', still.saturn === 0 && still.sky === 0 && still.frames > 1, still);
+
     // only one platform hint visible
     const hints = await p.evaluate(()=>[...document.querySelectorAll('#pause-overlay .pause-hint-copy')]
       .filter(e=>getComputedStyle(e).display!=='none').map(e=>e.textContent.trim()));

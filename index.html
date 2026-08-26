@@ -1619,18 +1619,90 @@
            ========================================================================== */
         #pause-overlay {
             justify-content: center;
-            /* Graded like the title screen's scrim rather than flat, so the table is present
-               behind the panel instead of blacked out - but held much darker through the middle
-               band than the title's 0.18, because unlike a title screen this surface carries
-               controls that have to stay crisp over a lit, high-contrast playfield. */
-            background: linear-gradient(to bottom,
-                rgba(4, 0, 14, 0.95) 0%,
-                rgba(4, 0, 14, 0.80) 16%,
-                rgba(4, 0, 14, 0.58) 40%,
-                rgba(4, 0, 14, 0.58) 60%,
-                rgba(4, 0, 14, 0.86) 86%,
-                rgba(4, 0, 14, 0.96) 100%);
+            /* The scrim is FOUR background layers in one paint - no extra elements, no second
+               compositing pass. Listed topmost-first, the way CSS stacks them:
+                 1. vignette      transparent through the middle, pulling the corners down. The
+                                  playfield's brightest run is its lower corners (slingshot and
+                                  flipper glow); a flat wash leaves those competing with the panel
+                                  no matter how dark it is, and only a radial can answer that.
+                 2. violet tint   from the upper band, where the backglass sits.
+                 3. cyan tint     from the lower band, where the flippers do. Both are under 10%
+                                  alpha: a colour cast on the frozen scene, not a colour.
+                 4. darkening     the base grade, middle band 0.70 (was a flat-ish 0.58).
+
+               Every number here was CALIBRATED against measured transmission rather than picked,
+               by screenshotting the paused and unpaused frames and comparing mean luminance over
+               three regions of the table. Against the previous scrim:
+
+                                     lower-left  lower-right  mid-left
+                   previous              18%          19%        40%
+                   this scrim            20%          21%        31%
+
+               - the brightest, most distracting part of the table (the lit lower corners) stays
+               as suppressed as it already was, while the middle band - which is most of what the
+               eye actually sees - drops from 40% to 31%. Strongly darker overall, still clearly a
+               pinball table.
+
+               The two tint layers are part of that budget, not decoration on top of it: a
+               low-alpha wash over a near-black area RAISES its luminance. A first pass put the
+               cyan at 0.08 centred at 96%, directly over the lower corners, and measured them at
+               26% - LIGHTER than the scrim it replaced, the opposite of the intent. Weakened to
+               0.035 and lifted to 82%, which is what buys the corner numbers above.
+
+               No transition and no animation anywhere in here: the scrim is painted once when the
+               panel opens and never repaints while paused. */
+            background:
+                radial-gradient(ellipse 120% 100% at 50% 46%,
+                    rgba(2, 0, 10, 0) 0%,
+                    rgba(2, 0, 10, 0) 44%,
+                    rgba(2, 0, 10, 0.34) 78%,
+                    rgba(2, 0, 10, 0.58) 100%),
+                radial-gradient(ellipse 90% 60% at 50% 16%,
+                    rgba(122, 62, 220, 0.07) 0%,
+                    rgba(122, 62, 220, 0) 72%),
+                radial-gradient(ellipse 85% 55% at 50% 82%,
+                    rgba(40, 180, 220, 0.035) 0%,
+                    rgba(40, 180, 220, 0) 72%),
+                linear-gradient(to bottom,
+                    rgba(3, 0, 12, 0.93) 0%,
+                    rgba(3, 0, 12, 0.80) 16%,
+                    rgba(3, 0, 12, 0.70) 42%,
+                    rgba(3, 0, 12, 0.70) 60%,
+                    rgba(3, 0, 12, 0.85) 86%,
+                    rgba(3, 0, 12, 0.95) 100%);
             padding: max(5vh, 40px) 16px max(5vh, 40px);
+        }
+
+        /* Full-screen backdrop blur, and the reason it is gated rather than simply applied.
+           A backdrop-filter over the whole viewport is the single most expensive thing this
+           stylesheet could ask for, and it is only cheap here because the scene behind it is
+           genuinely FROZEN (the render loop's Saturn spin and skybox parallax are now inside its
+           pause gate - see babylon-game.js). Measured paused frame cost with it on versus off is
+           recorded in the commit.
+           Gated on a real desktop pointer AND width, not width alone: a wide tablet is still a
+           tablet. Everything below that gets the four-layer gradient scrim on its own, which is
+           the low-cost path and already carries the whole design - the blur is a refinement, not
+           a load-bearing part of it. @supports so a browser without backdrop-filter simply never
+           sees the rule rather than silently painting an unfiltered box. */
+        @media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+            @supports ((-webkit-backdrop-filter: blur(2px)) or (backdrop-filter: blur(2px))) {
+                #pause-overlay {
+                    -webkit-backdrop-filter: blur(2px);
+                    backdrop-filter: blur(2px);
+                }
+                /* The panel's own blur is redundant once the whole backdrop is blurred, and
+                   nesting one backdrop-filter inside another is a known compositing trap - the
+                   inner one has to re-read an already-filtered surface. Dropped here only; the
+                   phone path keeps it, where it is the only blur on screen.
+                   Scoped through #pause-overlay deliberately: a bare `.pause-panel` ties with the
+                   panel's own rule on specificity and loses on source order, since that rule is
+                   declared later in the file. Measured - the first version of this reported
+                   blur(3px) still applied. An id here makes it win regardless of ordering. */
+                #pause-overlay .pause-panel {
+                    -webkit-backdrop-filter: none;
+                    backdrop-filter: none;
+                }
+            }
         }
 
         .pause-panel {
