@@ -1428,6 +1428,15 @@ export const STARTING_LIVES = 3; // ported from CONFIG.startingLives
 // project's whole load-failure error-handling effort before it even registers (see
 // 04-*.md's implementation note for how this was learned the hard way).
 // ===================================
+// '#rrggbb' -> [r, g, b] bytes. Distinct from hexToColor3() below, which takes a NUMERIC hex
+// and returns a BABYLON.Color3: STATE_COLORS are CSS strings (canvas fillStyle takes those
+// directly), and two consumers now need to take them apart - the backglass message halo and the
+// ASCENSION screen flash. One parser rather than one per call site.
+export function hexStringToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
 export function hexToColor3(hex) {
     return new BABYLON.Color3(
         ((hex >> 16) & 0xff) / 255,

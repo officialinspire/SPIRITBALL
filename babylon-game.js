@@ -102,7 +102,7 @@ import {
     COOLDOWN_BUMPER_MS, COOLDOWN_COMET_MS, COOLDOWN_SLINGSHOT_MS, COOLDOWN_MISSION_TARGET_MS,
     COOLDOWN_REENTRY_LANE_MS, COOLDOWN_SATURN_MS, COOLDOWN_SIDE_LANE_MS, COOLDOWN_ORBIT_MS,
     COOLDOWN_WALL_MS, COOLDOWN_FLIPPER_MS, DRAIN_ZONE_WIDTH_M, DRAIN_ZONE_DEPTH_PX,
-    DRAIN_ZONE_CENTER_Y_PX, STARTING_LIVES, hexToColor3, HEX_BALL,
+    DRAIN_ZONE_CENTER_Y_PX, STARTING_LIVES, hexToColor3, hexStringToRgb, HEX_BALL,
     HEX_EYEBALL, HEX_FLIPPER, HEX_WALL, HEX_BUMPERS,
     HEX_CHAKRA, HEX_SATURN, HEX_SATURN_RING, HEX_COMET,
     HEX_MISSION_ACTIVE, HEX_LANE_LAMP, HEX_OUTLANE_LAMP, HEX_ORBIT_LAMP, HEX_SKILL_SHOT_LAMP,
@@ -2624,13 +2624,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const MI_Y = ROW_Y + ROW_H + 12;                // mission window
         const MI_H = height - MI_Y - 14;
 
-        // '#rrggbb' -> 'rgba(r, g, b, a)'. Needed because STATE_COLORS are CSS strings (canvas
-        // fillStyle takes those directly) while config's own hexToColor3() takes a NUMERIC hex
-        // and returns a BABYLON.Color3 - a different input and a different output, so this is a
-        // second small helper rather than a reuse. Only the tinted message halo calls it.
+        // '#rrggbb' -> 'rgba(r, g, b, a)' for the tinted message halo, over config's shared
+        // hexStringToRgb() - the ASCENSION screen flash needs the same parse, so it lives there.
         function hexToRgba(hex, alpha) {
-            const n = parseInt(hex.slice(1), 16);
-            return 'rgba(' + ((n >> 16) & 0xff) + ', ' + ((n >> 8) & 0xff) + ', ' + (n & 0xff) + ', ' + alpha + ')';
+            return 'rgba(' + hexStringToRgb(hex).join(', ') + ', ' + alpha + ')';
         }
 
         // Greedy word wrap into AT MOST two lines - the remainder of a very long string all lands
@@ -3485,10 +3482,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // 07-*.md, not a separately-tracked color). Always fires regardless of reduced-motion - this
     // IS the "hit confirmed" feedback the doc says must stay intact; only its particle COUNT is
     // reduced on low-tier devices, which is a performance gate, not a motion gate.
-    function spawnHitBurst(scene, texture, mesh, highFidelity) {
+    // colorOverride is optional. Without it this reads the struck mesh's own material exactly as
+    // it always has, so every existing call site is unchanged; the ASCENSION beat passes the
+    // state's palette colour so its burst is spectral rather than whatever the ball happens to
+    // be. Short-circuits the material read entirely when given, so the caller is free to pass a
+    // mesh whose material has neither albedoColor nor diffuseColor.
+    function spawnHitBurst(scene, texture, mesh, highFidelity, colorOverride, name) {
         if (!devParticlesEnabled) return null; // dev HUD "particle effects" toggle - see its own declaration comment
-        const color = mesh.material.albedoColor || mesh.material.diffuseColor;
-        const burst = new BABYLON.ParticleSystem('hitBurst', highFidelity ? 30 : 12, scene);
+        const color = colorOverride || mesh.material.albedoColor || mesh.material.diffuseColor;
+        // Optional name, defaulting to the 'hitBurst' every call site produced before it existed.
+        // The ASCENSION beat names its own so it is distinguishable in scene.particleSystems from
+        // the ordinary hit bursts firing at the same instant - without that, "did the ascension
+        // burst fire?" is unanswerable, because the bumper hits driving the vision are spawning
+        // their own bursts in the same frames. qa/ascension-beat.js relies on this.
+        const burst = new BABYLON.ParticleSystem(name || 'hitBurst', highFidelity ? 30 : 12, scene);
         burst.particleTexture = texture;
         burst.emitter = mesh.position.clone();
         burst.minEmitBox = BABYLON.Vector3.Zero();
@@ -6520,11 +6527,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // DefaultRenderingPipeline color-grade pulse - works identically regardless of
         // detectHighFidelity(), where the pipeline doesn't exist at all on low-tier devices.
         const flashOverlay = document.getElementById('flash-overlay');
-        function flashScreen(durationMs, r, g, b) {
+        // peakOpacity is optional and defaults to the 0.5 this had before it existed, so the drain
+        // flash below is byte-identical. The ASCENSION beat passes a much lower peak deliberately:
+        // a drain can white the screen out because the ball is already gone, but an ascension
+        // fires mid-play with the ball still live, and a half-opacity veil over a moving ball is
+        // exactly the "affects ball visibility" problem this game keeps guarding against.
+        function flashScreen(durationMs, r, g, b, peakOpacity) {
             if (window.SPIRITBALL_reducedMotion) return;
             flashOverlay.style.background = 'rgb(' + (r ?? 255) + ',' + (g ?? 255) + ',' + (b ?? 255) + ')';
             flashOverlay.style.transition = 'none';
-            flashOverlay.style.opacity = '0.5';
+            flashOverlay.style.opacity = String(peakOpacity ?? 0.5);
             void flashOverlay.offsetWidth; // force a reflow so the transition below animates from 0.5, not skips straight to 0
             flashOverlay.style.transition = 'opacity ' + durationMs + 'ms ease-out';
             flashOverlay.style.opacity = '0';
@@ -7947,18 +7959,52 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // gain, so it names the thing that WAS gained instead of repeating a state the
             // player already has. Was 'VISION COMPLETE!'; there is deliberately no plain
             // "vision complete" message, because every completion is one or the other of these.
+            const stateHex = STATE_COLORS[mission.rank];
             backglass.showMessage(
                 rankedUp ? 'ASCENSION: ' + RANK_NAMES[mission.rank] : 'INSIGHT GAINED',
                 1600,
                 // Tinted with the state being announced - the one moment the ladder's colour is
                 // worth spending attention on. INSIGHT GAINED takes the top state's colour since
                 // that is the state the player is sitting at when it fires.
-                STATE_COLORS[mission.rank]
+                stateHex
             );
-            // A stronger beat than any regular hit's - completing a mission and ranking up is the
-            // single biggest moment the game currently has, deserves to read as one.
+            // A stronger beat than any regular hit's - completing a vision and ascending is the
+            // single biggest moment the game currently has, deserves to read as one. Camera shake
+            // and punch are unchanged; the two additions below are what lift it above an ordinary
+            // hit, and every piece is an existing primitive with an optional argument, not a new
+            // effect system and not a cutscene.
+            //
+            // The whole beat is over well inside a second and NOTHING is paused: physics keeps
+            // stepping, the ball keeps travelling, input stays live. Longest element is the
+            // existing rank-up arpeggio at ~740ms; the flash is 260ms and the burst's particles
+            // are dead by ~600ms. The backglass message outlives all of it at 1600ms, but that is
+            // a panel readout the player can ignore, not an interruption.
+            const [sr, sg, sb] = hexStringToRgb(stateHex);
+            // Brief spectral wash in the state's own colour. Peak 0.22, not flashScreen()'s
+            // default 0.5 - see that function's comment for why a mid-play flash must not be a
+            // whiteout. Already a no-op under reduced motion inside flashScreen() itself.
+            flashScreen(260, sr, sg, sb, 0.22);
+            // Chakra spark burst at the ball, in the state's colour. Emitted where the ball IS,
+            // which is also where the player's eye needs to stay - the ball is still live and
+            // still travelling through all of this.
+            //
+            // Reduced motion suppresses this extra burst the same way buildChakraSparkle() does
+            // (returns null outright) rather than the vortex's reduce-the-rate approach, because
+            // there is nothing to reduce in a one-shot. Deliberately gated HERE at the call site
+            // and not inside spawnHitBurst(), which every ordinary hit shares - silencing those
+            // too would be a change to existing feedback nobody asked for. A reduced-motion player
+            // still gets the tinted ASCENSION message and the arpeggio, the same "clear, if
+            // motion-free, acknowledgement" triggerLaunchFiredFlash() already settles on.
+            if (!window.SPIRITBALL_reducedMotion) {
+                spawnHitBurst(scene, particleTexture, mainBall.mesh, highFidelity,
+                    new BABYLON.Color3(sr / 255, sg / 255, sb / 255), 'ascensionBurst');
+            }
             triggerCameraShake(500, 0.01);
             triggerCameraPunch(500, new BABYLON.Vector3(0, 0.02, -0.03));
+            // Unchanged: the existing four-note rising arpeggio (392 -> 523 -> 659 -> 784) is
+            // already the right shape for an ascension and already distinct from every other
+            // sound in the game. Refining it would mostly mean lengthening it, which the ~1s
+            // budget does not have room for.
             playRankUpSound();
             vibrateDevice(HAPTIC_MISSION_COMPLETE_PATTERN); // differentiated haptics (user-requested) - a short multi-pulse "fanfare", distinct from every single-tick haptic elsewhere
             // Drop-target bank reset (user-requested upgrade) - a mission completing is one of
