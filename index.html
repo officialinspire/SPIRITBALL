@@ -1880,19 +1880,30 @@
             box-shadow: 0 0 0 5px rgba(90, 220, 250, 0.16), 0 0 22px rgba(0, 200, 230, 0.22);
         }
 
-        /* Status footer. Legend/readout split and tracking straight off #player-hud's .hud-label
-           / .hud-value pair, at the smallest size in the panel. */
-        .pause-status {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: baseline;
-            justify-content: center;
-            gap: 2px 8px;
+        /* Current-run summary. Legend/readout split and tracking straight off #player-hud's
+           .hud-label / .hud-value pair, at the smallest sizes in the panel: labels 9px, values
+           11-12px against RESUME's 15-17px, so it can never compete with the primary action.
+           Rows are label-left / value-right, which is how the backglass reads its own windows. */
+        .pause-summary {
             margin: 0;
             padding-top: 12px;
             border-top: 1px solid rgba(126, 226, 236, 0.12);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
         }
-        .pause-status-label {
+        .pause-summary-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+            min-width: 0;
+        }
+        /* The hidden attribute has to beat the flex display above it, or an inactive vision row
+           would still lay out. */
+        .pause-summary-row[hidden] { display: none; }
+        .pause-summary-row dt {
+            flex: 0 0 auto;
             font-family: var(--hud-label-font);
             font-size: 9px;
             font-weight: 700;
@@ -1900,26 +1911,56 @@
             text-transform: uppercase;
             color: rgba(150, 245, 255, 0.55);
         }
-        .pause-status-value {
+        .pause-summary-row dd {
+            margin: 0;
+            min-width: 0;
             font-family: var(--hud-digit-font);
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 800;
+            font-variant-numeric: tabular-nums lining-nums;
             letter-spacing: 0.02em;
-            /* Inline colour is set by syncPauseStatus() from STATE_COLORS, so the footer carries
+            color: rgba(214, 245, 255, 0.9);
+            text-align: right;
+            /* A long value truncates rather than wrapping the row into two lines and breaking the
+               summary's rhythm. */
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pause-summary-state {
+            /* Inline colour is set by syncPauseStatus() from STATE_COLORS, so the summary carries
                the same spectral progression the backglass and the ASCENSION toast do. The value
                here is only the pre-script fallback. */
             color: #7dffe0;
         }
-        .pause-status-sep {
-            /* Hidden at phone widths on purpose. The footer wraps to two lines there, and a
-               separator between two STACKED rows is a pipe dangling off the end of the first one -
-               measured, not guessed. It only earns its place once both halves share a line. */
-            display: none;
-            width: 1px;
-            height: 9px;
-            background: rgba(126, 226, 236, 0.22);
+        .pause-summary-vision {
+            display: flex;
+            align-items: baseline;
+            justify-content: flex-end;
+            gap: 8px;
+            /* The name is the part allowed to truncate; the progress count never is - it is the
+               shorter and the more perishable of the two. */
+            overflow: visible;
         }
-        .pause-status-hint {
+        .pause-summary-vision-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 11px;
+            color: rgba(255, 190, 96, 0.92);   /* the backglass VISION window's own amber */
+        }
+        .pause-summary-progress {
+            flex: 0 0 auto;
+            font-size: 11px;
+            color: rgba(255, 210, 122, 0.75);
+        }
+
+        .pause-hint {
+            margin: 10px 0 0;
+            text-align: center;
+        }
+        .pause-hint-copy {
             font-family: var(--hud-label-font);
             font-size: 9px;
             font-weight: 600;
@@ -1929,15 +1970,15 @@
         }
         /* Platform copy, same mechanism as the title screen's hint: a coarse-pointer media query
            as the pre-script default, then [data-touch-controls] once the game has decided. */
-        #pause-overlay span.pause-status-hint.hint-touch { display: none; }
+        #pause-overlay span.pause-hint-copy.hint-touch { display: none; }
         @media (hover: none) and (pointer: coarse) {
-            #pause-overlay span.pause-status-hint.hint-desktop { display: none; }
-            #pause-overlay span.pause-status-hint.hint-touch { display: inline; }
+            #pause-overlay span.pause-hint-copy.hint-desktop { display: none; }
+            #pause-overlay span.pause-hint-copy.hint-touch { display: inline; }
         }
-        html[data-touch-controls="on"] #pause-overlay span.pause-status-hint.hint-desktop { display: none; }
-        html[data-touch-controls="on"] #pause-overlay span.pause-status-hint.hint-touch { display: inline; }
-        html[data-touch-controls="off"] #pause-overlay span.pause-status-hint.hint-desktop { display: inline; }
-        html[data-touch-controls="off"] #pause-overlay span.pause-status-hint.hint-touch { display: none; }
+        html[data-touch-controls="on"] #pause-overlay span.pause-hint-copy.hint-desktop { display: none; }
+        html[data-touch-controls="on"] #pause-overlay span.pause-hint-copy.hint-touch { display: inline; }
+        html[data-touch-controls="off"] #pause-overlay span.pause-hint-copy.hint-desktop { display: inline; }
+        html[data-touch-controls="off"] #pause-overlay span.pause-hint-copy.hint-touch { display: none; }
 
         /* Mobile-first scale-up. Nothing below is a layout change - only size. */
         @media (min-width: 480px) {
@@ -1949,7 +1990,6 @@
             #pause-overlay .pause-btn-primary { font-size: 17px; padding: 19px 16px; min-height: 62px; }
             #pause-overlay .pause-btn-secondary { font-size: 14px; padding: 15px 16px; min-height: 50px; }
             #pause-overlay .pause-btn-reset { font-size: 12px; padding: 13px 16px; min-height: 46px; }
-            .pause-status-sep { display: block; }
         }
         @media (min-width: 900px) {
             .pause-panel { max-width: 396px; }
@@ -2072,7 +2112,6 @@
                 text-shadow: none;
                 border: 1px solid currentColor;
             }
-            .pause-status-sep { background: currentColor; }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -2328,15 +2367,37 @@
                      where "vision" means the run and nothing is ambiguous. -->
                 <button id="pause-newgame-btn" class="pause-btn pause-btn-reset">NEW GAME</button>
             </div>
-            <p class="pause-status">
-                <span class="pause-status-label">STATE</span>
-                <!-- The one thing pause used to hide: the backglass carries the progression state,
-                     and the scrim covers the backglass. Filled by syncPauseStatus() in
-                     babylon-game.js from the state the panel is already showing. -->
-                <span class="pause-status-value" id="pause-status-state">INITIATE</span>
-                <span class="pause-status-sep" aria-hidden="true"></span>
-                <span class="pause-status-hint hint-desktop">ESC TO RESUME</span>
-                <span class="pause-status-hint hint-touch">TAP RESUME TO CONTINUE</span>
+            <!-- Current-run summary. THREE rows, deliberately not a second HUD: score and state
+                 because the scrim hides the backglass that carries them, and the active vision
+                 because nothing else on screen names it while paused. Balls is left out on
+                 purpose - #player-hud is a fixed element and stays visible through the pause, so
+                 repeating it would be duplication rather than information. A <dl> because these
+                 are label/value pairs and assistive tech should read them as such.
+                 Every value is READ from state that already exists; syncPauseStatus() in
+                 babylon-game.js fills them, and it is called on every path that shows the panel. -->
+            <dl class="pause-summary">
+                <div class="pause-summary-row">
+                    <dt>SCORE</dt>
+                    <dd id="pause-summary-score">0</dd>
+                </div>
+                <div class="pause-summary-row">
+                    <dt>STATE</dt>
+                    <dd class="pause-summary-state" id="pause-status-state">INITIATE</dd>
+                </div>
+                <!-- Hidden unless a vision is actually running - an empty "VISION -" row is worse
+                     than no row. Toggled with the hidden attribute, the same way #mission-hud
+                     already handles its own idle state. -->
+                <div class="pause-summary-row" id="pause-summary-vision-row" hidden>
+                    <dt>VISION</dt>
+                    <dd class="pause-summary-vision">
+                        <span class="pause-summary-vision-name" id="pause-summary-vision"></span>
+                        <span class="pause-summary-progress" id="pause-summary-progress"></span>
+                    </dd>
+                </div>
+            </dl>
+            <p class="pause-hint">
+                <span class="pause-hint-copy hint-desktop">ESC TO RESUME</span>
+                <span class="pause-hint-copy hint-touch">TAP RESUME TO CONTINUE</span>
             </p>
         </div>
     </div>

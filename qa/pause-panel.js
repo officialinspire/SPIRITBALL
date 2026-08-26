@@ -46,6 +46,13 @@ const check=(l,ok,d)=>{ ok?pass++:fail++; console.log(`  ${ok?'OK  ':'FAIL'} ${l
     await p.waitForFunction(()=>!!window.__flipperDebug,null,{timeout:40000});
     const vis=(id)=>p.evaluate((i)=>getComputedStyle(document.getElementById(i)).display!=='none',id);
     const phys=()=>p.evaluate(()=>!!BABYLON.EngineStore.LastCreatedScene.physicsEnabled);
+    // Escape TOGGLES, and Space is overloaded - it resumes when paused rather than charging - so
+    // a relaunch loop can leave the game in either state, and a bare Escape then does the opposite
+    // of what the next assertion assumes. This drives to "panel open" from what is actually on
+    // screen. (Found the hard way: the vision-row check passed at two viewports and failed at the
+    // third purely because the relaunch loop ran a different number of times there.)
+    const ensurePaused=async()=>{ if(!(await vis('pause-overlay'))){
+      await p.keyboard.press('Escape'); await p.waitForTimeout(600); } };
     if(touch) await p.touchscreen.tap(W/2,H/2); else await p.keyboard.press('Space');
     await p.waitForTimeout(2200);
 
@@ -65,8 +72,25 @@ const check=(l,ok,d)=>{ ok?pass++:fail++; console.log(`  ${ok?'OK  ':'FAIL'} ${l
     const st = await p.evaluate(()=>{ const e=document.getElementById('pause-status-state');
       return { text:e.textContent, color:getComputedStyle(e).color }; });
     check('status footer shows the live state', st.text.length>0 && st.color!=='rgba(0, 0, 0, 0)', st);
+
+    // --- current-run summary ------------------------------------------------------------------
+    // Reads existing state, so the test is agreement with the source, not a hardcoded value.
+    const sum = await p.evaluate(()=>({
+      score: document.getElementById('pause-summary-score').textContent,
+      hudScore: document.getElementById('hud-score').textContent,
+      visionHidden: document.getElementById('pause-summary-vision-row').hidden,
+      valueSize: parseFloat(getComputedStyle(document.querySelector('.pause-summary-row dd')).fontSize),
+      labelSize: parseFloat(getComputedStyle(document.querySelector('.pause-summary-row dt')).fontSize),
+      primarySize: parseFloat(getComputedStyle(document.getElementById('pause-resume-btn')).fontSize),
+      rows: document.querySelectorAll('.pause-summary-row').length }));
+    check('summary score agrees with the HUD rather than formatting it differently',
+      sum.score === sum.hudScore, sum);
+    check('the VISION row is absent when no vision is running', sum.visionHidden === true);
+    check('the summary is subordinate to RESUME',
+      sum.valueSize < sum.primarySize && sum.labelSize < sum.valueSize, sum);
+    check('the summary is three rows, not a second HUD', sum.rows === 3, { rows: sum.rows });
     // only one platform hint visible
-    const hints = await p.evaluate(()=>[...document.querySelectorAll('#pause-overlay .pause-status-hint')]
+    const hints = await p.evaluate(()=>[...document.querySelectorAll('#pause-overlay .pause-hint-copy')]
       .filter(e=>getComputedStyle(e).display!=='none').map(e=>e.textContent.trim()));
     check('exactly one platform hint is shown', hints.length===1, {hints});
     // CONTROLS -> BACK round trip
@@ -164,13 +188,35 @@ const check=(l,ok,d)=>{ ok?pass++:fail++; console.log(`  ${ok?'OK  ':'FAIL'} ${l
     // long a frame takes - which varies with viewport. A fixed count completed the vision at
     // 1280x800 and 390x844 and silently fell short at 320x568, where the frames are quicker.
     await p.evaluate(() => window.__pp_hold('missionTarget0'));
+    // Pause immediately after SELECTING the vision, at 0/N, rather than after feeding hits.
+    // Feeding first raced the completion: a held ball scores once per the bumper's own cooldown,
+    // so how far a fixed number of frames gets depends on frame duration, and at 1280x800 the
+    // vision was already finished by the time the panel opened - correctly leaving the row hidden.
+    //
+    // The comparison is against the DEV HUD's live mission row, not #mission-hud's text.
+    // updatePlayerStatusHud() hides #mission-hud when no vision is active but never clears its
+    // textContent, so that element keeps the last vision's name and progress indefinitely; reading
+    // it is reading a ghost, which is what made the first version of this check disagree with a
+    // summary that was behaving correctly.
+    await p.waitForTimeout(300);
+    await ensurePaused();
+    const live = await p.evaluate(()=>window.__pp_mission());
+    const active = await p.evaluate(()=>({
+      hidden: document.getElementById('pause-summary-vision-row').hidden,
+      name: document.getElementById('pause-summary-vision').textContent,
+      progress: document.getElementById('pause-summary-progress').textContent }));
+    const m = /^(.*) \((\d+\/\d+)\)$/.exec(live || '');
+    check('a vision is actually running for this check', !!m, { missionRow: live });
+    check('the VISION row appears while a vision is running, with its name and progress',
+      !!m && active.hidden === false && active.name === m[1] && active.progress === m[2],
+      { active, live });
+    await p.click('#pause-resume-btn'); await p.waitForTimeout(500);
     for (let h = 0; h < 90; h++) {
       await p.evaluate(() => window.__pp_hold('bumper1', 3));
       if (await p.evaluate(() => window.__pp_mission()) === 'none') break;
     }
     await p.waitForTimeout(400);
-    await p.waitForTimeout(600);
-    await p.keyboard.press('Escape'); await p.waitForTimeout(600);
+    await ensurePaused();
     const st2 = await p.evaluate(()=>{ const e=document.getElementById('pause-status-state');
       return { text:e.textContent, color:getComputedStyle(e).color }; });
     const diag = await p.evaluate(()=>({ inPlay:window.__flipperDebug.isBallInPlay(),
@@ -179,6 +225,10 @@ const check=(l,ok,d)=>{ ok?pass++:fail++; console.log(`  ${ok?'OK  ':'FAIL'} ${l
       pauseShown:getComputedStyle(document.getElementById('pause-overlay')).display!=='none' }));
     check('status footer tracks a CHANGED state, not just the default',
       st2.text !== st.text && st2.color !== st.color, { before:st, after:st2, diag });
+    check('the VISION row disappears again once the vision completes',
+      await p.evaluate(()=>document.getElementById('pause-summary-vision-row').hidden) === true);
+    check('the summary score updated with the run',
+      await p.evaluate(()=>document.getElementById('pause-summary-score').textContent) !== sum.score);
     await p.click('#pause-resume-btn'); await p.waitForTimeout(500);
 
     // NEW GAME from pause

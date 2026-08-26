@@ -9260,10 +9260,30 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // the panel is ALREADY displaying and writes it into the footer; it sets no state, owns
         // no state, and is safe to call whenever the overlay becomes visible.
         const pauseStatusState = document.getElementById('pause-status-state');
+        const pauseSummaryScore = document.getElementById('pause-summary-score');
+        const pauseSummaryVisionRow = document.getElementById('pause-summary-vision-row');
+        const pauseSummaryVision = document.getElementById('pause-summary-vision');
+        const pauseSummaryProgress = document.getElementById('pause-summary-progress');
         function syncPauseStatus() {
             if (!pauseStatusState) return;
             pauseStatusState.textContent = backglass.state.rank;
             pauseStatusState.style.color = backglass.state.rankColor || STATE_COLORS[0];
+            // String(score), matching setScore()'s own formatting rather than adding thousands
+            // separators here: #player-hud stays visible through the pause, and a summary that
+            // renders the same number differently from the readout beside it reads as a bug.
+            if (pauseSummaryScore) pauseSummaryScore.textContent = String(score);
+            if (pauseSummaryVisionRow) {
+                // Shown only while a vision is actually running. backglass.state.missionName is
+                // null between visions (see its own declaration), which is the same signal
+                // #mission-hud and the backglass window both already use for their idle state.
+                const activeVision = backglass.state.missionName;
+                pauseSummaryVisionRow.hidden = !activeVision;
+                if (activeVision) {
+                    pauseSummaryVision.textContent = activeVision;
+                    pauseSummaryProgress.textContent =
+                        backglass.state.missionProgress + '/' + backglass.state.missionRequired;
+                }
+            }
         }
 
         function openPauseMenu() {
