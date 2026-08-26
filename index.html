@@ -1592,29 +1592,268 @@
             background: #2a2a5e;
         }
 
-        #pause-newgame-btn { border-color: #00ff00; }
-        #pause-newgame-btn:active, #pause-newgame-btn:hover { color: #00ff00; }
-        #pause-controls-btn { border-color: #ffff00; }
-        #pause-controls-btn:active, #pause-controls-btn:hover { color: #ffff00; }
+        /* ==========================================================================
+           PAUSE PANEL (user-requested redesign)
 
-        /* UX pass (user-requested): Resume is the action most players take most often (every
-           pause is expected to end in a resume, not a new game) - previously it had the exact
-           same visual weight as every other button on the screen, with nothing marking it as the
-           primary/default one. A filled background (instead of the shared flat #1a1a3e) plus a
-           stronger glow is enough to read as "the main button" without changing its size, border
-           color, or position - still the first item in the list, same as before. */
-        #pause-resume-btn {
-            background: linear-gradient(135deg, rgba(0, 255, 255, 0.28), rgba(0, 140, 190, 0.38));
-            box-shadow: 0 0 18px rgba(0, 255, 255, 0.4);
-        }
-        #pause-resume-btn:active, #pause-resume-btn:hover {
-            background: linear-gradient(135deg, rgba(0, 255, 255, 0.4), rgba(0, 140, 190, 0.5));
+           WHAT WAS WRONG. Pause was the surface the title-screen redesign left behind. It still
+           inherited .screen-overlay's `font-family: 'Courier New', monospace` - the same "reads as
+           Courier" problem --title-font's own comment describes fixing for the wordmark - while
+           the title, the HUD and the backglass share a two-font system with deliberate tracking.
+           Its palette was pure 8-bit web colour (#0ff / #0f0 / #ff0 / #888) against a game built
+           on alpha-modulated cyans and violets; its three buttons carried three DIFFERENT border
+           hues, so nothing read as primary; its 3px borders outweighed the 2px card containing
+           them; and a flat rgba(_, 0.93) scrim blacked out the cosmic playfield at the one moment
+           the player has time to look at it.
+
+           WHAT REPLACES IT. Not a restyled card - the same construction #player-hud already uses,
+           so pause reads as another lit surface on the machine: near-black face, 3px dot-matrix
+           grain at ~3% alpha, a 1px bezel, inset recess + top light-catch, and 1px lit text edges
+           instead of neon bloom. Type comes from the existing tokens only - no font is added.
+           Mobile-first: the base rules below are the phone layout and the two min-width queries
+           only scale it up.
+
+           EVERYTHING FUNCTIONAL IS UNTOUCHED. Same ids, same handlers, same display:flex toggling
+           from openPauseMenu()/resumeGame()/backFromControlsScreen(). The Controls and Game Over
+           overlays deliberately keep .overlay-card and their current look - this pass was scoped
+           to pause alone, so every selector here is under #pause-overlay.
+           ========================================================================== */
+        #pause-overlay {
+            justify-content: center;
+            /* Graded like the title screen's scrim rather than flat, so the table is present
+               behind the panel instead of blacked out - but held much darker through the middle
+               band than the title's 0.18, because unlike a title screen this surface carries
+               controls that have to stay crisp over a lit, high-contrast playfield. */
+            background: linear-gradient(to bottom,
+                rgba(4, 0, 14, 0.95) 0%,
+                rgba(4, 0, 14, 0.80) 16%,
+                rgba(4, 0, 14, 0.58) 40%,
+                rgba(4, 0, 14, 0.58) 60%,
+                rgba(4, 0, 14, 0.86) 86%,
+                rgba(4, 0, 14, 0.96) 100%);
+            padding: max(5vh, 40px) 16px max(5vh, 40px);
         }
 
-        .screen-overlay .hint {
+        .pause-panel {
+            width: 100%;
+            max-width: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding: 20px 16px 14px;
+            box-sizing: border-box;
+            border-radius: 14px;
+            /* Same face as #player-hud, one step more opaque: this one sits over the brightest
+               part of the table rather than a corner of it. */
+            background-color: rgba(6, 3, 14, 0.86);
+            /* The panel grain, at the HUD's own 3px pitch. Pulled to ~3% (the HUD uses ~4.5%)
+               because this is a much larger surface and the texture should stay felt-not-seen. */
+            background-image: radial-gradient(circle at 50% 50%,
+                rgba(130, 245, 255, 0.03) 0.5px, rgba(130, 245, 255, 0) 0.75px);
+            background-size: 3px 3px;
+            /* The thin structural bezel - 1px at 30% alpha, exactly #player-hud's, replacing the
+               old 2px solid #00ffff that drew a hard box around the whole composition. */
+            border: 1px solid rgba(126, 226, 236, 0.30);
+            box-shadow:
+                inset 0 1px 0 rgba(170, 240, 255, 0.13),   /* light catching the top edge */
+                inset 0 0 46px rgba(138, 43, 226, 0.10),   /* the subtle internal violet glow */
+                0 20px 52px rgba(0, 0, 0, 0.55);           /* the panel sitting off the playfield */
+            /* Progressive: where it is unsupported the panel is simply a solid dark face, which
+               is already legible - nothing depends on the blur. */
+            -webkit-backdrop-filter: blur(3px);
+            backdrop-filter: blur(3px);
+        }
+
+        .pause-plate { text-align: center; }
+
+        /* The maker's plate, not a hero title: on a pause screen the STATE is the message and the
+           game's name is context. Tracked wide and held well back in luminance so it reads as
+           stamped on the bezel. text-indent compensates for the trailing letter-space, which
+           otherwise pushes centred tracked text visibly left. */
+        .pause-wordmark {
+            margin: 0 0 8px;
+            font-family: var(--title-font);
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.44em;
+            text-indent: 0.44em;
+            color: rgba(206, 240, 252, 0.55);
+            text-shadow: none;
+        }
+
+        #pause-overlay h1 {
+            margin: 0;
+            font-family: var(--hud-label-font);
+            font-size: 19px;
+            font-weight: 700;
+            letter-spacing: 0.20em;
+            text-indent: 0.20em;
+            text-transform: uppercase;
+            color: rgba(163, 246, 255, 0.94);
+            /* A 1px lit edge, not a bloom - the same call #player-hud's score makes. The old
+               `0 0 12px #ff00ff, 0 0 24px #00ffff` is what made this read as neon signage. */
+            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.8), 0 0 1px rgba(120, 250, 255, 0.55);
+        }
+
+        .pause-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        #pause-overlay .pause-btn {
+            display: block;
+            width: 100%;
+            /* Overrides .screen-overlay button's min-width:min(240px,100%), which left a fixed
+               240px button ragged inside a wider card instead of filling its column. */
+            min-width: 0;
+            min-height: 46px;                 /* comfortably over the 44px touch-target floor */
+            margin: 0;                        /* rhythm comes from .pause-actions' gap, not <br> */
+            padding: 13px 14px;
+            box-sizing: border-box;
+            font-family: var(--hud-label-font);
             font-size: 13px;
-            color: #888;
-            margin-top: 20px;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-indent: 0.18em;
+            text-transform: uppercase;
+            color: rgba(206, 240, 250, 0.9);
+            /* A recess cut into the panel, same construction as the score window. */
+            background-color: rgba(0, 2, 6, 0.7);
+            background-image: radial-gradient(circle at 50% 50%,
+                rgba(130, 245, 255, 0.035) 0.5px, rgba(130, 245, 255, 0) 0.75px);
+            background-size: 3px 3px;
+            border: 1px solid rgba(126, 226, 236, 0.2);
+            border-radius: 9px;
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.7),
+                inset 0 -1px 0 rgba(150, 255, 255, 0.06);
+            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.85);
+            cursor: pointer;
+            transition: color 140ms ease, border-color 140ms ease,
+                        background-color 140ms ease, box-shadow 140ms ease;
+        }
+
+        /* Primary. One lit lamp in the stack rather than three equally shouting borders - the
+           difference is brightness and a contained glow, NOT a different hue, so the panel stays
+           one colour family. */
+        #pause-overlay .pause-btn-primary {
+            color: #eafcff;
+            border-color: rgba(126, 226, 236, 0.55);
+            background-color: rgba(0, 26, 38, 0.72);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.6),
+                inset 0 0 0 1px rgba(120, 250, 255, 0.14),
+                inset 0 -1px 0 rgba(150, 255, 255, 0.14),
+                0 0 18px rgba(0, 200, 230, 0.16);
+            text-shadow:
+                0 -1px 0 rgba(255, 255, 255, 0.22),
+                0 1px 0 rgba(0, 26, 38, 0.9),
+                0 0 1px rgba(120, 250, 255, 0.6);
+        }
+
+        /* The one destructive control: last in the stack, pulled back toward violet and dimmer
+           than either sibling, so it is findable without ever being the thing the eye lands on. */
+        #pause-overlay .pause-btn-reset {
+            color: rgba(222, 196, 246, 0.72);
+            border-color: rgba(176, 132, 226, 0.24);
+        }
+
+        #pause-overlay .pause-btn:hover,
+        #pause-overlay .pause-btn:active {
+            color: #f2ffff;
+            background-color: rgba(0, 30, 44, 0.8);
+            border-color: rgba(150, 245, 255, 0.6);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.55),
+                inset 0 0 0 1px rgba(120, 250, 255, 0.18),
+                inset 0 -1px 0 rgba(150, 255, 255, 0.14),
+                0 0 20px rgba(0, 200, 230, 0.2);
+        }
+        #pause-overlay .pause-btn-reset:hover,
+        #pause-overlay .pause-btn-reset:active {
+            color: #f6ecff;
+            border-color: rgba(198, 150, 245, 0.62);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.55),
+                inset 0 0 0 1px rgba(198, 150, 245, 0.18),
+                inset 0 -1px 0 rgba(214, 180, 255, 0.12),
+                0 0 20px rgba(150, 80, 220, 0.22);
+        }
+        #pause-overlay .pause-btn:focus-visible {
+            outline: 2px solid rgba(150, 245, 255, 0.75);
+            outline-offset: 2px;
+        }
+
+        /* Status footer. Legend/readout split and tracking straight off #player-hud's .hud-label
+           / .hud-value pair, at the smallest size in the panel. */
+        .pause-status {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            justify-content: center;
+            gap: 2px 8px;
+            margin: 0;
+            padding-top: 12px;
+            border-top: 1px solid rgba(126, 226, 236, 0.12);
+        }
+        .pause-status-label {
+            font-family: var(--hud-label-font);
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: rgba(150, 245, 255, 0.55);
+        }
+        .pause-status-value {
+            font-family: var(--hud-digit-font);
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            /* Inline colour is set by syncPauseStatus() from STATE_COLORS, so the footer carries
+               the same spectral progression the backglass and the ASCENSION toast do. The value
+               here is only the pre-script fallback. */
+            color: #7dffe0;
+        }
+        .pause-status-sep {
+            /* Hidden at phone widths on purpose. The footer wraps to two lines there, and a
+               separator between two STACKED rows is a pipe dangling off the end of the first one -
+               measured, not guessed. It only earns its place once both halves share a line. */
+            display: none;
+            width: 1px;
+            height: 9px;
+            background: rgba(126, 226, 236, 0.22);
+        }
+        .pause-status-hint {
+            font-family: var(--hud-label-font);
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: rgba(160, 210, 235, 0.45);
+        }
+        /* Platform copy, same mechanism as the title screen's hint: a coarse-pointer media query
+           as the pre-script default, then [data-touch-controls] once the game has decided. */
+        #pause-overlay span.pause-status-hint.hint-touch { display: none; }
+        @media (hover: none) and (pointer: coarse) {
+            #pause-overlay span.pause-status-hint.hint-desktop { display: none; }
+            #pause-overlay span.pause-status-hint.hint-touch { display: inline; }
+        }
+        html[data-touch-controls="on"] #pause-overlay span.pause-status-hint.hint-desktop { display: none; }
+        html[data-touch-controls="on"] #pause-overlay span.pause-status-hint.hint-touch { display: inline; }
+        html[data-touch-controls="off"] #pause-overlay span.pause-status-hint.hint-desktop { display: inline; }
+        html[data-touch-controls="off"] #pause-overlay span.pause-status-hint.hint-touch { display: none; }
+
+        /* Mobile-first scale-up. Nothing below is a layout change - only size. */
+        @media (min-width: 480px) {
+            .pause-panel { max-width: 364px; gap: 22px; padding: 24px 22px 16px; }
+            .pause-wordmark { font-size: 12px; }
+            #pause-overlay h1 { font-size: 22px; }
+            #pause-overlay .pause-btn { font-size: 14px; padding: 15px 16px; min-height: 50px; }
+            .pause-status-sep { display: block; }
+        }
+        @media (min-width: 900px) {
+            .pause-panel { max-width: 396px; }
+            #pause-overlay h1 { font-size: 24px; }
         }
 
         #controls-rows { margin: 12px 0 24px 0; }
@@ -1723,9 +1962,24 @@
                 border: 1px solid currentColor;
             }
             #player-hud #hud-lives { text-shadow: none; }
+            /* Same call for the pause panel: forced-colors strips author colours but not
+               background-image or box-shadow, which would leave the grain and the recesses
+               painted over a system-coloured surface. The bezel becomes a real border so the
+               panel and its buttons still have edges. */
+            .pause-panel, #pause-overlay .pause-btn {
+                background-image: none;
+                box-shadow: none;
+                text-shadow: none;
+                border: 1px solid currentColor;
+            }
+            .pause-status-sep { background: currentColor; }
         }
 
         @media (prefers-reduced-motion: reduce) {
+            /* The pause buttons' feedback is colour and brightness only - no transform, nothing
+               that moves - but the cross-fade is still animation, so it becomes an instant change
+               here rather than being removed. The feedback itself must not disappear. */
+            #pause-overlay .pause-btn { transition: none; }
             .launch-btn.ready { animation: none; }
             .rotate-icon { animation: none; }
             .screen-overlay .pulse-text, #loading-panel h1 { animation: none; }
@@ -1948,13 +2202,38 @@
         </div>
     </div>
 
+    <!-- Pause panel (user-requested redesign). Deliberately NOT .overlay-card: this is built from
+         #player-hud's own instrumentation grammar - near-black face, 3px dot-matrix grain, a 1px
+         bezel and inset recesses - so it reads as another lit surface on the same machine rather
+         than a dialog over a game. Every id is unchanged, so every handler binds exactly as
+         before; the buttons are only REORDERED (destructive action last) and relabelled. -->
     <div id="pause-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="pause-overlay-heading">
-        <div class="overlay-card">
-            <h1 id="pause-overlay-heading">GAME PAUSED</h1>
-            <button id="pause-resume-btn">▶ RESUME GAME</button><br>
-            <button id="pause-newgame-btn">🔄 NEW GAME</button><br>
-            <button id="pause-controls-btn">ℹ CONTROLS</button>
-            <p class="hint">ESC or TAP RESUME to continue</p>
+        <div class="pause-panel">
+            <div class="pause-plate">
+                <p class="pause-wordmark">SPIRITBALL</p>
+                <h1 id="pause-overlay-heading">VISION PAUSED</h1>
+            </div>
+            <div class="pause-actions">
+                <button id="pause-resume-btn" class="pause-btn pause-btn-primary">RESUME</button>
+                <button id="pause-controls-btn" class="pause-btn">CONTROLS</button>
+                <!-- "NEW GAME", not "NEW VISION", of the two the prompt offered: a vision IS a
+                     mission in this game (MISSION_DEFS), and the HUD says "VISION: CHAKRA
+                     AWAKENING" while one is running - so "NEW VISION" on the one destructive
+                     control here would read as "start another mission", which is a real action
+                     the player can take by hitting a target. The heading keeps VISION PAUSED,
+                     where "vision" means the run and nothing is ambiguous. -->
+                <button id="pause-newgame-btn" class="pause-btn pause-btn-reset">NEW GAME</button>
+            </div>
+            <p class="pause-status">
+                <span class="pause-status-label">STATE</span>
+                <!-- The one thing pause used to hide: the backglass carries the progression state,
+                     and the scrim covers the backglass. Filled by syncPauseStatus() in
+                     babylon-game.js from the state the panel is already showing. -->
+                <span class="pause-status-value" id="pause-status-state">INITIATE</span>
+                <span class="pause-status-sep" aria-hidden="true"></span>
+                <span class="pause-status-hint hint-desktop">ESC TO RESUME</span>
+                <span class="pause-status-hint hint-touch">TAP RESUME TO CONTINUE</span>
+            </p>
         </div>
     </div>
 

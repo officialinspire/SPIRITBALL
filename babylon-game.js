@@ -9254,10 +9254,23 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // --- Pause / Controls flow, ported from pauseGame()/resumeGame()/showSettingsMenu() in
         // ../index.js. scene.physicsEnabled toggling confirmed against Babylon's actual source
         // (see the render loop's pause-gate comment below) - not guessed. ---
+        // Pause panel's status footer (presentation only - see index.html's pause block). The
+        // progression state lives on the backglass, and the pause scrim covers the backglass, so
+        // pausing used to hide the one number the panel had room to show. This reads the state
+        // the panel is ALREADY displaying and writes it into the footer; it sets no state, owns
+        // no state, and is safe to call whenever the overlay becomes visible.
+        const pauseStatusState = document.getElementById('pause-status-state');
+        function syncPauseStatus() {
+            if (!pauseStatusState) return;
+            pauseStatusState.textContent = backglass.state.rank;
+            pauseStatusState.style.color = backglass.state.rankColor || STATE_COLORS[0];
+        }
+
         function openPauseMenu() {
             if (isPaused || gameOverActive || isMenuUp()) return;
             isPaused = true;
             scene.physicsEnabled = false;
+            syncPauseStatus();
             pauseOverlay.style.display = 'flex';
         }
 
@@ -9291,6 +9304,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         function backFromControlsScreen() {
             controlsOverlay.style.display = 'none';
+            // Also refreshed on the way back from Controls - the panel is being re-shown, and a
+            // deferred drain resolved during the detour could have moved the state.
+            syncPauseStatus();
             pauseOverlay.style.display = 'flex';
         }
 
