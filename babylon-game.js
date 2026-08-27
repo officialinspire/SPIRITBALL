@@ -4577,6 +4577,21 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // material ABOVE, so this call cleanly replaces it when a skin exists rather than
             // racing it. Nothing in this decorative block touches the box's dimensions or the
             // aggregate below, so custom art can never alter the physics.
+            //
+            // Nor can it alter the DROP. updateDropTargetBank() lerps this mesh's position.y
+            // between TARGET_RAISED_Y_M and TARGET_DROPPED_Y_M and reads nothing from the
+            // material; the trigger aggregate below deliberately stays put while the flag sinks.
+            // qa/skin-mission-targets.js stages a real hit and asserts both halves - the flag
+            // reaches the dropped position and the trigger's transform does not move - identically
+            // with and without artwork loaded.
+            //
+            // No albedoScale on these slots, unlike cabinetRails/bumperCap: albedoColor is already
+            // white here (the chakra colour lives in the texture, not the tint - see targetMats
+            // above), so applySkinTexture()'s white reset is a no-op and there is no existing
+            // tuning for a ceiling to protect. What artwork DOES inherit is this material's flat
+            // chakra emissiveColor, by design - see js/skins.js for the per-index values an artist
+            // needs to design around, and createTargetFaceTexture() for why the procedural face
+            // carries no emissive texture of its own.
             applySkinTexture(scene, mesh.material, SKIN_MANIFEST.missionTargetFace[i]);
             mesh.metadata = { kind: 'missionTarget', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);

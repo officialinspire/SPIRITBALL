@@ -143,13 +143,62 @@ export const SKIN_MANIFEST = {
     // Future path: 'bumpers/bumper-cap.png'
     bumperCap: { path: null, kind: 'albedo', albedoScale: 0.55 },
 
-    // Mission target faces - per-target-index (MISSION_TARGET_BANK has 3 entries; targetMats[i]
-    // is already a distinct material per index). Index order matches MISSION_TARGET_BANK's own
-    // array order. Future paths: 'targets/mission-target-0.png' / '-1.png' / '-2.png'
+    // Mission/vision target faces - per-target-index (MISSION_TARGET_BANK has 3 entries;
+    // targetMats[i] is already a distinct material per index, verified by qa/skin-mission-
+    // targets.js rather than assumed - a shared instance here would cross-wire two targets' art).
+    // Index order matches MISSION_TARGET_BANK's own array order, and each index is tied to the
+    // vision that target selects (see MISSION_DEFS in js/config.js):
+    //
+    //   [0] CHAKRA AWAKENING  - symbolic chakra / lotus / energy motif
+    //   [1] ASTRAL PURSUIT    - comet / astral eye / star motif
+    //   [2] RETURN TO BODY    - spiral / portal / grounding / re-entry motif
+    //
+    // GEOMETRY. The flag is a CreateBox 0.028m wide x 0.030m tall x 0.008m deep, unrotated, and
+    // the camera-facing face is the full 0.028 x 0.030 one. That is an aspect of exactly 14:15
+    // (0.9333) - very slightly TALLER than square. Author at 448x480, which is 14:15 exactly.
+    // (This document previously said 2:3 portrait / 256x384, which is 0.667 - a 29% error that
+    // would have squashed any artwork drawn to it. The procedural fallback's own 128x136 is
+    // 0.9412, so the fallback was right and only the spec was wrong.)
+    //
+    // UV ORIENTATION IS ALREADY CORRECT, and unusually for this manifest there is nothing to work
+    // around. Measured by painting a quadrant map (image TL red / TR green / BL blue / BR yellow)
+    // onto the real plates in the real scene: image top-left lands screen top-left on all three
+    // targets, with no vertical flip and no horizontal mirroring. Artwork drops in the way it was
+    // drawn. All 6 box faces carry the default full u[0,1]/v[0,1] square, so the same image also
+    // paints the 0.008m edge slivers - they are a few pixels and effectively never read.
+    //
+    // THE TINT ARTWORK INHERITS is the one thing that will surprise an artist, and it is
+    // deliberate. applySkinTexture() only ever replaces albedoTexture, so each plate keeps its
+    // flat chakra-coloured emissiveColor (COLOR_CHAKRA[i].scale(0.30)) - that is what supplies the
+    // "lamp behind lit plastic" glow, and createTargetFaceTexture()'s comment explains why the
+    // procedural face deliberately carries no emissive texture of its own so a skin inherits it
+    // cleanly. Concretely, artwork on each index is washed by:
+    //
+    //   [0] violet     #9400d3 x 0.30
+    //   [1] deep pink  #ff1493 x 0.30
+    //   [2] yellow     #ffff00 x 0.30
+    //
+    // Worth designing around rather than fighting: a cyan comet motif on [1] will read magenta,
+    // since HEX_COMET is #66e0ff but this plate's own identity colour is pink. The plate is also
+    // alpha 0.85, so roughly 15% of the lit slot behind it shows through the artwork.
+    //
+    // NO albedoScale HERE, unlike cabinetRails and bumperCap, and that is a decision rather than
+    // an omission: these materials already set albedoColor to white (the chakra colour is baked
+    // into the texture, not tinted through albedoColor), so applySkinTexture()'s white reset is a
+    // no-op and there is no existing tuning for a ceiling to protect. Adding one for symmetry
+    // would darken artwork for nothing.
+    //
+    // The plate renders 24x24 screen pixels at 1280x800. Bold, high-contrast, centred symbols
+    // read; fine linework does not.
+    //
+    // The drop animation cannot be affected from here: updateDropTargetBank() lerps only the flag
+    // mesh's position.y between TARGET_RAISED_Y_M and TARGET_DROPPED_Y_M, never touching the
+    // material, and the trigger volume deliberately stays put while the flag sinks.
+    // Future paths: 'targets/mission-target-0.png' / '-1.png' / '-2.png'
     missionTargetFace: [
-        { path: null, kind: 'albedo' },
-        { path: null, kind: 'albedo' },
-        { path: null, kind: 'albedo' }
+        { path: null, kind: 'albedo' }, // CHAKRA AWAKENING - chakra / lotus / energy
+        { path: null, kind: 'albedo' }, // ASTRAL PURSUIT   - comet / astral eye / star
+        { path: null, kind: 'albedo' }  // RETURN TO BODY   - spiral / portal / re-entry
     ],
 
     // Lane inserts - the small backlit discs set into the inlane/outlane/orbit rollovers

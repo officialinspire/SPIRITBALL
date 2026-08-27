@@ -65,8 +65,8 @@ all.
      choice. `cabinetRails` and `bumperCap` set it today (see their sections below); on `bumperCap`
      it is specifically preserving a measured tuning that the plain white reset would discard.
 
-4. **`qa/skin-integration.js`** and **`qa/skin-bumper-cap.js`** - the guards. The first exercises
-   all three states of the `cabinetRails`
+4. **`qa/skin-integration.js`**, **`qa/skin-bumper-cap.js`** and **`qa/skin-mission-targets.js`** -
+   the guards. The first exercises all three states of the `cabinetRails`
    slot on every run (unset / configured-but-missing / configured-and-valid), by intercepting
    `js/skins.js` in the browser and rewriting the one slot - the shipped manifest is never edited
    and the test leaves no residue. It pins that an unset slot issues no request, that a failed load
@@ -79,7 +79,11 @@ all.
    collider, that bumper geometry and physics bodies are unchanged, that a real staged hit still
    awards the same score and still throws the ball back, that the hit flash still lifts
    `bodyMat`/`lampMat` and still never touches the shared cap material, and that the boss bumper's
-   three cues survive deliberately hostile artwork.
+   three cues survive deliberately hostile artwork. The third covers the `missionTargetFace` array:
+   that each index has its own material and picks up its own slot's file (no cross-wiring), that
+   UV orientation is upright and un-mirrored, that the drop animation's endpoints and the trigger
+   volume's position are unchanged by artwork, and it measures what neutral grey renders as on each
+   plate so the emissive-wash spec is a measurement rather than a guess.
 
 5. **`assets/skins/`** - where the actual image files go, in the subfolders described below.
 
@@ -334,6 +338,104 @@ white at full brightness, identical on all four caps - and asserts none of them 
 all three are bit-identical between the fallback and hostile-artwork runs, which is what "the cues
 do not live in this material" looks like when it is true.
 
+## Slot spec: `missionTargetFace[0..2]`
+
+**Not populated.** Integration path finished and guarded by `qa/skin-mission-targets.js`.
+
+### Theme mapping
+
+| Index | Vision | Motif |
+|---|---|---|
+| `[0]` | CHAKRA AWAKENING | symbolic chakra / lotus / energy |
+| `[1]` | ASTRAL PURSUIT | comet / astral eye / star |
+| `[2]` | RETURN TO BODY | spiral / portal / grounding / re-entry |
+
+Index order matches `MISSION_TARGET_BANK`, and each index has its **own** `PBRMaterial` instance,
+so the three slots are genuinely independent - the QA proves each target holds the texture from its
+own slot rather than trusting it.
+
+### Required files
+
+| | |
+|---|---|
+| Paths | `assets/skins/targets/mission-target-0.png` / `-1.png` / `-2.png` |
+| Dimensions | **448 x 480** each |
+| Aspect | **14:15 (0.9333)** - the visible face is 0.028m x 0.030m, very slightly taller than square |
+| Orientation | Draw it the way it should appear. No flip, no mirror needed. |
+
+Then set the three slots to
+`{ path: 'targets/mission-target-<i>.png', kind: 'albedo' }`.
+
+**The aspect in this table is a correction.** The previous spec said *2:3 portrait, 256x384* -
+that is 0.667 against a real face of 0.933, a **29% error**, and artwork drawn to it would have been
+noticeably squashed. The procedural fallback's own texture is 128x136 (0.9412), so the fallback was
+authored correctly and only the written spec was wrong. The old note that the plate is "angled
+slightly toward the camera" was also wrong: measured, all three plates have rotation `[0,0,0]`.
+
+### UV orientation - already correct
+
+Unusually for this manifest there is nothing to work around here. Measured by painting a quadrant
+map onto the real plates in the real scene (image TL red, TR green, BL blue, BR yellow) and reading
+back which image quadrant lands in which screen quadrant:
+
+| Screen | Image quadrant found there |
+|---|---|
+| top-left | top-left |
+| top-right | top-right |
+| bottom-left | bottom-left |
+| bottom-right | bottom-right |
+
+Consistent on all three targets. **No vertical flip, no horizontal mirroring** - artwork arrives the
+way it was drawn. All six box faces carry the default full `u[0,1]/v[0,1]` square, so the image also
+paints the 0.008m edge slivers; those are a few pixels and effectively never read.
+
+### The tint artwork inherits
+
+This is the one thing likely to surprise an artist, and it is deliberate. `applySkinTexture()` only
+ever replaces `albedoTexture`, so each plate keeps its flat chakra-coloured `emissiveColor`
+(`COLOR_CHAKRA[i].scale(0.30)`). That emissive is what supplies the "lamp behind lit plastic" glow,
+and `createTargetFaceTexture()` deliberately carries **no** emissive texture of its own precisely so
+a skin inherits it cleanly rather than glowing a baked-in border through the new art.
+
+| Index | Emissive wash | Note |
+|---|---|---|
+| `[0]` | violet `#9400d3` x 0.30 | suits the chakra/lotus motif directly |
+| `[1]` | deep pink `#ff1493` x 0.30 | **a cyan comet motif will read magenta** - `HEX_COMET` is `#66e0ff`, but this plate's identity colour is pink |
+| `[2]` | yellow `#ffff00` x 0.30 | suits a warm grounding/re-entry motif |
+
+The plate is also `alpha 0.85`, so roughly 15% of the lit slot behind it shows through the artwork.
+Design around the wash rather than fighting it - artwork cannot cancel an additive emissive.
+
+### No brightness ceiling on these slots
+
+Unlike `cabinetRails` and `bumperCap`, these slots set **no** `albedoScale`, and that is a decision
+rather than an omission. These materials already set `albedoColor` to white - the chakra colour is
+baked into the texture, not applied as a tint - so `applySkinTexture()`'s white reset is a no-op and
+there is no existing tuning for a ceiling to protect. Adding one for symmetry would darken artwork
+for nothing.
+
+### What a target skin cannot affect
+
+- **The drop animation.** `updateDropTargetBank()` lerps only the flag mesh's `position.y` between
+  `TARGET_RAISED_Y_M` (0.015) and `TARGET_DROPPED_Y_M` (-0.05) over `TARGET_DROP_ANIM_MS` (220),
+  and reads nothing from the material. The QA stages a real hit and asserts the flag reaches the
+  dropped position and the **trigger volume does not move** - that split is what keeps scoring
+  decoupled from the animation - identically with and without artwork.
+- **Collider, size, position.** Extents, positions, rotations and physics bodies are asserted
+  byte-identical across unset, broken-path and loaded-artwork.
+
+One limitation the QA states rather than papers over: it does not test the drop's intermediate
+interpolation. This headless environment runs at ~1.6 fps with frame deltas up to 677ms against a
+220ms animation, so the lerp completes inside a single frame and no intermediate value is
+observable at any sampling rate. Endpoints, constants, trigger invariance and skinned-vs-unskinned
+equality are observable, and those are what is asserted.
+
+### Authoring note
+
+The plate renders **24x24 screen pixels** at 1280x800. Bold, high-contrast, centred symbols read at
+that size; fine linework does not. The 448x480 target is for headroom, not for detail that will
+survive.
+
 ## How to add real artwork
 
 1. Drop the image at `assets/skins/<subfolder>/<filename>.png` (or `.jpg`/`.webp` - see format
@@ -399,9 +501,9 @@ Per slot:
 | Slot | Recommended size | Aspect | Mesh / default UV | Notes |
 |---|---|---|---|---|
 | `playfieldBackground` | 1024x1820 | matches `TABLE_WIDTH_M` : `TABLE_LENGTH_M` (~0.51 : 0.907, i.e. ~9:16) | `CreateBox` (playfield) | Top face only is ever seen (fixed camera looks down at the playfield); design the full image as a top-down playfield illustration. Portrait orientation, same as the table itself. |
-| `cabinetRails` | **64x512 portrait strip** | 1:8 | `CreateBox` x7 (each boundary wall), 42 faces, one shared material | **Not a tileable pattern and not a scene** - a vertical rail *profile*, read top-to-bottom, constant across its width. See the dedicated `cabinetRails` section below for why, the band layout to reproduce, and the brightness ceiling. |
-| `bumperCap` | 512x512 | 1:1 | `CreateSphere` (flattened, `scaling.y = 0.58`) | **Equirectangular sphere map, not a top-down disc.** The cap's apex is the image's BOTTOM edge; the top 25% of the image never renders. See the dedicated `bumperCap` section below for the measurements and the brightness ceiling. |
-| `missionTargetFace[0..2]` | 256x384 | matches the flag mesh, 2:3 portrait (`TARGET_RADIUS_M * 2` wide by `0.03`m... tall relative to width) | `CreateBox` (thin flag) | Front face only is normally visible (angled slightly toward the camera). Keep important content centered - the box's default UV maps the full image to each face independently. |
+| `cabinetRails` | **64x512 portrait strip** | 1:8 | `CreateBox` x7 (each boundary wall), 42 faces, one shared material | **Not a tileable pattern and not a scene** - a vertical rail *profile*, read top-to-bottom, constant across its width. See the `cabinetRails` section above for why, the band layout to reproduce, and the brightness ceiling. |
+| `bumperCap` | 512x512 | 1:1 | `CreateSphere` (flattened, `scaling.y = 0.58`) | **Equirectangular sphere map, not a top-down disc.** The cap's apex is the image's BOTTOM edge; the top 25% of the image never renders. See the `bumperCap` section above for the measurements and the brightness ceiling. |
+| `missionTargetFace[0..2]` | **448x480** | **14:15 (0.9333)** - the face is 0.028m x 0.030m | `CreateBox` (thin flag), one material per index | Camera-facing face only. **UV orientation is already correct** - upright, un-mirrored. Artwork inherits a per-index chakra emissive wash. See the `missionTargetFace` section above. |
 | `laneInsertInlane` / `-Outlane` / `-Orbit` | 128x128 | 1:1 | `CreateCylinder` (flat disc, height 0.003) | Only the flat top face is seen. Emissive slot - design these bright/high-contrast on a dark or transparent ground; they render additively over the lamp's own on/off emissive color, so a mid-gray image will look dim when the lamp is "off" and full-bright when "on," matching the existing lamp system automatically. |
 | `obstacleDecalSaturn` | 256x256 | 1:1 | `CreateSphere` (flattened cap) | Same sphere-UV note as `bumperCap` - keep key content in the visible top band. |
 | `obstacleDecalComet` | 256x256 | 1:1 | `CreateSphere` (full sphere, this is the comet's own body/collider) | Standard equirectangular sphere UV - a simple radial/icy pattern reads best given the shallow default camera angle (most of the sphere's far side is never seen). |
@@ -426,10 +528,15 @@ Per slot:
   either way.
 - **No artwork was invented.** The one populated slot (`playfieldBackground`) uses artwork
   supplied directly by the user, not generated. Every other subfolder under `assets/skins/`
-  contains only a `.gitkeep` placeholder - `cabinet/` and `bumpers/` included. The `cabinetRails`
-  and `bumperCap` passes finalized and tested the paths into those two slots and wrote the specs
-  above; neither produced a file to put in them, and both keep `path: null` until a real one
-  exists.
+  contains only a `.gitkeep` placeholder - `cabinet/`, `bumpers/` and `targets/` included. The
+  `cabinetRails`, `bumperCap` and `missionTargetFace` passes finalized and tested the paths into
+  those slots and wrote the specs above; none produced a file to put in them, and all keep
+  `path: null` until a real one exists.
+- **The `missionTargetFace` pass changed no code at all.** Its entire diff is comments, this
+  document and `qa/skin-mission-targets.js` - the slots already accepted textures cleanly and the
+  UV orientation was already correct, which the pass verified rather than altered. The one
+  substantive change is to the written spec: the recommended aspect was wrong by 29% (2:3 against
+  a real 14:15) and is corrected above.
 - **The `bumperCap` pass changed no geometry, UV layout, collider, physics body, score, kick,
   cooldown or hit animation.** Its entire executable change is one manifest field
   (`albedoScale: 0.55` on the `bumperCap` slot) - the multiply it feeds already existed from the
