@@ -102,8 +102,46 @@ export const SKIN_MANIFEST = {
     // every pop-bumper cap from the same plastic regardless of that bumper's own body color), so
     // one shared skin slot matches the existing architecture rather than adding per-bumper
     // variants gameplay never asked for.
+    //
+    // THIS IS AN EQUIRECTANGULAR SPHERE MAP, NOT A TOP-DOWN DISC, and that is the single thing
+    // most likely to be got wrong here because a real bumper cap decal IS a top-down disc. The
+    // cap is a CreateSphere flattened to scaling.y 0.58, so Babylon's sphere UV applies: v is
+    // latitude, and a row of the image is a line of latitude wrapped all the way around. Measured
+    // from the mesh's own vertex data, v=0 is the TOP pole and v=0.5 the equator; measured again
+    // by rendering eight labelled bands onto the real caps in the real scene, invertY puts the
+    // dome's apex at the image's BOTTOM edge. So:
+    //
+    //   image bottom edge   -> the cap's apex (a single point, stretched across the full width)
+    //   moving UP the image -> moving outward and down the dome
+    //   image vertical mid  -> the cap's rim/equator
+    //   top 25% of image    -> NEVER RENDERED (the buried underside; measured 0% on all 4 caps)
+    //
+    // The face a player actually reads - the upper 45% of the cap's silhouette from the gameplay
+    // camera - comes 97-99% from the BOTTOM 37.5% of the image, with the last eighth alone (the
+    // apex) accounting for 17-20% and the image's vertical middle contributing 1-3%. Design
+    // accordingly: content near the image's bottom edge lands dead centre on the cap and must be
+    // drawn pre-distorted (wide and short, since it is pinched to a point at the pole), content in
+    // the middle of the image lands on the rim, and the top quarter is wasted.
+    //
+    // Also worth knowing before authoring detail: the whole cap is 28x24 to 36x30 screen pixels
+    // at 1280x800. Two or three tonal zones read; fine pattern does not.
+    //
+    // albedoScale exists here to PRESERVE AN EXISTING DECISION, not to add a new one. The cap
+    // albedo was deliberately walked down 0.88 -> 0.66 -> the current 0.54/0.58 by the lighting-
+    // hierarchy pass, whose comment records the measurement: the caps were the single brightest
+    // surface in the frame after the ball, clipping to 255 across their whole visible face.
+    // applySkinTexture() resets albedoColor to white on a successful load, which would throw that
+    // tuning away and render artwork ~1.85x brighter than the fallback it replaced - re-creating
+    // the exact clipping that pass fixed. 0.55 keeps a skinned cap in the same band the tuned
+    // procedural cap already occupies. qa/skin-bumper-cap.js measures that rather than trusting it.
+    //
+    // A skin here CANNOT affect which bumper is the boss. All three boss cues live outside this
+    // material: the 1.5x radius, the boss-only gold trim torus, and the star glyph on its own
+    // label plane. One shared texture lands identically on all four caps, so it can only ever
+    // change them together - qa/skin-bumper-cap.js re-measures all three cues under artwork chosen
+    // specifically to be as hostile to them as possible (flat pure white at full brightness).
     // Future path: 'bumpers/bumper-cap.png'
-    bumperCap: { path: null, kind: 'albedo' },
+    bumperCap: { path: null, kind: 'albedo', albedoScale: 0.55 },
 
     // Mission target faces - per-target-index (MISSION_TARGET_BANK has 3 entries; targetMats[i]
     // is already a distinct material per index). Index order matches MISSION_TARGET_BANK's own

@@ -6,10 +6,11 @@ work-in-progress snapshot - see "Why every slot defaults to `path: null`" below 
 document describes how to actually add artwork (playfieldBackground already shows the full
 worked example), and the folder/image spec that artwork needs to follow.
 
-`cabinetRails` is unpopulated but its integration path is finalized and guarded: see
-"Slot spec: `cabinetRails`" below for the artwork spec to author against, and
-`qa/skin-integration.js` for the test that exercises the whole path - unset, broken and valid -
-on every run.
+`cabinetRails` and `bumperCap` are unpopulated but their integration paths are finalized and
+guarded - see their "Slot spec" sections below for the artwork to author against.
+`qa/skin-integration.js` exercises the generic path (unset, broken, valid) and
+`qa/skin-bumper-cap.js` covers what is specific to the cap: that artwork there cannot reach the
+collider, size, scoring, kick or hit animation, and that the boss bumper stays distinguishable.
 
 ## What this is for
 
@@ -61,9 +62,11 @@ all.
      of the plain white above, capping how bright the loaded artwork is allowed to render. It
      exists because a skin slot is otherwise a hole in the board's visual hierarchy - the artwork's
      exposure is whatever the artist happened to author, and on some surfaces that is not a free
-     choice. Only `cabinetRails` sets it today (see its section below).
+     choice. `cabinetRails` and `bumperCap` set it today (see their sections below); on `bumperCap`
+     it is specifically preserving a measured tuning that the plain white reset would discard.
 
-4. **`qa/skin-integration.js`** - the guard. Exercises all three states of the `cabinetRails`
+4. **`qa/skin-integration.js`** and **`qa/skin-bumper-cap.js`** - the guards. The first exercises
+   all three states of the `cabinetRails`
    slot on every run (unset / configured-but-missing / configured-and-valid), by intercepting
    `js/skins.js` in the browser and rewriting the one slot - the shipped manifest is never edited
    and the test leaves no residue. It pins that an unset slot issues no request, that a failed load
@@ -71,7 +74,12 @@ all.
    the wall UV layout the artwork spec depends on is intact, that wall colliders are byte-identical
    across all three states, and that no file outside `js/skins.js` contains an `assets/skins/` path
    literal in code (comments are stripped first - the cross-references in `babylon-game.js` are
-   documentation, and are meant to stay).
+   documentation, and are meant to stay). The second does the same three states for `bumperCap` and
+   adds what is specific to a slot sitting on live gameplay hardware: that the cap mesh has no
+   collider, that bumper geometry and physics bodies are unchanged, that a real staged hit still
+   awards the same score and still throws the ball back, that the hit flash still lifts
+   `bodyMat`/`lampMat` and still never touches the shared cap material, and that the boss bumper's
+   three cues survive deliberately hostile artwork.
 
 5. **`assets/skins/`** - where the actual image files go, in the subfolders described below.
 
@@ -234,6 +242,98 @@ measured the flipper meshes owning 0.6% of the frame's top-1% brightest pixels a
 coverage, against 40.7% for the lane geometry the halo lands on). Asserting a minimum over the
 flipper mesh would be asserting against a number that does not describe what a player sees.
 
+## Slot spec: `bumperCap`
+
+**Not populated.** Integration path finished and guarded by `qa/skin-bumper-cap.js` (40 checks).
+
+### Required file
+
+| | |
+|---|---|
+| Path | `assets/skins/bumpers/bumper-cap.png` (`.webp` fine - opaque, no alpha used) |
+| Dimensions | **512 x 512** |
+| Projection | **Equirectangular sphere map** - see below. Not a top-down disc. |
+| Brightness | authored freely; the slot applies a 0.55 ceiling on load (`albedoScale`) |
+
+Then set the slot to
+`bumperCap: { path: 'bumpers/bumper-cap.png', kind: 'albedo', albedoScale: 0.55 }`.
+
+### Where the image actually lands on the cap
+
+This is the thing most likely to be got wrong, because a real pop-bumper cap decal *is* a
+top-down disc and this image is not. The cap is a `CreateSphere` flattened to `scaling.y = 0.58`,
+so Babylon's sphere UV applies: `v` is latitude, and a row of the image is a line of latitude
+wrapped the whole way around.
+
+Measured two ways - from the mesh's own vertex data (`v = 0` at the top pole, `v = 0.5` at the
+equator), and by rendering eight labelled colour bands onto the real caps in the real scene to
+settle which image rows those correspond to after `invertY`:
+
+| Image region | Lands on | Visible? |
+|---|---|---|
+| Bottom eighth (last 12.5%) | The cap's **apex** - dead centre as seen from above | Yes - 17-20% of the readable face |
+| Bottom 37.5% (last three eighths) | The cap face a player reads | **Yes - 97-99% of it** |
+| Vertical middle | The cap's rim / equator | Barely - 1-3% |
+| **Top 25%** | The buried underside | **No - measured 0% on all four caps** |
+
+So: **the readable cap face is essentially the bottom 37.5% of the image** (97-99% of it), content
+near the bottom edge lands dead centre on the cap, moving up the image moves outward and down the
+dome, and the top quarter is wasted. Anything intended to read as
+centred on the cap must be drawn near the bottom edge and pre-distorted - wide and short - because
+it gets pinched to a point at the pole.
+
+The previous spec here said to centre the face content "around the vertical middle band", which
+lands it on the rim instead of the face, and did not mention that a quarter of the image is never
+drawn. Both are corrected above.
+
+One more thing worth knowing before authoring detail: **the whole cap is 28x24 to 36x30 screen
+pixels** at 1280x800. Two or three tonal zones read at that size; fine pattern does not. The
+procedural fallback's turned rings are themselves much subtler on the visible face than its
+drawing code suggests, for exactly the UV reason above - see `createBumperCapTexture()`'s comment.
+
+### Why the brightness ceiling
+
+`albedoScale` here preserves an existing decision rather than adding a new one. The cap albedo was
+deliberately walked down `0.88 -> 0.66 -> 0.54/0.58` by the lighting-hierarchy pass, which recorded
+the reason: the caps were the single brightest surface in the frame after the ball, clipping to 255
+across their whole visible face. `applySkinTexture()` resets `albedoColor` to white on a successful
+load, which would discard that tuning and put artwork on screen **~1.85x brighter than the fallback
+it replaced** - re-creating precisely the clipping that pass fixed. `0.55` keeps a skinned cap in
+the band the tuned procedural cap already occupies, and the QA asserts the skinned value stays
+within 0.02 of the fallback's.
+
+### What a cap skin cannot affect
+
+Guarded by `qa/skin-bumper-cap.js`, measured rather than argued:
+
+- **Collider.** No cap mesh carries a physics body at all - the collider is on the parent fixture.
+  Bumper extents, positions and physics bodies are asserted byte-identical across unset,
+  broken-path and loaded-artwork.
+- **Size.** Cap mesh scaling, extents and positions are asserted identical across those states.
+- **Scoring and kick.** A real hit is staged - the ball is placed beside a bumper, given velocity
+  into it, and Havok's own steps are allowed to run. The award for that hit is read off the HUD the
+  player sees (500, identical skinned and unskinned) and the kick off the ball's own post-contact
+  velocity (thrown back at -0.86 m/s against a +1.15 m/s approach, matching within 12%).
+- **Hit animation.** `pulseBumperLamp()` still lifts `bodyMat` and `lampMat` emissive by 2.1x and
+  still never touches the shared cap material - which is the point of the exclusion, since one
+  shared instance would flash all four caps on any single bumper's hit.
+
+### Boss vs normal bumpers
+
+All three boss cues live **outside** this material, so one shared cap texture lands identically on
+all four caps and cannot differentiate or un-differentiate them:
+
+| Cue | Where it lives | Measured |
+|---|---|---|
+| 1.5x radius | fixture geometry | boss 54x67px vs normals 42x50/42x55 - **1.57x screen area** |
+| Gold trim torus | boss-only mesh, own material | 274 visible px |
+| Star vs circled-dot glyph | separate label planes, own emissive texture | 222 visible px (boss) |
+
+The QA re-measures all three under artwork chosen to be maximally hostile to them - flat pure
+white at full brightness, identical on all four caps - and asserts none of them weakens. Measured,
+all three are bit-identical between the fallback and hostile-artwork runs, which is what "the cues
+do not live in this material" looks like when it is true.
+
 ## How to add real artwork
 
 1. Drop the image at `assets/skins/<subfolder>/<filename>.png` (or `.jpg`/`.webp` - see format
@@ -300,7 +400,7 @@ Per slot:
 |---|---|---|---|---|
 | `playfieldBackground` | 1024x1820 | matches `TABLE_WIDTH_M` : `TABLE_LENGTH_M` (~0.51 : 0.907, i.e. ~9:16) | `CreateBox` (playfield) | Top face only is ever seen (fixed camera looks down at the playfield); design the full image as a top-down playfield illustration. Portrait orientation, same as the table itself. |
 | `cabinetRails` | **64x512 portrait strip** | 1:8 | `CreateBox` x7 (each boundary wall), 42 faces, one shared material | **Not a tileable pattern and not a scene** - a vertical rail *profile*, read top-to-bottom, constant across its width. See the dedicated `cabinetRails` section below for why, the band layout to reproduce, and the brightness ceiling. |
-| `bumperCap` | 512x512 | 1:1 | `CreateSphere` (flattened, `scaling.y = 0.55`) | Standard sphere UV (equirectangular-ish): design with the "face" content centered around the vertical middle band, since the cap is a shallow dome - only the top portion of the sphere is ever visible. |
+| `bumperCap` | 512x512 | 1:1 | `CreateSphere` (flattened, `scaling.y = 0.58`) | **Equirectangular sphere map, not a top-down disc.** The cap's apex is the image's BOTTOM edge; the top 25% of the image never renders. See the dedicated `bumperCap` section below for the measurements and the brightness ceiling. |
 | `missionTargetFace[0..2]` | 256x384 | matches the flag mesh, 2:3 portrait (`TARGET_RADIUS_M * 2` wide by `0.03`m... tall relative to width) | `CreateBox` (thin flag) | Front face only is normally visible (angled slightly toward the camera). Keep important content centered - the box's default UV maps the full image to each face independently. |
 | `laneInsertInlane` / `-Outlane` / `-Orbit` | 128x128 | 1:1 | `CreateCylinder` (flat disc, height 0.003) | Only the flat top face is seen. Emissive slot - design these bright/high-contrast on a dark or transparent ground; they render additively over the lamp's own on/off emissive color, so a mid-gray image will look dim when the lamp is "off" and full-bright when "on," matching the existing lamp system automatically. |
 | `obstacleDecalSaturn` | 256x256 | 1:1 | `CreateSphere` (flattened cap) | Same sphere-UV note as `bumperCap` - keep key content in the visible top band. |
@@ -326,9 +426,19 @@ Per slot:
   either way.
 - **No artwork was invented.** The one populated slot (`playfieldBackground`) uses artwork
   supplied directly by the user, not generated. Every other subfolder under `assets/skins/`
-  contains only a `.gitkeep` placeholder - `cabinet/` included. The `cabinetRails` pass finalized
-  and tested the path into that slot and wrote the spec above; it did not produce a file to put in
-  it, and `path` stays `null` until a real one exists.
+  contains only a `.gitkeep` placeholder - `cabinet/` and `bumpers/` included. The `cabinetRails`
+  and `bumperCap` passes finalized and tested the paths into those two slots and wrote the specs
+  above; neither produced a file to put in them, and both keep `path: null` until a real one
+  exists.
+- **The `bumperCap` pass changed no geometry, UV layout, collider, physics body, score, kick,
+  cooldown or hit animation.** Its entire executable change is one manifest field
+  (`albedoScale: 0.55` on the `bumperCap` slot) - the multiply it feeds already existed from the
+  `cabinetRails` pass. Everything else is comments, this document and `qa/skin-bumper-cap.js`.
+  The procedural `createBumperCapTexture()` fallback is byte-for-byte unchanged: its comment was
+  corrected to record that its centred-ring drawing does not land as rings on the visible face
+  under the sphere's equirectangular UV, but the pixels it draws were deliberately left alone,
+  since redrawing them would change the shipped look of every bumper for a pattern that is
+  sub-pixel at the cap's 28x24..36x30 on-screen size.
 - **The `cabinetRails` pass changed no geometry, UV layout, collider or physics body.**
   `albedoScale` is a new optional manifest field plus the multiply it feeds in
   `applySkinTexture()`; everything else in that pass is comments, this document, and

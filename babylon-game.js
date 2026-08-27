@@ -2954,11 +2954,25 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     }
 
     // Moulded pop-bumper cap face. Turned concentric rings plus faint radial spokes: the shapes a
-    // real cap is moulded with, and - more usefully here - shapes that catch the light differently
-    // as the cap is viewed from different angles, so the cap reads as a solid moulded object
-    // instead of a flat pale disc. Overridden wholesale by SKIN_MANIFEST.bumperCap when that
-    // artwork exists (applySkinTexture() runs after this and reassigns albedoTexture), so this is
-    // strictly the fallback look, never something a skin has to fight.
+    // real cap is moulded with. Overridden wholesale by SKIN_MANIFEST.bumperCap when that artwork
+    // exists (applySkinTexture() runs after this and reassigns albedoTexture), so this is strictly
+    // the fallback look, never something a skin has to fight.
+    //
+    // Worth knowing before editing this, because the drawing below does not say it: the cap is a
+    // SPHERE with equirectangular UV, so this square is a lat/long map, NOT the top-down disc its
+    // centred-circle drawing code implies. Measured (eight labelled bands rendered onto the real
+    // caps in the real scene), the dome's apex samples the image's BOTTOM edge and the image's
+    // centre - where these rings are concentric about - lands on the rim, near the silhouette
+    // edge. The consequence is that the rings and spokes are far subtler on the visible face than
+    // this drawing suggests: at the cap's 28x24..36x30 on-screen size what actually reads is the
+    // pale plastic tone and the gloss highlight, not the turned pattern.
+    //
+    // Deliberately left as-is rather than redrawn to sit correctly under the mapping: it renders
+    // as a clean, glossy off-white cap, which is exactly the fallback's job, and changing it would
+    // change the shipped look of every bumper for a pattern that is sub-pixel at this size. The
+    // note is here so the next person to touch it knows the geometry they are drawing onto - and
+    // so the bumperCap artwork spec in js/skins.js/SKINS.md is not mistakenly written to "match
+    // the rings" that a player cannot actually see.
     function createBumperCapTexture(scene) {
         const size = 128;
         const texture = new BABYLON.DynamicTexture('bumperCapTex', { width: size, height: size }, scene, true);
@@ -4327,6 +4341,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // for all 4 caps, matching this material's own existing shared-instance design above.
         // No-op until assets/skins/bumpers/bumper-cap.png actually exists (see SKINS.md); the
         // glossy off-white plastic look stays the fallback either way.
+        //
+        // The slot carries an albedoScale (see js/skins.js) specifically so a load here cannot
+        // undo the 0.54/0.58 albedo two lines above. That value is not a default - it is the
+        // hierarchy pass' measured answer to the caps clipping at 255 - and applySkinTexture()'s
+        // plain white reset would discard it, putting artwork on screen ~1.85x brighter than the
+        // fallback it replaced.
+        //
+        // Everything that makes a bumper a bumper is untouched by this call by construction: the
+        // collider and kick live on the parent body mesh (this cap mesh has no physics body at
+        // all), scoring and cooldown live in the hit handler, and pulseBumperLamp() deliberately
+        // flashes only bodyMat/lampMat - never this shared instance, which would light all four
+        // caps at once. A skin can change what the cap looks like and nothing else.
         applySkinTexture(scene, bumperCapMat, SKIN_MANIFEST.bumperCap);
 
         // Machined-metal fixture, distinct from the shared obstacleHousingMat every other rail and
