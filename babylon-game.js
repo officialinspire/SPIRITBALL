@@ -3232,9 +3232,30 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // replaces this wholesale on the same property (applySkinTexture() runs after this is
     // assigned) rather than fighting it.
     //
-    // legend: 'up'/'down' draws a lane arrow pointing up-table/down-table (canvas -Y maps to +Z on
-    // a cylinder cap - verified by rendering a UV probe, not assumed); null draws concentric rings
-    // for the indicators that mark a state rather than a direction.
+    // legend picks the symbol printed on the lens. Each lane FAMILY gets its own, because a
+    // family's identity is the one thing a player has to read at a glance and colour alone was
+    // carrying all of it: inlane and outlane both drew the same down-arrow, and orbit drew the
+    // same up-arrow as the skill shot, so two pairs of unrelated lanes were visually identical.
+    // The four family symbols are chosen to have maximally different SILHOUETTES rather than
+    // different detail, because measured, an insert is only 20-40px across at the gameplay camera
+    // and detail below that resolves to mush:
+    //
+    //   'flow'   INLANE    double chevron down-table - return / flow
+    //   'void'   OUTLANE   bold X                    - danger / void
+    //   'cycle'  ORBIT     ring with an arrowhead    - cycle / infinity
+    //   'ground' RE-ENTRY  earth mark, stacked bars  - return-to-body / grounding
+    //
+    // chevrons / cross / circle / stacked horizontals stay distinguishable from each other when
+    // they are only a handful of pixels tall, which four variations on an arrow would not.
+    //
+    // 'up'/'down' remain for the arrows that genuinely mark a DIRECTION rather than a family - the
+    // skill-shot lanes ('up'). 'down' is no longer used by any lane family but is kept because it
+    // costs nothing and losing it would make re-introducing a directional insert a code change
+    // rather than an argument. null draws concentric rings, for indicators that mark a state
+    // rather than a direction (kickback, ball save).
+    //
+    // Canvas +Y maps down-table, which is why 'down' puts its tip at c + 34 (the original arrow's
+    // own convention, verified by a UV probe when it was written, and reused here unchanged).
     function createInsertLensTexture(scene, name, legend) {
         const size = 128, c = size / 2;
         const texture = new BABYLON.DynamicTexture('insertLensTex' + name, { width: size, height: size }, scene, true);
@@ -3263,6 +3284,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         ctx.arc(c, c, c * (lit - 0.04), 0, Math.PI * 2);
         ctx.stroke();
 
+        // Every family symbol is stroked with round caps and joins at a deliberately heavy width.
+        // At the sizes these render, a thin elegant line disappears entirely and a mitred corner
+        // reads as a stray pixel; weight and rounded ends are what survive downsampling.
+        ctx.strokeStyle = 'rgba(255,255,255,0.98)';
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
         if (legend === 'up' || legend === 'down') {
             // Classic notched lane arrow. dir flips it along the table's Z axis.
             const dir = legend === 'down' ? 1 : -1;
@@ -3277,6 +3305,79 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             ctx.lineTo(c - 26, c - dir * 6);
             ctx.closePath();
             ctx.fill();
+        } else if (legend === 'flow') {
+            // INLANE - return / flow. Two nested chevrons pointing down-table: the direction the
+            // ball returns from, said twice so it reads as movement rather than as a static arrow.
+            ctx.lineWidth = 10;
+            for (const off of [-16, 8]) {
+                ctx.beginPath();
+                ctx.moveTo(c - 24, c + off);
+                ctx.lineTo(c, c + off + 20);
+                ctx.lineTo(c + 24, c + off);
+                ctx.stroke();
+            }
+        } else if (legend === 'void') {
+            // OUTLANE - danger / void. A bold X, the one symbol here with no curves and no
+            // vertical axis, so it cannot be mistaken for any of the other three at any size.
+            ctx.lineWidth = 12;
+            const d = 24;
+            ctx.beginPath();
+            ctx.moveTo(c - d, c - d); ctx.lineTo(c + d, c + d);
+            ctx.moveTo(c + d, c - d); ctx.lineTo(c - d, c + d);
+            ctx.stroke();
+        } else if (legend === 'cycle') {
+            // ORBIT - cycle / infinity. A ring broken at the top with an arrowhead on the open
+            // end: the gap plus the head is what turns a plain circle into a direction of travel,
+            // and the ring is the only closed curve in the set.
+            //
+            // The head is placed and pointed from the arc's own tangent rather than by hand-picked
+            // offsets. A first version offset it by eye and rendered as a blob hanging off the
+            // ring at the wrong angle - at this size an arrowhead that is a few degrees out does
+            // not read as an arrow at all, it reads as damage.
+            ctx.lineWidth = 11;
+            const r = 30;
+            const gapHalf = Math.PI * 0.24;       // half the opening, centred on 12 o'clock
+            const top = -Math.PI / 2;
+            const from = top + gapHalf;           // sweep clockwise from the gap's right edge...
+            const to = top - gapHalf + Math.PI * 2; // ...all the way round to its left edge
+            ctx.beginPath();
+            ctx.arc(c, c, r, from, to);
+            ctx.stroke();
+            // Tangent at the arc's END, in the direction of increasing angle - i.e. the way the
+            // stroke was travelling when it stopped.
+            const hx = c + Math.cos(to) * r, hy = c + Math.sin(to) * r;
+            const tx = -Math.sin(to), ty = Math.cos(to);
+            const nx = -ty, ny = tx;              // perpendicular, for the head's base
+            const len = 17, half = 11;
+            ctx.fillStyle = 'rgba(255,255,255,0.98)';
+            ctx.beginPath();
+            ctx.moveTo(hx + tx * len, hy + ty * len);
+            ctx.lineTo(hx + nx * half, hy + ny * half);
+            ctx.lineTo(hx - nx * half, hy - ny * half);
+            ctx.closePath();
+            ctx.fill();
+        } else if (legend === 'ground') {
+            // RE-ENTRY - return-to-body / grounding. The electrical earth mark: a stem descending
+            // into three stacked bars of decreasing width.
+            //
+            // Chosen over the obvious "chevron landing on a baseline" because that version shared
+            // its basic shape with the inlane's chevrons, and two symbols that differ only by an
+            // added bar are exactly the pair that stops being distinguishable first as the insert
+            // shrinks. Stacked horizontals against chevrons, a cross and a circle gives all four
+            // families a silhouette nothing else in the set approaches.
+            ctx.lineWidth = 10;
+            ctx.beginPath();
+            ctx.moveTo(c, c - 30);
+            ctx.lineTo(c, c - 6);
+            ctx.stroke();
+            const bars = [[28, -4], [18, 10], [8, 24]];
+            for (const [halfW, dy] of bars) {
+                ctx.lineWidth = 10;
+                ctx.beginPath();
+                ctx.moveTo(c - halfW, c + dy);
+                ctx.lineTo(c + halfW, c + dy);
+                ctx.stroke();
+            }
         } else {
             // Two concentric rings - the "this is a state lamp, not a shot" legend.
             ctx.strokeStyle = 'rgba(255,255,255,0.96)';
@@ -4160,8 +4261,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // emissiveColor is deliberately NOT touched here - it belongs to the lamp system and nothing
     // else may write it (see createLampSystem()). The texture assigned here is multiplied by
     // whatever state that system has the lamp in, so off/dim/lit/blink behave exactly as before.
+    // Insert-legibility pass (user-requested - "keep lamp states functional and obvious when
+    // lit/unlit"). The albedo floor comes DOWN again, from (0.042,0.042,0.05)+colour*0.09, and the
+    // reason is measured rather than aesthetic. Rendering the inserts in isolation (only the
+    // insert meshes, glow layer off, so nothing else contributes) and then zeroing emissiveColor
+    // showed that 89-94% of an UNLIT insert's brightness was albedo response to the scene lights -
+    // a constant the lamp system cannot touch. That floor is what was flattening the on/off read:
+    // driving a lamp its full dim->lit range (0.12 -> 0.9, a 7.5x change in emitted light) moved
+    // the rendered insert only 1.25-1.41x, because most of what was on screen was never the lamp.
+    //
+    // Cutting the floor to roughly a sixth puts the emissive swing back in charge without making
+    // an unlit insert invisible - it still reads as a dark lens with a hint of its family colour,
+    // which is what unlit moulded plastic looks like. Measured over an albedo sweep, the dim->lit
+    // ratio goes 1.41x (old floor) -> 1.62x -> 1.75x here, against a hard ceiling of 2.01x at
+    // albedo zero; the last stop was rejected because a pure-black unlit lens loses the family's
+    // colour identity entirely, which costs more than the remaining 0.26x buys.
+    //
+    // Roughness was swept alongside and deliberately left alone: 0.55 vs 0.95 moved the ratio by
+    // 0.01x, so the residual floor is not a specular lobe and raising roughness would only flatten
+    // the lens for nothing. qa/lane-inserts.js measures the ratio on every run, so a future edit
+    // that quietly re-raises this floor fails loudly instead of silently costing the board its
+    // state signal.
     function styleInsertLampMat(mat, color, lensTexture) {
-        mat.albedoColor = new BABYLON.Color3(0.042, 0.042, 0.05).add(color.scale(0.09));
+        mat.albedoColor = new BABYLON.Color3(0.008, 0.008, 0.010).add(color.scale(0.016));
         mat.metallic = 0.04;
         mat.roughness = 0.55;
         mat.emissiveTexture = lensTexture;
@@ -4237,7 +4359,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const insertLensTextures = {
             down: createInsertLensTexture(scene, 'ArrowDown', 'down'),
             up: createInsertLensTexture(scene, 'ArrowUp', 'up'),
-            ring: createInsertLensTexture(scene, 'Ring', null)
+            ring: createInsertLensTexture(scene, 'Ring', null),
+            // One per lane FAMILY - see createInsertLensTexture()'s comment for why each family
+            // needs its own silhouette rather than its own colour. Still shared across both
+            // mirrored sides of a family, which is the sharing that actually mattered for memory.
+            flow: createInsertLensTexture(scene, 'Flow', 'flow'),
+            void: createInsertLensTexture(scene, 'Void', 'void'),
+            cycle: createInsertLensTexture(scene, 'Cycle', 'cycle'),
+            ground: createInsertLensTexture(scene, 'Ground', 'ground')
         };
 
         // Shared floor-tint materials for addLaneFloorTint() above - one per lane family (inlane,
@@ -5298,10 +5427,31 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const reentryLaneMeshes = [];
         REENTRY_LANES.forEach((pos, i) => {
             const laneMat = new BABYLON.PBRMaterial('laneMat' + i, scene);
-            laneMat.albedoColor = new BABYLON.Color3(0.5, 0.5, 0.15);
+            // Insert-legibility pass (user-requested). Two changes, both measured.
+            //
+            // albedoColor 0.5/0.5/0.15 -> a near-black olive. That old value made these the worst
+            // offenders on the board for state readability: rendered in isolation with emissive
+            // zeroed, 85% of an UNLIT lane's brightness was albedo response to the scene lights,
+            // so the lamp system's own 0.12 -> 0.9 swing could only move the rendered lane 1.47-
+            // 1.56x. They read as three permanently-lit olive blocks whether the bank was lit or
+            // not. Same reasoning and same direction as styleInsertLampMat()'s floor above.
+            //
+            // These also had NO symbol at all - three identical untextured boxes marking the
+            // objective of a whole vision (RETURN TO BODY, "COMPLETE THE RE-ENTRY LANES"). They
+            // now carry the family's earth-mark legend on the same emissiveTexture channel every
+            // other insert uses, so the lamp system drives them identically and nothing about
+            // registerLamp()/setLaneLit() changes.
+            laneMat.albedoColor = new BABYLON.Color3(0.028, 0.028, 0.009);
+            laneMat.emissiveTexture = insertLensTextures.ground;
             laneMat.metallic = 0.1;
             laneMat.roughness = 0.4;
             laneMat.alpha = 0.6;
+            // Re-entry lane insert skin slot - the fourth lane family, added alongside the three
+            // that already existed. Emissive like its siblings, for the same reason: a loaded
+            // texture is multiplied by whatever state the lamp system has this lane in, so artwork
+            // can restyle the symbol without ever overriding lit/unlit. No-op until
+            // assets/skins/lanes/lane-insert-reentry.png exists (see SKINS.md).
+            applySkinTexture(scene, laneMat, SKIN_MANIFEST.laneInsertReentry);
 
             const mesh = BABYLON.MeshBuilder.CreateBox('reentryLane' + i, {
                 width: REENTRY_LANE_RADIUS_M * 2,
@@ -5444,10 +5594,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // split just above that already existed for the dev-only trigger overlay.
                 const laneLampColor = laneKind.kind === 'outlane' ? COLOR_OUTLANE_LAMP : COLOR_LANE_LAMP;
                 const lampMat = new BABYLON.PBRMaterial(laneKind.kind + 'LampMat' + laneDef.side, scene);
-                // Arrow points down-table on both: an inlane and an outlane are both lanes the
-                // ball rolls DOWN, toward the flipper and toward the drain respectively, so the
-                // legend marks the direction of travel rather than a shot to aim at.
-                styleInsertLampMat(lampMat, laneLampColor, insertLensTextures.down);
+                // One symbol per family, not one arrow for both. These two lanes sit side by side
+                // and mean opposite things - an inlane returns the ball to a flipper, an outlane
+                // loses it - and until this pass they carried the SAME down-arrow, leaving colour
+                // as the only thing distinguishing "safe" from "drain". The inlane gets a double
+                // chevron (return / flow), the outlane a bold X (danger / void), which is the one
+                // symbol in the set with no curve and no vertical axis.
+                styleInsertLampMat(lampMat, laneLampColor,
+                    laneKind.kind === 'outlane' ? insertLensTextures.void : insertLensTextures.flow);
                 // Lane insert skin slot (visual-architecture pass, user-requested) - shared per
                 // kind (inlane/outlane), both sides. Emissive, not albedo, matching the lamp
                 // system's own emissive-only on/off convention (registerLamp() in main()) - a
@@ -5613,7 +5767,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // Up-table arrow on both orbit inserts: an orbit is a shot you drive UP the lane,
                 // and the entrance insert marking that direction is the cue a player reads when
                 // deciding whether to take it.
-                styleInsertLampMat(lampMat, COLOR_ORBIT_LAMP, insertLensTextures.up);
+                // Cycle ring, not the skill shot's up-arrow. An orbit is a loop the ball travels
+                // around and back, which the skill-shot arrow said nothing about - and sharing that
+                // arrow made two unrelated shot types look like the same call to action.
+                styleInsertLampMat(lampMat, COLOR_ORBIT_LAMP, insertLensTextures.cycle);
                 // Lane insert skin slot (visual-architecture pass, user-requested) - shared by
                 // both orbit trigger kinds (entrance/completion) and both sides, same emissive-
                 // over-the-lamp-system reasoning as the inlane/outlane inserts above. No-op until

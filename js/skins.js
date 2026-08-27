@@ -201,13 +201,36 @@ export const SKIN_MANIFEST = {
         { path: null, kind: 'albedo' }  // RETURN TO BODY   - spiral / portal / re-entry
     ],
 
-    // Lane inserts - the small backlit discs set into the inlane/outlane/orbit rollovers
-    // (buildObstacles()' lampMat instances). Emissive, not albedo - these read as a lit insert,
-    // not painted artwork, matching the lamp system's existing emissive-only on/off convention.
-    // Future paths: 'lanes/lane-insert-inlane.png' / '-outlane.png' / '-orbit.png'
+    // Lane inserts - one slot per lane FAMILY, each shared by both mirrored sides. Emissive, not
+    // albedo: these read as a lit insert, not painted artwork, and more importantly emissive is
+    // the channel the lamp system already owns, so a loaded texture is multiplied by whatever
+    // state that lamp is in and can restyle the symbol WITHOUT ever overriding lit/unlit.
+    //
+    // Each family carries its own symbol, and the reason is measured: an insert is only 20-40px
+    // across at the gameplay camera, so families have to differ by SILHOUETTE rather than by
+    // detail or by colour alone. Before the insert-legibility pass, inlane and outlane drew the
+    // same down-arrow (opposite meanings, identical mark) and orbit drew the same up-arrow as the
+    // skill shot. The four now are:
+    //
+    //   laneInsertInlane   double chevron down-table  - return / flow
+    //   laneInsertOutlane  bold X                     - danger / void
+    //   laneInsertOrbit    ring with an arrowhead     - cycle / infinity
+    //   laneInsertReentry  earth mark, stacked bars    - return-to-body / grounding
+    //
+    // Artwork replacing any of these should keep a single bold high-contrast mark on a dark
+    // ground, centred, with no text - greyscale is safest, since the texture MULTIPLIES the lamp's
+    // own identity colour and a coloured file would tint that twice. 128x128 is what the
+    // procedural lenses use and is ample; the lens is a circle inscribed in the square for the
+    // three rollover inserts, and a near-square top face for the re-entry lanes.
+    //
+    // laneInsertReentry is new. The re-entry lanes previously had no insert slot and no symbol at
+    // all - three untextured boxes marking a whole vision's objective - so this is the fourth
+    // family taking the same shape as its three siblings rather than a special case.
+    // Future paths: 'lanes/lane-insert-inlane.png' / '-outlane.png' / '-orbit.png' / '-reentry.png'
     laneInsertInlane: { path: null, kind: 'emissive' },
     laneInsertOutlane: { path: null, kind: 'emissive' },
     laneInsertOrbit: { path: null, kind: 'emissive' },
+    laneInsertReentry: { path: null, kind: 'emissive' },
 
     // Obstacle decals - small decorative accents on the board's named feature obstacles.
     // Future paths: 'obstacles/obstacle-decal-saturn.png' / '-comet.png' / '-slingshot.png'

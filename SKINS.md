@@ -65,8 +65,8 @@ all.
      choice. `cabinetRails` and `bumperCap` set it today (see their sections below); on `bumperCap`
      it is specifically preserving a measured tuning that the plain white reset would discard.
 
-4. **`qa/skin-integration.js`**, **`qa/skin-bumper-cap.js`** and **`qa/skin-mission-targets.js`** -
-   the guards. The first exercises all three states of the `cabinetRails`
+4. **`qa/skin-integration.js`**, **`qa/skin-bumper-cap.js`**, **`qa/skin-mission-targets.js`** and
+   **`qa/lane-inserts.js`** - the guards. The first exercises all three states of the `cabinetRails`
    slot on every run (unset / configured-but-missing / configured-and-valid), by intercepting
    `js/skins.js` in the browser and rewriting the one slot - the shipped manifest is never edited
    and the test leaves no residue. It pins that an unset slot issues no request, that a failed load
@@ -83,7 +83,11 @@ all.
    that each index has its own material and picks up its own slot's file (no cross-wiring), that
    UV orientation is upright and un-mirrored, that the drop animation's endpoints and the trigger
    volume's position are unchanged by artwork, and it measures what neutral grey renders as on each
-   plate so the emissive-wash spec is a measurement rather than a guess.
+   plate so the emissive-wash spec is a measurement rather than a guess. The fourth covers the
+   four `laneInsert*` families: that no two share a lens texture (the exact regression the pass
+   removed), that every lane trigger still matches the config constants it is built from, that no
+   insert lens carries a physics body, and it re-measures the dim-to-lit ratio against a 1.40x
+   floor so a re-raised albedo floor fails loudly.
 
 5. **`assets/skins/`** - where the actual image files go, in the subfolders described below.
 
@@ -436,6 +440,90 @@ The plate renders **24x24 screen pixels** at 1280x800. Bold, high-contrast, cent
 that size; fine linework does not. The 448x480 target is for headroom, not for detail that will
 survive.
 
+## Slot spec: `laneInsert*` (four lane families)
+
+**Not populated.** Guarded by `qa/lane-inserts.js` (16 checks).
+
+### One symbol per family
+
+| Slot | Family | Symbol | Meaning |
+|---|---|---|---|
+| `laneInsertInlane` | INLANE | double chevron down-table | return / flow |
+| `laneInsertOutlane` | OUTLANE | bold X | danger / void |
+| `laneInsertOrbit` | ORBIT | ring with a tangential arrowhead | cycle / infinity |
+| `laneInsertReentry` | RE-ENTRY | earth mark (stem + three stacked bars) | return-to-body / grounding |
+
+`laneInsertReentry` is new in this pass. The re-entry lanes previously had **no** insert slot and
+no symbol - three untextured boxes marking a whole vision's objective.
+
+The four differ by **silhouette**, not by detail or colour: chevrons / cross / circle / stacked
+horizontals. That is deliberate and measured - an insert is only 17x7 to 41x23 screen pixels at the
+gameplay camera, so four variations on an arrow would be indistinguishable. Before this pass,
+inlane and outlane drew the *same* down-arrow (two adjacent lanes meaning opposite things - return
+the ball, lose the ball) and orbit drew the *same* up-arrow as the skill shot.
+
+An earlier draft gave re-entry a chevron landing on a baseline; it was replaced because it shared
+its basic shape with the inlane's chevrons, and two symbols differing only by an added bar are the
+pair that stops being distinguishable first as the insert shrinks.
+
+### Authoring artwork for these slots
+
+| | |
+|---|---|
+| Paths | `assets/skins/lanes/lane-insert-inlane.png` / `-outlane.png` / `-orbit.png` / `-reentry.png` |
+| Dimensions | **128x128** (what the procedural lenses use; ample at these on-screen sizes) |
+| Kind | `emissive` |
+| Colour | **Greyscale.** The texture multiplies the lamp's own identity colour - a coloured file tints it twice. |
+| Content | One bold, centred, high-contrast mark on a black ground. No text. Black = emits nothing. |
+
+Emissive is not an implementation detail here: it is the channel the lamp system owns, so a loaded
+texture is multiplied by whatever state the lamp is in. Artwork can restyle the symbol and can
+never override lit/unlit.
+
+### Lit vs unlit - what was actually wrong
+
+The board-graphics audit found insert state barely readable. The cause was measured rather than
+guessed: rendering the inserts in isolation (only insert meshes, glow layer off) and then zeroing
+`emissiveColor` showed **85-94% of an unlit insert's brightness was albedo response to the scene
+lights** - a constant the lamp system cannot touch. Driving a lamp its full dim-to-lit range
+(0.12 to 0.9, a 7.5x change in emitted light) moved the rendered insert only **1.25-1.41x**, because
+most of what was on screen was never the lamp.
+
+Lowering that albedo floor put the lamp back in charge:
+
+| | dim -> lit ratio |
+|---|---|
+| Before | 1.25 - 1.41x |
+| After | **1.55 - 1.75x** |
+| Ceiling, at albedo zero | 2.01x |
+
+The last stop was rejected: a pure-black unlit lens loses the family's colour identity entirely,
+which costs more than the remaining 0.26x buys. Roughness was swept alongside and left alone -
+0.55 vs 0.95 moved the ratio by 0.01x, so the residual floor is not a specular lobe.
+`qa/lane-inserts.js` re-measures the ratio every run against a 1.40x floor.
+
+### Honest limits at the gameplay camera
+
+Two families read well and two are constrained by things outside the inserts themselves:
+
+- **OUTLANE** - the X is clearly visible lit and absent unlit. Works.
+- **RE-ENTRY** - dark olive unlit, bright green lit. State is obvious. Works.
+- **INLANE** - the symbol is legible in isolation but is **swamped in situ by flipper bloom**,
+  which sits at ~200 luminance directly on the lower lane band. That is the board-graphics audit's
+  own top-5 item (pull the flipper and ball bloom back); it is not fixable from inside the insert.
+- **ORBIT** - projects to 17x7px because the orbit lamps sit far up-table at a raking angle.
+  Enlarging the decorative lens was tested at 1.4x and 1.8x and buys 17x7 -> 23x9, so it was
+  rejected: it does not solve the problem (the viewing angle does) and would make the insert
+  oversized relative to its lane.
+
+### What this pass did not change
+
+No trigger, collider, score, or lamp-system behaviour. `js/config.js` was not touched, so every
+lane trigger still matches the constants it is built from - which `qa/lane-inserts.js` asserts
+directly (`LANE_TRIGGER_WIDTH_M`, `ORBIT_TRIGGER_WIDTH_M`/`_DEPTH_M`, `REENTRY_LANE_RADIUS_M`). The
+insert lenses carry no physics body at all, which is what makes them incapable of affecting a
+trigger however they are restyled.
+
 ## How to add real artwork
 
 1. Drop the image at `assets/skins/<subfolder>/<filename>.png` (or `.jpg`/`.webp` - see format
@@ -464,9 +552,10 @@ assets/
       mission-target-1.png
       mission-target-2.png
     lanes/
-      lane-insert-inlane.png        - lane inserts (backlit rollover discs)
+      lane-insert-inlane.png        - lane inserts (backlit rollover discs), one per family
       lane-insert-outlane.png
       lane-insert-orbit.png
+      lane-insert-reentry.png
     obstacles/
       obstacle-decal-saturn.png     - obstacle decals
       obstacle-decal-comet.png
@@ -504,7 +593,7 @@ Per slot:
 | `cabinetRails` | **64x512 portrait strip** | 1:8 | `CreateBox` x7 (each boundary wall), 42 faces, one shared material | **Not a tileable pattern and not a scene** - a vertical rail *profile*, read top-to-bottom, constant across its width. See the `cabinetRails` section above for why, the band layout to reproduce, and the brightness ceiling. |
 | `bumperCap` | 512x512 | 1:1 | `CreateSphere` (flattened, `scaling.y = 0.58`) | **Equirectangular sphere map, not a top-down disc.** The cap's apex is the image's BOTTOM edge; the top 25% of the image never renders. See the `bumperCap` section above for the measurements and the brightness ceiling. |
 | `missionTargetFace[0..2]` | **448x480** | **14:15 (0.9333)** - the face is 0.028m x 0.030m | `CreateBox` (thin flag), one material per index | Camera-facing face only. **UV orientation is already correct** - upright, un-mirrored. Artwork inherits a per-index chakra emissive wash. See the `missionTargetFace` section above. |
-| `laneInsertInlane` / `-Outlane` / `-Orbit` | 128x128 | 1:1 | `CreateCylinder` (flat disc, height 0.003) | Only the flat top face is seen. Emissive slot - design these bright/high-contrast on a dark or transparent ground; they render additively over the lamp's own on/off emissive color, so a mid-gray image will look dim when the lamp is "off" and full-bright when "on," matching the existing lamp system automatically. |
+| `laneInsertInlane` / `-Outlane` / `-Orbit` / `-Reentry` | 128x128 | 1:1 | `CreateCylinder` (flat disc) for the three rollovers; `CreateBox` top face for re-entry | One slot per lane FAMILY, each with its own symbol. Emissive - the texture multiplies the lamp's own colour and state, so artwork restyles the symbol without ever overriding lit/unlit. **Greyscale**: a coloured file tints twice. See the `laneInsert*` section above. |
 | `obstacleDecalSaturn` | 256x256 | 1:1 | `CreateSphere` (flattened cap) | Same sphere-UV note as `bumperCap` - keep key content in the visible top band. |
 | `obstacleDecalComet` | 256x256 | 1:1 | `CreateSphere` (full sphere, this is the comet's own body/collider) | Standard equirectangular sphere UV - a simple radial/icy pattern reads best given the shallow default camera angle (most of the sphere's far side is never seen). |
 | `obstacleDecalSlingshot` | 256x128 | 2:1 | `CreateBox` (thin ridge trim) | Same image is reused for both the left and right slingshot (mirrored geometry, not a mirrored UV) - avoid asymmetric content that would look wrong reversed. |
@@ -532,6 +621,13 @@ Per slot:
   `cabinetRails`, `bumperCap` and `missionTargetFace` passes finalized and tested the paths into
   those slots and wrote the specs above; none produced a file to put in them, and all keep
   `path: null` until a real one exists.
+- **The lane-insert pass changed no trigger, collider, score or lamp-system behaviour, and did not
+  touch `js/config.js`.** It changed what the inserts look like: four family symbols where two
+  pairs previously shared one mark, a lowered albedo floor so the lamp's own state drives the
+  rendered brightness, and a fourth skin slot (`laneInsertReentry`) for the re-entry lanes, which
+  had none. Two families (inlane, orbit) remain hard to read at the gameplay camera for reasons
+  outside the inserts - flipper bloom and viewing angle - documented in their section above rather
+  than papered over.
 - **The `missionTargetFace` pass changed no code at all.** Its entire diff is comments, this
   document and `qa/skin-mission-targets.js` - the slots already accepted textures cleanly and the
   UV orientation was already correct, which the pass verified rather than altered. The one
