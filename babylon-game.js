@@ -2495,6 +2495,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // no mission is active, matching the original 2D HUD's "Select Mission" idle state.
             rank: RANK_NAMES[0], rankColor: STATE_COLORS[0],
             missionName: null, missionProgress: 0, missionRequired: 0,
+            // First-play readability (user-requested - "without adding a tutorial screen"). When
+            // no vision is running this window said "NONE ACTIVE", which is true and useless: it
+            // is the one large, permanently-visible, already-labelled slot on the whole cabinet,
+            // and it was spending itself telling a new player that nothing is happening. It now
+            // carries one short contextual instruction instead - what to do RIGHT NOW - and falls
+            // back to the old text if nothing sets it, so a missed call site degrades rather than
+            // blanks. Set by updatePlayerStatusHud(), which already runs on a throttle and
+            // already reads exactly the state this depends on.
+            idleHint: null,
             // Score-multiplier power-up (board redesign) - true while a collected orb's 2x
             // window is running (see updatePowerUp() in main()).
             multiplierActive: false,
@@ -2875,9 +2884,22 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 ctx.fillText(state.missionProgress + '/' + state.missionRequired, width - PAD - 26, barY - 18);
                 ctx.textAlign = 'left';
             } else {
-                ctx.font = '700 64px ' + BG_VALUE_FONT;
-                ctx.fillStyle = 'rgba(150, 245, 255, 0.35)';
-                ctx.fillText('NONE ACTIVE', PAD + 26, MI_Y + 70);
+                // Shrink-to-fit, for the same reason the mission name above has it: this line is
+                // now variable-length player-facing text, and "HOLD SPACE TO LAUNCH" is nearly
+                // twice the width of the "NONE ACTIVE" this slot was sized around.
+                const hint = state.idleHint || 'NONE ACTIVE';
+                let hintSize = 64;
+                ctx.font = '700 ' + hintSize + 'px ' + BG_VALUE_FONT;
+                while (ctx.measureText(hint).width > width - PAD * 2 - 52 && hintSize > 34) {
+                    hintSize -= 3;
+                    ctx.font = '700 ' + hintSize + 'px ' + BG_VALUE_FONT;
+                }
+                // Brighter than the old idle grey (0.35 -> 0.62). This is an instruction a new
+                // player is meant to read, not a greyed-out "nothing here" placeholder - but still
+                // well below the amber an ACTIVE vision uses, so a running objective always wins
+                // the slot's visual priority.
+                ctx.fillStyle = 'rgba(150, 245, 255, 0.62)';
+                ctx.fillText(hint, PAD + 26, MI_Y + 70);
             }
 
             texture.update();
@@ -6889,7 +6911,22 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // that id from this point on, never its mesh/material directly.
         const lampSystem = createLampSystem();
         obstacles.missionTargetLamps.forEach((mesh, i) => {
-            lampSystem.registerLamp('missionTarget' + i, mesh, COLOR_CHAKRA[i % COLOR_CHAKRA.length], LAMP_MODE.ON);
+            // dimScale raised well above the 0.12 default (first-play readability pass). These
+            // lamps now PULSE whenever no vision is running - see syncMissionTargetLamps() below -
+            // and a pulse that troughs at the standard 0.12 reads as a lamp cutting out rather
+            // than as a target inviting a shot. 0.45 breathes instead of blinking. ON mode is
+            // unaffected: that uses litScale, which is untouched.
+            // Registered PULSE, not ON, and that is the boot state rather than a default worth
+            // overriding later: a fresh game always starts with no vision active, so the very
+            // first thing a new player sees is the three targets inviting a shot.
+            //
+            // Deliberately NOT a syncMissionTargetLamps() call here even though that would read
+            // more symmetrically - `mission` is declared further down this same function, so
+            // calling the helper at registration time would read it inside its temporal dead zone
+            // and throw at boot. Registering the correct starting mode directly avoids needing
+            // the helper before the state it reads exists.
+            lampSystem.registerLamp('missionTarget' + i, mesh, COLOR_CHAKRA[i % COLOR_CHAKRA.length],
+                LAMP_MODE.PULSE, { dimScale: 0.45 });
         });
         obstacles.reentryLaneMeshes.forEach((mesh, i) => {
             lampSystem.registerLamp('reentryLane' + i, mesh, COLOR_MISSION_ACTIVE, LAMP_MODE.OFF);
@@ -8139,8 +8176,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 missionHudName.textContent = backglass.state.missionName;
                 missionHudProgress.textContent = backglass.state.missionProgress + '/' + backglass.state.missionRequired;
                 missionHud.hidden = false;
+                backglass.state.idleHint = null; // the window belongs to the running vision now
             } else {
                 missionHud.hidden = true;
+                // First-play readability (user-requested). One short instruction in the backglass
+                // slot that would otherwise read "NONE ACTIVE", picked from the state the player
+                // is actually in. No tutorial page, no timers, no new UI - this is the existing
+                // window saying something useful instead of something empty.
+                //
+                // The two states a new player gets stuck in are the two answered here: a ball
+                // sitting on the plunger with no idea it needs launching (the title screen said
+                // so, but that screen is gone by the time it matters), and a ball in play with no
+                // idea that hitting a target is what starts a vision.
+                //
+                // Wording follows document.documentElement.dataset.touchControls rather than a
+                // media query of its own, because that attribute is this file's authoritative
+                // answer to "which controls can the player actually SEE right now" (see
+                // updateMobileControlsVisibility()'s comment on why a coarse-pointer query gives
+                // the wrong answer at small desktop widths). Sharing it means this hint and the
+                // title screen's control hint cannot contradict each other.
+                const touch = document.documentElement.dataset.touchControls === 'on';
+                backglass.state.idleHint = ballInPlay
+                    ? 'HIT A LIT TARGET'
+                    : (touch ? 'HOLD LAUNCH BUTTON' : 'HOLD SPACE TO LAUNCH');
             }
 
             effectBallSave.hidden = !ballSave.active;
@@ -8554,11 +8612,32 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         // Selects AND starts a mission in one action (see MISSION_DEFS' comment for why) -
         // triggered by hitting a mission target while no mission is active.
+        // First-play readability (user-requested - "lamp highlighting"). The three mission targets
+        // were registered LAMP_MODE.ON and never changed mode again, so they sat statically lit
+        // and were indistinguishable from the board's decoration. They are the entry point to the
+        // entire vision system and nothing on the table said so.
+        //
+        // They now pulse while no vision is running - the lamp system's existing invitation mode,
+        // driven by the mode it already supports - and go steady once a vision is active, so the
+        // invitation stops the moment it has been taken up. That inversion is the point: a pulse
+        // that never stops is decoration, and a pulse that stops when you obey it is instruction.
+        //
+        // Under reduced motion updateLamps() already slows the pulse period rather than removing
+        // it (see LAMP_BLINK_PERIOD_MS' own comment on why a lamp's state is real information),
+        // so this needs no reduced-motion branch of its own.
+        function syncMissionTargetLamps() {
+            const inviting = mission.state !== 'active';
+            for (let i = 0; i < obstacles.missionTargetLamps.length; i++) {
+                lampSystem.setLampMode('missionTarget' + i, inviting ? LAMP_MODE.PULSE : LAMP_MODE.ON);
+            }
+        }
+
         function startMission(index) {
             mission.state = 'active';
             mission.selectedIndex = index;
             mission.progress = 0;
             mission.required = missionRequiredCount(mission.rank);
+            syncMissionTargetLamps(); // invitation taken up - the targets stop pulsing
             backglass.state.missionName = MISSION_DEFS[index].name;
             backglass.state.missionProgress = 0;
             backglass.state.missionRequired = mission.required;
@@ -8593,6 +8672,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.state = 'idle';
             mission.selectedIndex = null;
             mission.progress = 0;
+            syncMissionTargetLamps(); // back to inviting the next vision
             // Bug fix (playtest audit): at the top rank (index RANK_NAMES.length - 1), mission.rank
             // was already capped by this same Math.min() below, but the message still read
             // "ASCENSION: <top state>" regardless - misleading every time a vision completed after
@@ -10095,6 +10175,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.selectedIndex = null;
             mission.progress = 0;
             mission.required = 0;
+            syncMissionTargetLamps();
             mission.rank = 0;
             backglass.state.rank = RANK_NAMES[0];
             backglass.state.rankColor = STATE_COLORS[0];
@@ -10290,6 +10371,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // adding any visible UI.
             triggerEnterLog = [];
             window.__triggerDebug = { log: triggerEnterLog };
+
+            // Backglass state, exposed for qa/onboarding.js under the same ?dev=1-only, read-only
+            // convention as __flipperDebug/__triggerDebug above. The onboarding hints live in this
+            // object as strings, and the alternative - reading them back off the 1024x480 canvas
+            // with pixel sampling, the way qa/state-palette.js has to for colours - cannot tell
+            // "HOLD SPACE TO LAUNCH" from "HIT A LIT TARGET". This is the same object the panel
+            // itself renders from, so a test reading it cannot drift from what a player sees.
+            window.__backglassDebug = backglass.state;
 
             // Flipper-geometry regression test instrumentation (qa/flipper-geometry.js) - same
             // "?dev=1-only, read-only, zero impact on a real player" convention as
