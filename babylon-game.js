@@ -83,6 +83,7 @@ import {
     INLANE_GUIDE_TOP_X_M, INLANE_GUIDE_BOTTOM_X_M, SIDE_LANES, ORBIT_RAIL_BOTTOM_Z_M,
     ORBIT_RAIL_TOP_Z_M, ORBIT_ENTRANCE_Z_M, ORBIT_COMPLETION_Z_M, ORBIT_TRIGGER_WIDTH_M,
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
+    MISSION_CUE_MS, MISSION_SELECT_MESSAGE_MS,
     VISION_GATE_RADIUS_M, VISION_GATE_COLLAR_RADIUS_M, SCORE_VISION_GATE, VISION_GATE_SEQUENCE_MS,
     VISION_GATE_HALO_SPIN_RAD_MS, VISION_GATE_HALO_DRIFT_RATE,
     COOLDOWN_VISION_GATE_MS, VISION_GATE_EJECT_SPEED_MS, HEX_VISION_GATE, BALL_REST_X_PX,
@@ -8632,6 +8633,109 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }
         }
 
+        // Vision-selection feedback (user-requested - "player should understand what to hit next
+        // within ~1 second"). Selecting a vision used to change only TEXT: a 900ms backglass
+        // message, the VISION window, and the mission HUD. Nothing on the PLAYFIELD moved, so the
+        // objective's own hardware - the thing the player now has to aim at - looked exactly as it
+        // had a moment earlier, and "HIT THE POP BUMPERS" left them hunting for which lumps on the
+        // table were pop bumpers.
+        //
+        // This lights the objective's elements once, briefly, right after selection. Deliberately
+        // ONE sweep and then nothing: a persistent marker on live gameplay hardware is the
+        // permanent-arrow clutter this pass was told not to create, and the backglass window +
+        // mission HUD already carry the objective for as long as it is running.
+        //
+        // Every branch reuses a mechanism this file already had, rather than inventing a cue
+        // system: lanes go through the lamp system's own flashLamp() (tick-driven, so it cannot
+        // fire while paused and leave a lamp stuck bright - see its own comment), and bumpers go
+        // through pulseBumperLamp(), the exact emissive lift a real bumper hit already uses.
+        //
+        // The comet gets the same emissive-lift treatment written out, NOT pulseMesh(), and that
+        // is a deliberate avoidance rather than an inconsistency: pulseMesh() scales the mesh, and
+        // the comet is the one objective element carrying a physics body with an explicit collision
+        // radius. Scaling it would be a mechanics change on a pass that is not allowed one.
+        function cueMissionObjective(index) {
+            const type = MISSION_DEFS[index].type;
+            if (type === 'lane') {
+                for (let i = 0; i < obstacles.reentryLaneMeshes.length; i++) {
+                    lampSystem.flashLamp('reentryLane' + i, MISSION_CUE_MS, COLOR_MISSION_ACTIVE);
+                }
+                return;
+            }
+            if (type === 'bumper') {
+                // The shared CAP material, not each bumper's own bodyMat/lampMat, and that choice
+                // fixes a real bug rather than being a stylistic preference. pulseBumperLamp() -
+                // the hit reaction - saves and restores exactly those per-bumper materials on a
+                // 90ms timer. Two independent save/restore pairs on one material do not compose:
+                // a bumper hit landing in the last 90ms of a 620ms cue would snapshot the LIFTED
+                // value, the cue would then restore the true rest value, and the hit's own restore
+                // would fire afterwards and put the lifted value back - leaving that bumper stuck
+                // bright until something else happened to write it.
+                //
+                // bumperCapMat is written once at construction and never again; the hit reaction
+                // deliberately excludes it (flashing one shared instance would light all four caps
+                // at once - see its own comment). For a HIT that is a bug, but for a CUE meaning
+                // "hit the pop bumpers, all of them" it is exactly the right semantics, and it
+                // leaves the hit reaction's materials entirely alone.
+                liftEmissive([scene.getMaterialByName('bumperCapMat')],
+                    new BABYLON.Color3(0.38, 0.38, 0.45));
+                return;
+            }
+            if (type === 'comet') {
+                const comet = scene.getMeshByName('comet');
+                // The comet's resting emissive is near-black - it is the board's one deliberately
+                // unlit feature - so a multiplier does nothing useful here and it is lifted to an
+                // absolute value instead.
+                liftEmissive([comet && comet.material], COLOR_COMET.scale(0.55));
+            }
+        }
+
+        // Briefly lifts a set of materials' emissive and puts it back. Written out rather than
+        // reusing pulseBumperLamp() for the bumper branch above, even though that helper does
+        // exactly this shape, because its 90ms is the duration of a BUMPER HIT REACTION - and a
+        // cue is not a hit. Measured on the first version, borrowing it gave the bumpers a 90ms
+        // blink against the lanes' 620ms, so the one objective a new player is most likely to be
+        // shown first was also the one whose cue was easiest to miss. Sharing the helper would
+        // also mean any future retune of the hit reaction silently retimes this.
+        //
+        // The restore is a plain setTimeout, unlike the lamp system's tick-driven flashLamp(). A
+        // pause landing inside the window leaves the element lit under the overlay for the
+        // remainder, then restores on schedule - timers are not pause-gated, so this self-heals
+        // rather than sticking. At MISSION_CUE_MS that is at most a few hundred milliseconds of a
+        // brighter bumper behind a pause menu, which is not worth a second timer system.
+        //
+        // Re-entrancy is handled explicitly rather than assumed away. Two overlapping lifts on one
+        // material do not compose: the second would snapshot the already-LIFTED value as its
+        // "rest", and whichever restore ran last would leave the material stuck bright. That is
+        // not hypothetical - it is exactly the bug that moved the bumper cue off the hit
+        // reaction's materials, and completing a vision and immediately selecting the same one
+        // again inside MISSION_CUE_MS would reach it a second way. liftPending keeps the FIRST
+        // snapshot as the authority and lets a later lift only re-arm the timer, so the material
+        // always lands back on the value it had before any cue touched it.
+        const liftPending = new Map(); // material -> { rest: Color3, timer }
+        // Takes an absolute colour rather than a multiplier, deliberately. A multiplier is the
+        // obvious signature and it is the wrong one here: the three cued surfaces rest at wildly
+        // different levels (the bumper caps at 0.20, the comet near black, the lanes at their dim
+        // 0.12), so the same factor would produce three different brightnesses and the cue would
+        // read as three different events. Absolute targets land all three within 1.0-1.25, which
+        // is what makes "this is the cue" recognisable across objectives.
+        function liftEmissive(materials, absoluteColor) {
+            const targets = materials.filter((m) => m && m.emissiveColor);
+            if (!targets.length) return;
+            targets.forEach((m) => {
+                const existing = liftPending.get(m);
+                // Only snapshot when nothing is already holding this material's true rest value.
+                const rest = existing ? existing.rest : m.emissiveColor.clone();
+                if (existing) clearTimeout(existing.timer);
+                m.emissiveColor = absoluteColor.clone();
+                const timer = setTimeout(() => {
+                    liftPending.delete(m);
+                    if (m.emissiveColor) m.emissiveColor.copyFrom(rest);
+                }, MISSION_CUE_MS);
+                liftPending.set(m, { rest, timer });
+            });
+        }
+
         function startMission(index) {
             mission.state = 'active';
             mission.selectedIndex = index;
@@ -8648,10 +8752,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // for all three visions - measured; a dash or a slash there orphans the separator at
             // the start of line 2. See MISSION_DEFS for the full surface-by-surface measurement,
             // including why the steady VISION window and #mission-hud do NOT carry this.
+            // 900 -> 1400ms. The brief is that a player understands what to hit next within about
+            // a second, and this single message carries BOTH the vision's name and its objective
+            // across two wrapped lines - 900ms to read two lines and then look at the table for the
+            // cue below is not a second's worth of reading, it is a glimpse. The wrap itself is
+            // unchanged; only the dwell is longer.
             backglass.showMessage(
                 'VISION: ' + MISSION_DEFS[index].name + ': ' + MISSION_DEFS[index].objective,
-                900
+                MISSION_SELECT_MESSAGE_MS
             );
+            // Light the objective's own hardware, once, so the text above has something on the
+            // table to point at. Runs last so it lands with the message rather than before it.
+            cueMissionObjective(index);
         }
 
         // Called from the hit handlers below with the scoring category that just happened

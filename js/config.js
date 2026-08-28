@@ -1384,6 +1384,13 @@ if (STATE_COLORS.length !== RANK_NAMES.length) {
 //
 // Keep these short. The plate is the constraint: 27 characters ('COMPLETE THE RE-ENTRY LANES')
 // is what pins the size to 54px, and anything longer will shrink it further.
+// Vision-selection feedback (user-requested). How long the objective's own playfield elements
+// stay lit after a vision is selected, and how long the name+objective message dwells. The cue is
+// deliberately shorter than the message: the text is what the player reads, the cue is what makes
+// them look at the table, and a cue still burning after the message has gone reads as a state
+// change rather than as an answer to it.
+export const MISSION_CUE_MS = 620;
+export const MISSION_SELECT_MESSAGE_MS = 1400;
 export const MISSION_DEFS = [
     { type: 'bumper', name: 'CHAKRA AWAKENING', objective: 'HIT THE POP BUMPERS' },
     { type: 'comet', name: 'ASTRAL PURSUIT', objective: 'STRIKE THE COMET' },
