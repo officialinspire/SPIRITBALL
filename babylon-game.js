@@ -3425,6 +3425,175 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return texture;
     }
 
+    // Premium flipper bat face (flipper-visual pass, user-requested - "look like real premium
+    // pinball bats with SPIRITBALL identity"). The bat was a bare CreateBox wearing one flat
+    // magenta PBR material with a heavy uniform emissive, which the board-graphics audit measured
+    // reading as a solid glowing tube: p95 225, blown to near-white at the pivot, no bat shape, no
+    // rubber, no hinge, and a bloom halo landing mostly OFF the mesh (the flippers owned 0.6% of
+    // the frame's brightest pixels at 1.04% coverage, while the lane geometry they bleed onto
+    // owned 40.7%).
+    //
+    // Everything here is surface. The box's dimensions, pivot, motion, collision filter and
+    // restitution are untouched - this only changes what that box is painted with.
+    //
+    // UV layout, measured by painting four labelled bands onto the real bats in the real scene
+    // rather than assumed: u = 0 is the PIVOT end and u = 1 is the TIP, identically on both
+    // flippers (they share this material and the same local-space mesh offset, so left/right
+    // symmetry is structural rather than something this drawing has to maintain). v runs across
+    // the bat, and the large camera-facing striking face carries the full square - it is the
+    // surface a player actually looks at, not the narrow top edge.
+    //
+    // Drawn symmetric about v = 0.5 on purpose: the rubber has to land on BOTH long edges anyway
+    // (a real flipper's sleeve wraps it), and a v-symmetric design cannot be installed upside
+    // down on any face of the box, which removes a whole class of "which way up is this" bug.
+    //
+    // Returns { albedo, emissive } - two textures from one drawing pass. Splitting them is the
+    // point of the exercise: the albedo carries the bat, and the emissive is near-black except
+    // for the accent and hinge ring, so the body stops self-illuminating and only the detail
+    // glows. That is what lets the flat emissive come down far enough for the ball to out-shine
+    // the flippers again.
+    function createFlipperBatTextures(scene) {
+        const W = 512, H = 64;
+        const albedo = new BABYLON.DynamicTexture('flipperBatTex', { width: W, height: H }, scene, true);
+        const emissive = new BABYLON.DynamicTexture('flipperBatEmisTex', { width: W, height: H }, scene, true);
+        const a = albedo.getContext();
+        const e = emissive.getContext();
+
+        const RUBBER = 0.155;                  // fraction of the bat's width taken by each sleeve
+        const bodyTop = H * RUBBER, bodyBot = H * (1 - RUBBER);
+
+        // --- albedo -------------------------------------------------------------------------
+        // Rubber sleeve first, as the ground everything else sits inside. Near-black with a warm
+        // violet bias rather than neutral: a real sleeve picks up the playfield's colour, and pure
+        // grey read as a dead band against this board's magenta.
+        a.fillStyle = '#120a16';
+        a.fillRect(0, 0, W, H);
+
+        // Bat body - a magenta face that cools and darkens toward the tip. Real bats are lit from
+        // the base end by the playfield inserts under them, and the falloff is most of what makes
+        // a long flat object read as having a near end and a far end rather than as a bar.
+        const body = a.createLinearGradient(0, 0, W, 0);
+        body.addColorStop(0.00, '#ff5cf2');
+        body.addColorStop(0.30, '#f02fe0');
+        body.addColorStop(0.72, '#c018bd');
+        body.addColorStop(1.00, '#8a1090');
+        a.fillStyle = body;
+        a.fillRect(0, bodyTop, W, bodyBot - bodyTop);
+
+        // Taper. The box cannot narrow - its collider depends on staying a box - so the taper is
+        // painted: the sleeve is allowed to eat into the body toward the tip, which reads from the
+        // gameplay camera as a bat that gets thinner rather than as a rectangle that gets darker.
+        a.fillStyle = '#120a16';
+        a.beginPath();
+        a.moveTo(W, bodyTop); a.lineTo(W, bodyTop + (bodyBot - bodyTop) * 0.30);
+        a.lineTo(W * 0.52, bodyTop); a.closePath(); a.fill();
+        a.beginPath();
+        a.moveTo(W, bodyBot); a.lineTo(W, bodyBot - (bodyBot - bodyTop) * 0.30);
+        a.lineTo(W * 0.52, bodyBot); a.closePath(); a.fill();
+
+        // Moulded highlight along the body's upper half - the single strongest "this is a curved
+        // plastic object" cue available on a flat face.
+        const gloss = a.createLinearGradient(0, bodyTop, 0, bodyTop + (bodyBot - bodyTop) * 0.55);
+        gloss.addColorStop(0, 'rgba(255,255,255,0.34)');
+        gloss.addColorStop(1, 'rgba(255,255,255,0)');
+        a.fillStyle = gloss;
+        a.fillRect(0, bodyTop, W, (bodyBot - bodyTop) * 0.55);
+
+        // Bright printed keylines where body meets rubber. This is the rubber-edge CONTRAST the
+        // pass exists for: a dark band alone reads as a shadow, but a dark band with a lit edge on
+        // it reads as a separate material bolted to the bat.
+        a.strokeStyle = 'rgba(255,220,255,0.92)';
+        a.lineWidth = 3;
+        a.beginPath(); a.moveTo(0, bodyTop); a.lineTo(W, bodyTop);
+        a.moveTo(0, bodyBot); a.lineTo(W, bodyBot); a.stroke();
+
+        // Hinge hub at the pivot end - a dark boss with a bright collar, the fixture a real bat is
+        // bolted to. Also gives the base end something to BE, instead of the blown-out blob the
+        // audit screenshotted.
+        const hubX = W * 0.055, hubR = H * 0.30;
+        a.fillStyle = '#1d1024';
+        a.beginPath(); a.arc(hubX, H / 2, hubR, 0, Math.PI * 2); a.fill();
+        a.strokeStyle = 'rgba(255,190,255,0.85)';
+        a.lineWidth = 3.5;
+        a.beginPath(); a.arc(hubX, H / 2, hubR, 0, Math.PI * 2); a.stroke();
+        a.fillStyle = 'rgba(255,255,255,0.55)';
+        a.beginPath(); a.arc(hubX, H / 2, hubR * 0.30, 0, Math.PI * 2); a.fill();
+
+        // SPIRITBALL identity mark, centred on the bat: the third-eye lens the board already
+        // speaks in (the Vision Gate, the bumpers' circled-dot insert), drawn as a pointed oval
+        // with a bright pupil and a pair of chevrons running toward the tip. Bold and closed -
+        // measured, a bat renders about 150x25 screen pixels, which carries a silhouette and a
+        // couple of strokes and nothing finer.
+        const eyeX = W * 0.46, eyeRy = (bodyBot - bodyTop) * 0.34, eyeRx = eyeRy * 2.0;
+        a.strokeStyle = 'rgba(255,240,255,0.95)';
+        a.lineWidth = 3.5;
+        a.beginPath();
+        a.moveTo(eyeX - eyeRx, H / 2);
+        a.quadraticCurveTo(eyeX, H / 2 - eyeRy * 2.1, eyeX + eyeRx, H / 2);
+        a.quadraticCurveTo(eyeX, H / 2 + eyeRy * 2.1, eyeX - eyeRx, H / 2);
+        a.closePath(); a.stroke();
+        a.fillStyle = 'rgba(255,255,255,0.92)';
+        a.beginPath(); a.arc(eyeX, H / 2, eyeRy * 0.52, 0, Math.PI * 2); a.fill();
+        a.strokeStyle = 'rgba(255,225,255,0.75)';
+        a.lineWidth = 3;
+        a.lineCap = 'round';
+        for (let i = 0; i < 2; i++) {
+            const cx = W * (0.70 + i * 0.085);
+            a.beginPath();
+            a.moveTo(cx, H / 2 - eyeRy * 0.85);
+            a.lineTo(cx + W * 0.030, H / 2);
+            a.lineTo(cx, H / 2 + eyeRy * 0.85);
+            a.stroke();
+        }
+        albedo.update();
+
+        // --- emissive -----------------------------------------------------------------------
+        // Black everywhere the bat should merely be LIT rather than a light source. The body keeps
+        // a low, tip-falling grey so it still reads as backlit plastic; the rubber emits nothing
+        // at all, which is what makes the sleeve read as rubber next to a glowing face.
+        e.fillStyle = '#000000';
+        e.fillRect(0, 0, W, H);
+        const bodyE = e.createLinearGradient(0, 0, W, 0);
+        bodyE.addColorStop(0.00, '#3a3a3a');
+        bodyE.addColorStop(0.55, '#2a2a2a');
+        bodyE.addColorStop(1.00, '#141414');
+        e.fillStyle = bodyE;
+        e.fillRect(0, bodyTop + 2, W, (bodyBot - bodyTop) - 4);
+        // The lit detail: keylines, hinge collar, eye and chevrons. These are the only parts of a
+        // flipper that should still punch after the body has been quietened.
+        e.strokeStyle = 'rgba(255,255,255,0.80)';
+        e.lineWidth = 3;
+        e.beginPath(); e.moveTo(0, bodyTop); e.lineTo(W, bodyTop);
+        e.moveTo(0, bodyBot); e.lineTo(W, bodyBot); e.stroke();
+        e.strokeStyle = 'rgba(255,255,255,0.85)';
+        e.lineWidth = 3.5;
+        e.beginPath(); e.arc(hubX, H / 2, hubR, 0, Math.PI * 2); e.stroke();
+        e.fillStyle = 'rgba(255,255,255,0.95)';
+        e.beginPath(); e.arc(hubX, H / 2, hubR * 0.30, 0, Math.PI * 2); e.fill();
+        e.strokeStyle = 'rgba(255,255,255,0.95)';
+        e.lineWidth = 3.5;
+        e.beginPath();
+        e.moveTo(eyeX - eyeRx, H / 2);
+        e.quadraticCurveTo(eyeX, H / 2 - eyeRy * 2.1, eyeX + eyeRx, H / 2);
+        e.quadraticCurveTo(eyeX, H / 2 + eyeRy * 2.1, eyeX - eyeRx, H / 2);
+        e.closePath(); e.stroke();
+        e.fillStyle = 'rgba(255,255,255,1)';
+        e.beginPath(); e.arc(eyeX, H / 2, eyeRy * 0.52, 0, Math.PI * 2); e.fill();
+        e.strokeStyle = 'rgba(255,255,255,0.70)';
+        e.lineWidth = 3;
+        e.lineCap = 'round';
+        for (let i = 0; i < 2; i++) {
+            const cx = W * (0.70 + i * 0.085);
+            e.beginPath();
+            e.moveTo(cx, H / 2 - eyeRy * 0.85);
+            e.lineTo(cx + W * 0.030, H / 2);
+            e.lineTo(cx, H / 2 + eyeRy * 0.85);
+            e.stroke();
+        }
+        emissive.update();
+        return { albedo, emissive };
+    }
+
     // Vision Gate beacon shaft. The beacon used to be a plain translucent cylinder, and from the
     // gameplay camera that rendered as a 7x130px hard-edged magenta bar running straight through
     // Saturn and 50px past the top rail into empty starfield - measured in the board-graphics
@@ -6977,12 +7146,34 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const plunger = createPlunger(scene, plungerMat);
 
         // CONFIG.colors.flipper (0xff00ff) - already an exact match for the placeholder color
-        // used since Stage 4, now upgraded to a proper emissive-glass PBR material.
+        // used since Stage 4, then an emissive-glass PBR material, now a painted premium bat.
+        // See createFlipperBatTextures() for the face itself and the measured UV layout it is
+        // drawn against; everything below is the material tuning that face needs.
+        //
+        // ONE material instance for both bats, unchanged - that plus their identical local-space
+        // mesh offset is what makes left/right symmetry structural rather than maintained.
         const flipperMat = new BABYLON.PBRMaterial('flipperMat', scene);
-        flipperMat.albedoColor = COLOR_FLIPPER;
-        flipperMat.metallic = 0.4;
-        flipperMat.roughness = 0.4;
-        flipperMat.emissiveColor = COLOR_FLIPPER.scale(0.5);
+        const flipperBat = createFlipperBatTextures(scene);
+        // White, because the bat texture bakes its own colour - the same reason every other
+        // textured material in this file (targets, cabinet rails, bumper caps) sets white here.
+        // Leaving COLOR_FLIPPER on would multiply the magenta twice and crush the face to mud.
+        flipperMat.albedoColor = new BABYLON.Color3(1, 1, 1);
+        flipperMat.albedoTexture = flipperBat.albedo;
+        // 0.4 -> 0.25 metallic and 0.4 -> 0.3 roughness: a flipper bat is moulded plastic over a
+        // metal core, and the old values gave it a half-metal response that flattened the printed
+        // face. Tighter roughness is what lets the painted gloss streak actually catch a highlight.
+        flipperMat.metallic = 0.25;
+        flipperMat.roughness = 0.30;
+        // THE BALL-PROMINENCE CHANGE. This was a flat COLOR_FLIPPER.scale(0.5) applied to every
+        // pixel of the bat, which is what made it a glowing tube and what threw the bloom halo
+        // that the audit found landing on the lane inserts rather than on the flippers. It is now
+        // multiplied by an emissive texture that is BLACK over the rubber, low grey over the body
+        // and bright only on the eye, hinge collar and keylines - so the mean emissive across the
+        // bat falls sharply while the detail that should read still punches. The scalar is raised
+        // to 0.62 precisely because the texture removes so much: 0.62 x a mostly-dark map is far
+        // less total light than 0.5 x solid white.
+        flipperMat.emissiveColor = COLOR_FLIPPER.scale(0.62);
+        flipperMat.emissiveTexture = flipperBat.emissive;
 
         // REAL-MACHINE FLIPPER MOUNTING - see FLIPPER_PIVOT_X_M's "MOUNTING LAYOUT" comment in
         // config.js for the full root-cause story of why the flippers kept "feeling backwards"
