@@ -910,6 +910,14 @@ export const SCORE_VISION_GATE = 4000;
 // Total capture->eject duration. Short enough to stay "a beat," not a cutscene - about 3x a
 // mission-complete's own camera beat (500ms), the biggest existing moment on the board, since
 // this is meant to read as bigger still without genuinely interrupting pinball flow.
+// Vision Gate idle presentation (gate-polish pass, user-requested - "subtle rotating/spectral
+// energy if cheap", "visually special while idle but dramatically brighter only during capture").
+// Slower than SATURN_SPIN_RATE_RAD_MS: the halo sits inches from the boss bumper's own glare and a
+// brisk spin there reads as a flicker rather than as calm energy. One full turn takes ~7s.
+export const VISION_GATE_HALO_SPIN_RAD_MS = 0.0009;
+// Radians per ms fed to a sine for the halo's spectral drift - one full breath every ~8.4s.
+// Deliberately far below any flicker threshold; this is meant to be noticed only if watched for.
+export const VISION_GATE_HALO_DRIFT_RATE = 0.00075;
 export const VISION_GATE_SEQUENCE_MS = 1800;
 // Debounces the entry trigger itself, on top of the visionGate.active state guard (see
 // main()) - two independent layers, not one. Deliberately set LONGER than VISION_GATE_

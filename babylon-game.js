@@ -84,6 +84,7 @@ import {
     ORBIT_RAIL_TOP_Z_M, ORBIT_ENTRANCE_Z_M, ORBIT_COMPLETION_Z_M, ORBIT_TRIGGER_WIDTH_M,
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
     VISION_GATE_RADIUS_M, VISION_GATE_COLLAR_RADIUS_M, SCORE_VISION_GATE, VISION_GATE_SEQUENCE_MS,
+    VISION_GATE_HALO_SPIN_RAD_MS, VISION_GATE_HALO_DRIFT_RATE,
     COOLDOWN_VISION_GATE_MS, VISION_GATE_EJECT_SPEED_MS, HEX_VISION_GATE, BALL_REST_X_PX,
     BALL_REST_Z_PX, BALL_REST_Z_M, BALL_REST_Y_M, LANE_INNER_WALL_X_PX, LANE_INNER_WALL_WIDTH_PX,
     LANE_WALL_Z_TOP_PX, LANE_WALL_Z_BOTTOM_PX, PLUNGER_CHARGE_TIME_MS, PLUNGER_MIN_POWER_MS,
@@ -1386,6 +1387,37 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // stopped outright) - this is ambient/decorative motion, not gameplay-critical feedback, the
     // same category buildDrainVortex()'s emitRate reduction already established.
     const SATURN_SPIN_RATE_RAD_MS = 0.0006;
+    // Vision Gate idle life. Deliberately the cheapest thing that can make a fixture look alive:
+    // one rotation write and (outside reduced motion) one Color3 write per frame, on two meshes,
+    // with no particle system running. The gate is visited a handful of times per game, so an
+    // always-on emitter would be paying a per-frame cost for something the player is not looking
+    // at - the "no constant particle spam" line this pass was asked to hold.
+    //
+    // Reduced motion is treated the way this file already treats the two different concerns
+    // separately: the ROTATION is slowed rather than removed (ambient motion, same as
+    // updateSaturnRotation() above), but the spectral hue drift is removed outright, because a
+    // colour cycle is a photosensitivity trigger rather than a vestibular one - the same
+    // distinction startVisionGateColorCycle() makes for the capture sequence.
+    function updateVisionGateIdle(obstacles, deltaMs, clockMs) {
+        const halo = obstacles.visionGateHalo;
+        if (!halo) return;
+        const reduced = window.SPIRITBALL_reducedMotion;
+        halo.rotation.y += (reduced ? VISION_GATE_HALO_SPIN_RAD_MS * 0.15 : VISION_GATE_HALO_SPIN_RAD_MS) * deltaMs;
+        if (reduced) return;
+        // A slow drift across the violet end of the spectrum - never a full hue cycle, which would
+        // make an idle fixture flash. Sine-driven between the gate's own colour and a cyan-shifted
+        // neighbour, so at either extreme it still reads as "the Vision Gate", just breathing:
+        // red falls away, green rises, blue holds. Written straight into the existing Color3
+        // rather than allocating a new one, since this runs every frame.
+        const t = (Math.sin(clockMs * VISION_GATE_HALO_DRIFT_RATE) + 1) / 2; // 0..1
+        const level = 0.30; // the halo's step in this fixture's emissive hierarchy - see the collar
+        halo.material.emissiveColor.set(
+            COLOR_VISION_GATE.r * (1 - 0.45 * t) * level,
+            (COLOR_VISION_GATE.g + (0.85 - COLOR_VISION_GATE.g) * t) * level,
+            COLOR_VISION_GATE.b * level
+        );
+    }
+
     function updateSaturnRotation(saturnRings, deltaMs) {
         const rate = window.SPIRITBALL_reducedMotion ? SATURN_SPIN_RATE_RAD_MS * 0.15 : SATURN_SPIN_RATE_RAD_MS;
         saturnRings[0].rotation.y += rate * deltaMs;
@@ -3390,6 +3422,54 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }
 
         texture.update();
+        return texture;
+    }
+
+    // Vision Gate beacon shaft. The beacon used to be a plain translucent cylinder, and from the
+    // gameplay camera that rendered as a 7x130px hard-edged magenta bar running straight through
+    // Saturn and 50px past the top rail into empty starfield - measured in the board-graphics
+    // audit, where it read as a rendering artifact rather than as a beam of light. A beam needs
+    // two things a solid-colour cylinder cannot give: it has to be brightest where it leaves its
+    // source and it has to END by fading out, not by stopping.
+    //
+    // Both come from one 32x256 gradient: full brightness at the base, falling to nothing at the
+    // top, with the alpha channel carrying the same curve so the shaft dissolves into the sky.
+    // Drawn once at load, shared, no per-frame cost. Greyscale for the usual reason - it is an
+    // emissiveTexture, so it multiplies whatever colour the material carries, and the gate's
+    // colour has to stay free to be driven by the capture sequence.
+    function createGateBeaconTexture(scene) {
+        const w = 32, h = 256;
+        const texture = new BABYLON.DynamicTexture('gateBeaconTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        ctx.clearRect(0, 0, w, h);
+        // v=0 is the top of the shaft (the far end), v=1 the base at the playfield.
+        //
+        // The curve holds full brightness through the lower 55% and fades only above it, which is
+        // not the obvious choice and was arrived at by looking. A plain squared falloff (bright at
+        // the base, dark by mid-shaft) is the physically tidy answer and it made the beacon
+        // effectively disappear: from the fixed gameplay camera the boss bumper occludes the gate's
+        // base, so the only part of the shaft a player can actually see is the part a base-weighted
+        // gradient throws away. Brightness has to live where the shaft CLEARS the bumper, and the
+        // fade has to happen above that, at the end that was previously a hard cut across the sky.
+        const holdTo = 0.55;                  // fraction of the height (from the base) kept at full
+        for (let y = 0; y < h; y++) {
+            const t = y / (h - 1);            // 0 at top, 1 at base
+            const a = t >= holdTo ? 1 : Math.pow(t / holdTo, 1.6);
+            ctx.fillStyle = 'rgba(255,255,255,' + a.toFixed(4) + ')';
+            ctx.fillRect(0, y, w, 1);
+        }
+        // A brighter core down the middle third, so the shaft has an axis rather than being a
+        // uniform slab - the same "give it a centre to read" trick the comet tail uses.
+        const core = ctx.createLinearGradient(0, 0, w, 0);
+        core.addColorStop(0.00, 'rgba(255,255,255,0)');
+        core.addColorStop(0.50, 'rgba(255,255,255,0.62)');
+        core.addColorStop(1.00, 'rgba(255,255,255,0)');
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = core;
+        ctx.fillRect(0, Math.round(h * 0.35), w, h - Math.round(h * 0.35));
+        ctx.globalCompositeOperation = 'source-over';
+        texture.update();
+        texture.hasAlpha = true;
         return texture;
     }
 
@@ -5821,10 +5901,37 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }, scene);
         well.position.set(VISION_GATE_POS.x, -0.005, VISION_GATE_POS.z);
         const wellMat = new BABYLON.PBRMaterial('visionGateWellMat', scene);
-        wellMat.albedoColor = new BABYLON.Color3(0.02, 0, 0.05);
+        // Darker than before (0.02,0,0.05 -> near black) so the throat below actually reads as a
+        // depth gradient. A well floor that is already lit has nothing for a funnel to be darker
+        // than, which is what made the old gate read as a flat marker with a ring around it.
+        wellMat.albedoColor = new BABYLON.Color3(0.008, 0, 0.018);
         wellMat.metallic = 0.1;
         wellMat.roughness = 0.6;
         well.material = wellMat;
+
+        // Portal throat - a cone widening upward from the well floor to the collar, giving the
+        // gate an actual inside. This is the piece that turns "a disc with a ring on it" into
+        // "a hole you could drop a ball into" from a fixed camera that can never look down it:
+        // the cone's inner wall catches light along a curve, so the eye reads a depth cue rather
+        // than a silhouette. Decorative only - no PhysicsAggregate, like the ring and the well,
+        // so nothing here can touch the verified clearances the guard posts define.
+        const throat = BABYLON.MeshBuilder.CreateCylinder('visionGateThroat', {
+            diameterTop: VISION_GATE_COLLAR_RADIUS_M * 2.05,
+            diameterBottom: VISION_GATE_COLLAR_RADIUS_M * 1.7,
+            height: 0.016,
+            tessellation: 24,
+            sideOrientation: BABYLON.Mesh.DOUBLESIDE // seen from outside AND down the inside
+        }, scene);
+        throat.position.set(VISION_GATE_POS.x, 0.001, VISION_GATE_POS.z);
+        const throatMat = new BABYLON.PBRMaterial('visionGateThroatMat', scene);
+        throatMat.albedoColor = new BABYLON.Color3(0.05, 0.012, 0.08);
+        throatMat.metallic = 0.25;
+        throatMat.roughness = 0.42;
+        // The faintest inner glow, an order of magnitude below the rim ring. This is the bottom of
+        // the gate's emissive hierarchy and it is meant to be barely-there: it says "something is
+        // lit down there" without competing with the rim that defines the portal's edge.
+        throatMat.emissiveColor = COLOR_VISION_GATE.scale(0.07);
+        throat.material = throatMat;
 
         // Glowing rim ring - decorative only (see the block comment above), but the visual "this
         // is a real fixture, not a flat marker" cue, and the mesh startVisionGateCapture()'s
@@ -5843,21 +5950,97 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         ring.position.set(VISION_GATE_POS.x, 0.01, VISION_GATE_POS.z);
         ring.rotation.x = Math.PI / 2; // lay flat against the table plane
 
+        // Outer collar - a second, wider, DIMMER torus outside the rim ring. Two concentric rings
+        // at different brightnesses is what gives a flat table fixture an apparent depth: the eye
+        // reads the bright inner rim as the portal's mouth and the dim outer band as the housing
+        // it is set into, which a single ring can only ever say is "a circle drawn on the floor".
+        // Deliberately the DIMMEST lit element here (0.13 against the rim's 0.4) - it is structure,
+        // not signal, and the emissive hierarchy this pass establishes runs
+        // throat 0.07 < collar 0.13 < rim 0.40 < halo 0.30(spectral) < beacon 0.55.
+        // Tessellation 16, not the 28 this started at. A torus costs tessellation-squared
+        // triangles and these render about 20px across: measured, 28 cost 1682 triangles to draw
+        // a shape whose polygonal edges are sub-pixel either way. 16 is ~550 for the same picture.
+        const collar = BABYLON.MeshBuilder.CreateTorus('visionGateCollar', {
+            diameter: VISION_GATE_COLLAR_RADIUS_M * 3.35,
+            thickness: 0.0042,
+            tessellation: 16
+        }, scene);
+        collar.position.set(VISION_GATE_POS.x, 0.007, VISION_GATE_POS.z);
+        collar.rotation.x = Math.PI / 2;
+        const collarMat = new BABYLON.PBRMaterial('visionGateCollarMat', scene);
+        collarMat.albedoColor = COLOR_VISION_GATE.scale(0.45);
+        collarMat.metallic = 0.55;
+        collarMat.roughness = 0.3;
+        collarMat.emissiveColor = COLOR_VISION_GATE.scale(0.13);
+        collar.material = collarMat;
+
+        // Spectral halo - the one moving part of the idle gate. A thin torus tilted off the table
+        // plane and rotated slowly about Y, so it reads as energy circling the mouth rather than
+        // as another static ring. Tilted deliberately: a flat ring spinning about its own axis is
+        // invisible (a circle of revolution maps to itself), so the tilt is what makes the motion
+        // legible at all from a fixed camera.
+        //
+        // This is the whole of the "subtle rotating energy" budget - one mesh, one rotation write
+        // per frame in updateVisionGateIdle(), and NO particle system. An idle emitter running
+        // forever on a fixture the ball visits a few times a game is exactly the constant particle
+        // spam this pass was asked to avoid; the particles stay where they earn their cost, on the
+        // capture itself.
+        // Performance tier (user-requested): the halo is the one purely-ambient piece of this
+        // fixture - it carries no state, marks no shot, and exists only to make an idle gate feel
+        // alive - so it is also the one piece a low-tier device can simply not have. Skipping it
+        // there drops a mesh, a material and the per-frame rotation/colour writes in
+        // updateVisionGateIdle(), which no-ops cleanly on a null halo. Everything that carries
+        // MEANING - the rim, collar, throat, beacon, and the whole capture sequence - is built on
+        // every tier, because dropping those would change what the board tells the player.
+        const halo = detectHighFidelity() ? BABYLON.MeshBuilder.CreateTorus('visionGateHalo', {
+            diameter: VISION_GATE_COLLAR_RADIUS_M * 2.15,
+            thickness: 0.0028,
+            tessellation: 16
+        }, scene) : null;
+        if (halo) {
+            halo.position.set(VISION_GATE_POS.x, 0.016, VISION_GATE_POS.z);
+            halo.rotation.x = Math.PI / 2 - 0.38; // tilted off the table plane so the spin reads
+            const haloMat = new BABYLON.PBRMaterial('visionGateHaloMat', scene);
+            haloMat.albedoColor = new BABYLON.Color3(0, 0, 0); // unlit: this is energy, not a surface
+            haloMat.metallic = 0;
+            haloMat.roughness = 1;
+            haloMat.emissiveColor = COLOR_VISION_GATE.scale(0.30);
+            haloMat.alpha = 0.85;
+            halo.material = haloMat;
+        }
+
         // Vertical light beacon - a thin, tall emissive-only spire standing up from the gate,
         // reading clearly against the open dark sky above the table instead of competing with
         // the crowded playfield at the gate's own height. Same material/color-cycle target as the
         // ring (see startVisionGateCapture()) - between the two, the gate is identifiable from
         // across the whole board, not just up close.
+        // Reworked from a flat-topped solid cylinder into a tapered shaft that fades out. The old
+        // one measured (board-graphics audit) as a 7x130px hard-edged bar punching through Saturn
+        // and 50px above the top rail into empty starfield - a beam of light that ends in a
+        // straight cut across the sky reads as a missing polygon, not as light.
+        //
+        // Three changes, all presentation: the height comes down 0.16 -> 0.115 so the shaft stays
+        // over the board instead of running off the top of the frame; diameterTop narrows to a
+        // near-point so it tapers; and createGateBeaconTexture()'s vertical gradient carries the
+        // brightness AND the alpha, so it actually dissolves at its far end. backFaceCulling off
+        // because a translucent shaft seen from outside should show its far wall through its near
+        // one - that is what gives a volumetric beam its density.
         const beacon = BABYLON.MeshBuilder.CreateCylinder('visionGateBeacon', {
-            diameter: 0.006,
-            height: 0.16,
-            tessellation: 12
+            diameterTop: 0.0016,
+            diameterBottom: 0.0092,
+            height: 0.115,
+            tessellation: 14
         }, scene);
-        beacon.position.set(VISION_GATE_POS.x, 0.08, VISION_GATE_POS.z);
+        beacon.position.set(VISION_GATE_POS.x, 0.0575, VISION_GATE_POS.z);
         const beaconMat = new BABYLON.PBRMaterial('visionGateBeaconMat', scene);
-        beaconMat.albedoColor = COLOR_VISION_GATE;
-        beaconMat.emissiveColor = COLOR_VISION_GATE.scale(0.5);
-        beaconMat.alpha = 0.55; // translucent - reads as a beam of light, not a solid post
+        beaconMat.albedoColor = new BABYLON.Color3(0, 0, 0); // unlit: this is light, not a surface
+        beaconMat.metallic = 0;
+        beaconMat.roughness = 1;
+        beaconMat.emissiveColor = COLOR_VISION_GATE.scale(0.62);
+        beaconMat.emissiveTexture = createGateBeaconTexture(scene);
+        beaconMat.opacityTexture = beaconMat.emissiveTexture; // same curve drives the fade-out
+        beaconMat.alpha = 0.72;
+        beaconMat.backFaceCulling = false;
         beacon.material = beaconMat;
         ring.material = visionGateMat;
 
@@ -6288,7 +6471,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return {
             missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
             sideLaneLampMeshes, orbitLampMeshes, debugTriggerMeshes,
-            kickbackLampMesh, ballSaveLampMesh, saturnRings, saturnRim, cometTailMeshes, powerUpMesh, visionGateMesh: ring
+            kickbackLampMesh, ballSaveLampMesh, saturnRings, saturnRim, cometTailMeshes, powerUpMesh, visionGateMesh: ring,
+            visionGateHalo: halo, visionGateCollarMesh: collar, visionGateThroat: throat, visionGateBeacon: beacon
         };
     }
 
@@ -7993,6 +8177,31 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             triggerCameraPunch(400, cameraForwardDir.scale(0.012));
             playVisionGateSound();
             spawnHitBurst(scene, particleTexture, obstacles.visionGateMesh, highFidelity);
+            // Capture flash (gate-polish pass, user-requested - "dramatically brighter only during
+            // capture"). Two beats on top of the glow boost and colour cycle that were already
+            // here, both reusing existing helpers rather than adding an effect system:
+            //
+            // A brief violet screen wash, at the same restrained peak the ASCENSION beat uses -
+            // enough to register as the board firing, well short of a white-out. flashScreen()
+            // already no-ops under reduced motion, so no guard is needed here.
+            flashScreen(240, 170, 60, 255, 0.20);
+            // And a physical snap on the portal itself: the whole ring assembly pops outward,
+            // which is what sells the gate as a mouth that just swallowed something rather than a
+            // lamp that changed colour. pulseMesh() is the file's existing tested hit reaction
+            // (scale + emissive flash, self-restoring), so the gate borrows the same motion
+            // vocabulary every bumper and target already speaks.
+            //
+            // The COLLAR is the primary and the rim ring rides along as an extra, which is the
+            // opposite of the obvious wiring and is deliberate. pulseMesh() flashes its primary's
+            // emissive to white and restores the value it cloned ~100ms later; on the rim ring
+            // that clone is taken before startVisionGateColorCycle()'s first step lands, so the
+            // restore would drag the ring back to its REST colour mid-sequence and hold it there
+            // until the next cycle step - a visible dip to dim, 100ms into the brightest moment
+            // the gate has. Extras get the scale half only and never have their emissive touched,
+            // so wiring it this way keeps the ring's colour wholly owned by the cycle while the
+            // pop still reads across the whole assembly.
+            pulseMesh(obstacles.visionGateCollarMesh, 1.22,
+                [obstacles.visionGateMesh, obstacles.visionGateHalo].filter(Boolean));
             // buildChakraSparkle() already no-ops (returns null) under reduced motion - no extra
             // guard needed here, just the null-check before disposing it later.
             visionGate.sparkle = buildChakraSparkle(scene, particleTexture, obstacles.visionGateMesh, highFidelity);
@@ -8124,6 +8333,32 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             ball.mesh.position.set(VISION_GATE_POS.x, BALL_REST_Y_M, VISION_GATE_POS.z - 0.03);
             body.setLinearVelocity(new BABYLON.Vector3(-0.05, 0, -VISION_GATE_EJECT_SPEED_MS));
             clampBodySpeed(body, MAX_BALL_SPEED_MS);
+
+            // Eject feedback (gate-polish pass, user-requested). Until this pass the eject was
+            // visually silent: the capture built to a colour-cycling, glowing, particle-throwing
+            // crescendo and then the ball simply reappeared moving, with the gate dropping back to
+            // rest in the same frame. The moment the ball is actually returned to play is the
+            // payoff of the whole sequence and it had no beat of its own.
+            //
+            // Deliberately SMALLER than the capture, in every channel - a shorter, dimmer flash, a
+            // gentler pulse, a lighter punch. The capture is the event; this is the release, and
+            // matching their intensities would flatten the arc the capture spends 1.8s building.
+            // Ordered after the physics above so nothing here can be blamed for the eject vector.
+            flashScreen(160, 150, 70, 255, 0.11);
+            // Collar as primary again, for the same ownership reason as the capture pulse above -
+            // here the rim ring has just been handed back to the lamp system by
+            // cancelVisionGateCapture(), and an emissive flash on it would be fighting updateLamps()
+            // instead of the colour cycle. Same hazard, same fix.
+            pulseMesh(obstacles.visionGateCollarMesh, 1.12,
+                [obstacles.visionGateMesh].filter(Boolean));
+            spawnHitBurst(scene, particleTexture, obstacles.visionGateMesh, highFidelity,
+                COLOR_VISION_GATE, 'visionGateEjectBurst');
+            // A short punch along the ball's own exit direction (-Z, the gate's open mouth), so
+            // the camera reads as being shoved by the ball leaving rather than by a generic event.
+            // Magnitude 0.0054 against the capture's 0.012 - looked at, not assumed. The first
+            // version was 0.0108, which is 90% of the capture's punch and made the release read as
+            // a second event of equal weight rather than as the tail of the first one.
+            triggerCameraPunch(200, new BABYLON.Vector3(0, 0.002, -0.005));
         }
 
         // Selects AND starts a mission in one action (see MISSION_DEFS' comment for why) -
@@ -10130,6 +10365,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // unaffected: neither is paused.
             if (!isPaused) {
                 updateSaturnRotation(obstacles.saturnRings, deltaMs);
+                updateVisionGateIdle(obstacles, deltaMs, gameplayClockMs);
                 updateSkyboxLayers(skybox, deltaMs);
                 // Timer audit fix - accumulates only while unpaused, see gameplayClockMs' own
                 // declaration comment for why the orbit/combo windows read this instead of
