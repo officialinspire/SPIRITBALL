@@ -98,7 +98,8 @@ import {
     LANE_BANK_RESET_DELAY_MS, SCORE_SLINGSHOT, SCORE_SATURN, MISSION_COMPLETE_BONUS,
     SCORE_INLANE, SCORE_OUTLANE, SCORE_ORBIT, BONUS_MULTIPLIER_MAX,
     BONUS_MISSION_COMPLETE_AMOUNT, BONUS_MAJOR_SHOT_AMOUNT, BONUS_COUNT_TICKS, BONUS_COUNT_TICK_MS,
-    BONUS_COUNT_REDUCED_MOTION_MS, COMBO_ORBIT_TYPES, COMBO_STEP_WINDOW_MS, COMBO_TRIPLE_STEP_WINDOW_MS,
+    BONUS_COUNT_REDUCED_MOTION_MS, BONUS_COUNT_HOLD_MS,
+    END_OF_BALL_LOST_MS, END_OF_BALL_NO_BONUS_MS, END_OF_BALL_STATE_MS, END_OF_BALL_NEXT_BALL_MS, COMBO_ORBIT_TYPES, COMBO_STEP_WINDOW_MS, COMBO_TRIPLE_STEP_WINDOW_MS,
     COMBO_CHAIN_WINDOW_MS, COMBO_MAX_TIER, COMBO_BASE_SCORE, COMBO_MESSAGE_MS,
     COMBO_DEFS, RANK_NAMES, STATE_COLORS, MISSION_DEFS, missionRequiredCount,
     COOLDOWN_BUMPER_MS, COOLDOWN_COMET_MS, COOLDOWN_SLINGSHOT_MS, COOLDOWN_MISSION_TARGET_MS,
@@ -7576,9 +7577,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Space mid-pause produced backglass.state.message === 'LAUNCH!' while the pause overlay
         // was still showing.
         function handleLaunchRelease() {
-            // Gameplay-QA regression fix: drainTimeoutHandle !== null means a real drain just
-            // happened but resetBallToPlunger() hasn't run yet (see handleDrain()'s own two
-            // setTimeout branches) - the ball is still wherever it physically landed (mid-fall,
+            // Gameplay-QA regression fix: a drain just happened but resetBallToPlunger() hasn't
+            // run yet - the ball is still wherever it physically landed (mid-fall,
             // well below the table), not at the plunger. Without this guard, a launch input
             // landing in that window fired a full "launch" (message/shake/sound/haptic, armed
             // skill shot/ball save) from that stale sub-table position, which the pending reset
@@ -7587,9 +7587,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // by qa/regression-suite.js's "CONCRETE BUG" test. Doesn't affect the deliberately
             // supported "held Space through a drain, released after" case (archive/release-
             // prompts/13-*.md, see the comment above handleLaunchPress()) - by the time a real
-            // release happens after the reset has actually completed, drainTimeoutHandle is
-            // already back to null.
-            if (ballInPlay || isPaused || drainTimeoutHandle !== null) return;
+            // release happens after the reset has actually completed, both flags are already back
+            // to their idle values.
+            //
+            // Two flags because there are two such windows, and after the end-of-ball pass they
+            // no longer overlap: drainTimeoutHandle is the BALL SAVED return delay (still a
+            // timer), endOfBall.active is a real drain's end-of-ball sequence (no timer at all). The sequence clears itself in the same statement
+            // that returns the ball to the plunger (finishEndOfBallSequence()), so this blocks a
+            // stale-position launch for exactly as long as the ball is genuinely still down the
+            // drain, and not one frame into the NEXT BALL message - the player can launch through
+            // that message, which is the point of it not being a beat.
+            if (ballInPlay || isPaused || drainTimeoutHandle !== null || endOfBall.active) return;
             if (!plungerCharging) {
                 plungerPower = PLUNGER_MIN_POWER_MS;
             }
@@ -8257,8 +8265,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // exactly as it already does) as a rapid, visible count-up on the backglass. Calls
         // `onComplete` once the whole sequence (including reduced-motion's single-step version)
         // has finished, so handleDrain()'s normal life/game-over flow can continue.
+        // The one definition of "what is this ball's bonus worth". Extracted so the end-of-ball
+        // sequence below can ask whether there is a bonus to pay - it needs to know BEFORE
+        // calling startBonusCount(), because a zero bonus resolves synchronously and would
+        // otherwise complete the BONUS beat inside the call that started it. A read, never a
+        // payout: startBonusCount() is still the only thing in this file that moves these points
+        // into the score.
+        function pendingBonusTotal() {
+            return ballBonus.points * ballBonus.multiplierX;
+        }
+
         function startBonusCount(onComplete) {
-            const total = ballBonus.points * ballBonus.multiplierX;
+            const total = pendingBonusTotal();
             if (total <= 0) {
                 onComplete();
                 return;
@@ -8290,8 +8308,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Called every frame (render loop, gated by !isPaused like updatePowerUp()/
         // updateDropTargetBank()) while a count is running. `ticksRemaining <= 0` covers two
         // cases the same way: the reduced-motion single-step already ran in startBonusCount()
-        // above, or the normal tick loop just finished its last tick and its "BONUS AWARDED"
-        // dwell time has now elapsed - either way, time to finish.
+        // above, or the normal tick loop just finished its last tick and BONUS_COUNT_HOLD_MS of
+        // holding the completed total has now elapsed - either way, time to finish.
         function updateBonusCount(deltaMs) {
             if (!bonusCount.active) return;
             bonusCount.remainingMs -= deltaMs;
@@ -8327,11 +8345,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // "BONUS x{multiplierX}" message already claims.
             addScore(step, false);
             playBonusTickSound();
+            // The last tick holds the same climbing-number format every other tick uses, not the
+            // words 'BONUS AWARDED' it used to swap in. That swap threw away the one number the
+            // count-up existed to show: ticks 1-15 walked the total upward and the tick that
+            // finally landed it replaced the digits with a label, so the completed bonus was the
+            // only value in the sequence a player never actually got to read. Keeping the format
+            // makes the whole beat one number settling on its final value and holding there,
+            // which is also its own "this is finished" signal - the digits stop moving.
             backglass.showMessage(
-                isLastTick ? 'BONUS AWARDED' : 'BONUS x' + bonusCount.multiplierX + ': ' + bonusCount.awarded.toLocaleString(),
-                isLastTick ? 500 : BONUS_COUNT_TICK_MS + 60
+                'BONUS x' + bonusCount.multiplierX + ': ' + bonusCount.awarded.toLocaleString(),
+                isLastTick ? BONUS_COUNT_HOLD_MS + 120 : BONUS_COUNT_TICK_MS + 60
             );
-            bonusCount.remainingMs = isLastTick ? 500 : BONUS_COUNT_TICK_MS;
+            bonusCount.remainingMs = isLastTick ? BONUS_COUNT_HOLD_MS : BONUS_COUNT_TICK_MS;
         }
 
         // Power-up orb (board redesign): collectPowerUp() runs when the ball hits it while active
@@ -9763,16 +9788,25 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }
         }
 
-        // Bug fix (playtest audit): handleDrain()'s post-drain setTimeout below is a plain JS
-        // timer, not gated by scene.physicsEnabled the way real physics stepping is - confirmed
-        // via Playwright that pausing during its 1500ms window did NOT stop it from firing
-        // underneath the pause overlay (resetBallToPlunger()/showGameOverScreen() would run while
-        // the player couldn't see it happening, and in the Game-Over case, gameOverOverlay could
-        // end up display:flex at the same time as pauseOverlay). pendingDrainAction defers that
-        // action until resumeGame() actually runs it, instead of letting it fire invisibly.
+        // Bug fix (playtest audit): handleDrain()'s post-drain setTimeout is a plain JS timer,
+        // not gated by scene.physicsEnabled the way real physics stepping is - confirmed via
+        // Playwright that pausing during its window did NOT stop it from firing underneath the
+        // pause overlay (resetBallToPlunger()/showGameOverScreen() would run while the player
+        // couldn't see it happening, and in the Game-Over case, gameOverOverlay could end up
+        // display:flex at the same time as pauseOverlay). pendingDrainAction defers that action
+        // until resumeGame() actually runs it, instead of letting it fire invisibly.
+        //
+        // Scope note after the end-of-ball pass: this now guards ONE path, the BALL SAVED return
+        // delay. The real-drain path that motivated it no longer schedules a timer - it runs a
+        // render-loop-driven sequence inside the loop's own !isPaused gate (see
+        // startEndOfBallSequence()), which is immune to this class of bug by construction rather
+        // than by deferral. Kept as-is rather than converted alongside it: a ball save is not a
+        // ball change, its 700ms is one delay and not a sequence, and rewriting a working path
+        // that this pass was not asked to touch would be scope it did not have.
         let pendingDrainAction = null;
 
-        // Drain lifecycle audit fix: the raw setTimeout below (either branch) was never
+        // Drain lifecycle audit fix: the raw setTimeout below (the BALL SAVED return delay, and
+        // before the end-of-ball pass the real-drain delay too) was never
         // cancellable - pendingDrainAction only guards the "still paused when the timer fires"
         // case. If the timer was still in flight (not yet fired) when startNewGame() ran - e.g.
         // the player opened the pause menu mid-delay and immediately hit New Game, all well before
@@ -9815,6 +9849,206 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // inside cancelVisionGateCapture() (see its own comment). Purely a diagnostic breadcrumb.
         let lastResetReason = null;
 
+        // ===================================
+        // End-of-ball sequence (user-requested). A ball change used to say one thing and then go
+        // quiet: 'DRAINED!' for 1400ms, 100ms of nothing, a bonus count that only happened if this
+        // ball had earned something, and then the ball silently reappearing at the plunger. Three
+        // of the four things a player needs at a ball change were missing or conditional - what
+        // the bonus paid (skipped entirely at zero), where the run now stands, and that a new ball
+        // is up at all.
+        //
+        // Four ordered beats, driven off the render loop's own deltaMs rather than a setTimeout
+        // chain. That is the same idiom updateBonusCount()/updatePowerUp()/updateDropTargetBank()
+        // already use here, and it buys two things the old raw setTimeout(1500) needed a
+        // workaround for: the sequence freezes with a pause instead of firing invisibly underneath
+        // the overlay (which is what pendingDrainAction exists to patch around on the paths that
+        // still use timers), and its pacing does not depend on how much wall-clock a given frame
+        // takes on a given device.
+        //
+        // "Mobile and desktop behave identically" is a property of that structure rather than
+        // something checked at each beat: nothing in this sequence reads pointer type, touch
+        // controls, viewport, or input method, and every duration is a shared constant. The only
+        // device-conditional thing anywhere near a drain is vibrateDevice() on the ball-save path,
+        // which is a capability that either exists or does not, on a path this sequence never
+        // touches.
+        //
+        // Deliberately NOT a fifth beat for anything else. The brief was a brisk transition, not
+        // an arcade bookkeeping reel: no per-shot itemisation, no stats roll, no "SHOOT AGAIN"
+        // ceremony. Beats are also skipped rather than padded when they have nothing to say - see
+        // the game-over branch, which drops STATE and NEXT BALL because the Game Over screen it
+        // hands off to already prints the final state, and there is no next ball.
+        const END_OF_BALL_BEAT_LOST = 0;
+        const END_OF_BALL_BEAT_BONUS = 1;
+        const END_OF_BALL_BEAT_STATE = 2;
+        // `waiting` means this beat is not on a clock of its own - it is parked until the bonus
+        // count signals completion through its own onComplete. Kept separate from remainingMs so
+        // a paused frame cannot advance a beat that is waiting on another subsystem.
+        const endOfBall = { active: false, beat: -1, remainingMs: 0, waiting: false, gameOver: false };
+
+        // Starts the sequence for a real drain (never a ball save - that is not a ball change).
+        // Called with lives already decremented, so `lives <= 0` here is the authoritative "this
+        // was the last ball" answer for the whole sequence and is latched rather than re-read: a
+        // dev reset or any other write to `lives` mid-sequence must not turn a game-ending drain
+        // into a ball change halfway through it.
+        function startEndOfBallSequence() {
+            endOfBall.active = true;
+            endOfBall.gameOver = lives <= 0;
+            enterEndOfBallBeat(END_OF_BALL_BEAT_LOST);
+        }
+
+        // Wipes the sequence without running any of its remaining beats. Same "starting fresh
+        // makes in-progress state stale" reasoning startNewGame() already applies to bonusCount
+        // and pendingDrainAction: left running, a sequence belonging to the ball that just
+        // drained would keep posting messages over a fresh game and would eventually reset a
+        // ball the player may have already launched.
+        function cancelEndOfBallSequence() {
+            endOfBall.active = false;
+            endOfBall.beat = -1;
+            endOfBall.remainingMs = 0;
+            endOfBall.waiting = false;
+            endOfBall.gameOver = false;
+        }
+
+        function enterEndOfBallBeat(beat) {
+            endOfBall.beat = beat;
+            endOfBall.waiting = false;
+            // Every showMessage() below is given its beat's duration plus a margin. showMessage()
+            // clears itself on a raw setTimeout (wall-clock, like every other message in this
+            // file), while the beat advances on gameplay deltaMs - so on an ordinary frame the
+            // next beat overwrites the message well before its own clear fires, and a pause landing
+            // mid-beat costs a blank panel rather than a stuck one. Same margin idiom
+            // updateBonusCount()'s per-tick messages already use.
+            if (beat === END_OF_BALL_BEAT_LOST) {
+                // 'BALL LOST', not the 'DRAINED!' this replaces. "Drained" is pinball jargon: it
+                // is the correct word and it is exactly the word a first-time player does not
+                // have. The lives readout has already ticked down and pulsed by the time this
+                // shows, so the count is covered - this beat only has to name the event.
+                backglass.showMessage('BALL LOST', END_OF_BALL_LOST_MS + 200);
+                endOfBall.remainingMs = END_OF_BALL_LOST_MS;
+                return;
+            }
+            if (beat === END_OF_BALL_BEAT_BONUS) {
+                // Asked before starting, because startBonusCount() resolves a zero bonus by
+                // calling onComplete() synchronously - which would finish this beat inside the
+                // call that began it and leave the machine advancing twice in one frame.
+                if (pendingBonusTotal() <= 0) {
+                    // The old flow simply had no bonus beat at all when nothing was earned, which
+                    // is how a subsystem becomes invisible: a player who never lands a major shot
+                    // never learns that a bonus pool exists to be filled. Stating it costs 380ms.
+                    backglass.showMessage('NO BONUS', END_OF_BALL_NO_BONUS_MS + 200);
+                    endOfBall.remainingMs = END_OF_BALL_NO_BONUS_MS;
+                    return;
+                }
+                // The existing count-up, unchanged and unduplicated - this beat owns none of the
+                // payout, the pacing, or the messages, it only waits for them. remainingMs stays
+                // at 0 the whole time; `waiting` is what holds the machine.
+                endOfBall.waiting = true;
+                startBonusCount(() => {
+                    endOfBall.waiting = false;
+                });
+                return;
+            }
+            // STATE + vision progress. Both are permanent backglass readouts - the STATE row and
+            // the VISION window - and both are hidden for the entire sequence, because redraw()
+            // returns early while a message is up rather than drawing the transient zone under
+            // it. So this beat is not duplicating the panel; it is the only time either value is
+            // readable during a ball change.
+            //
+            // Two facts, one string, one showMessage() call: showMessage() has no queue, so a
+            // second call would silently overwrite the first (see its own comment). Left to
+            // drawMessage()'s greedy two-line wrap and shrink-to-fit, which is what the mission
+            // select message already relies on for the same reason.
+            //
+            // Tinted with this state's own colour, the second of the two sites STATE_COLORS is
+            // used for (the other being the ASCENSION toast) - so the ladder the player is
+            // climbing is legible as colour here too, not just as a word.
+            // The rank's own internal space is made non-breaking, which looks like a fussy detail
+            // and is not. drawMessage() wraps greedily on spaces, so the only two-word rank name
+            // splits across the two lines at the size the fit loop settles on: measured, every
+            // rank produced ['STATE <RANK>', 'VISION n/n'] except COSMIC SELF with a vision
+            // running, which produced ['STATE COSMIC', 'SELF VISION 3/3'] - the player's own
+            // hard-won top state broken in half. One token cannot be split, so this fixes it for
+            // every rank name, present or future, without special-casing the wrap or padding the
+            // string to a length that happens to shrink the font enough.
+            //
+            // U+00A0 rather than a narrower trick because it is what the shipped font stack
+            // actually draws: rendered at the panel's own 86px floor, 'STATE COSMIC\u00a0SELF' and
+            // 'STATE COSMIC SELF' come back pixel-identical (0 differing pixels, against 579 for a
+            // one-letter control), so there is no tofu box and no width change - just a space the
+            // wrap is not allowed to break on.
+            const rankName = RANK_NAMES[mission.rank].replace(/ /g, '\u00a0');
+            // mission.progress survives a drain by design - only dropTargetBank, ballBonus and
+            // the combo chain reset between balls - so this genuinely reads as "carry on from
+            // here" rather than as a scoreline. 'VISION READY' rather than a zero for the idle
+            // case: there is no vision to be 0/3 of, and the useful thing to say is that hitting
+            // a target will start one.
+            const visionPart = mission.state === 'active'
+                ? 'VISION ' + mission.progress + '/' + mission.required
+                : 'VISION READY';
+            backglass.showMessage('STATE ' + rankName + ' ' + visionPart,
+                END_OF_BALL_STATE_MS + 200, STATE_COLORS[mission.rank]);
+            endOfBall.remainingMs = END_OF_BALL_STATE_MS;
+        }
+
+        // Advanced from the render loop's existing !isPaused block, alongside updateBonusCount()
+        // - which this sequence's BONUS beat is parked on, so the two must tick in the same gate
+        // or a paused bonus count would hold a running sequence open forever.
+        function updateEndOfBallSequence(deltaMs) {
+            if (!endOfBall.active) return;
+            if (endOfBall.waiting) return;
+            endOfBall.remainingMs -= deltaMs;
+            if (endOfBall.remainingMs > 0) return;
+
+            if (endOfBall.beat === END_OF_BALL_BEAT_LOST) {
+                enterEndOfBallBeat(END_OF_BALL_BEAT_BONUS);
+                return;
+            }
+            if (endOfBall.beat === END_OF_BALL_BEAT_BONUS) {
+                if (endOfBall.gameOver) {
+                    // Straight to Game Over after the payout, exactly as the old flow did: the
+                    // bonus is paid before the lives check either way, so a last-ball bonus is
+                    // never swallowed. STATE and NEXT BALL are dropped rather than shortened -
+                    // the Game Over screen prints FINAL STATE itself, and there is no next ball
+                    // to announce.
+                    cancelEndOfBallSequence();
+                    showGameOverScreen();
+                    return;
+                }
+                enterEndOfBallBeat(END_OF_BALL_BEAT_STATE);
+                return;
+            }
+            finishEndOfBallSequence();
+        }
+
+        // NEXT BALL. Deliberately not a beat of the machine: the ball returns and the message is
+        // posted in the same instant, and the sequence is over before the message finishes, so
+        // the player can launch straight through it instead of waiting out one more dwell. That
+        // is also what keeps this whole flow no slower to a playable ball than the two-beat
+        // version it replaces, despite carrying two more beats of information.
+        function finishEndOfBallSequence() {
+            cancelEndOfBallSequence();
+            backglass.redraw();
+            resetBallToPlunger();
+            // Drop-target bank reset (user-requested upgrade) - real drop-target banks reset at
+            // the start of each new ball, not mid-ball. Unchanged from the old onComplete; only
+            // its call site moved.
+            resetDropTargetBank();
+            // Bonus/multiplier subsystem reset - "multiplier resets appropriately between balls."
+            // The BONUS beat above has already paid this ball's total, so zeroing here is safe.
+            ballBonus.points = 0;
+            ballBonus.multiplierX = 1;
+            backglass.state.bonusMultiplierX = 1;
+            resetCombos();
+            // Posted last, after resetBallToPlunger() has put the ball back and after redraw(),
+            // so nothing above can overwrite it. Ball number rather than lives remaining: "BALL 2
+            // OF 3" says where the player is in the run, where "2 BALLS LEFT" says the same thing
+            // in the units of the readout that is already on screen and already just pulsed.
+            backglass.showMessage(
+                'BALL ' + (STARTING_LIVES - lives + 1) + ' OF ' + STARTING_LIVES,
+                END_OF_BALL_NEXT_BALL_MS
+            );
+        }
+
         // Ported from checkDrain() in ../index.js: lose a life, end this ball's turn. No
         // GameOverScene equivalent exists yet (Stage 12), so hitting 0 lives just resets lives
         // and score in place after the same pause the 2D version used before showing Grim
@@ -9826,7 +10060,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
             // BALL SAVE (fairness mechanics, user-requested) - checked before anything else
             // touches lives/scoring, so a saved drain genuinely costs nothing: no life lost, no
-            // DRAINED! beat, and none of the per-ball resets below run (dropTargetBank/laneBank/
+            // end-of-ball sequence at all (this is not a ball change - see
+            // startEndOfBallSequence()), and none of the per-ball resets below run (dropTargetBank/laneBank/
             // combos/ballBonus all stay exactly as they were - the ball never really left play).
             // Consumes the save immediately (ballSave.usedThisLife = true) so it can't retrigger
             // from the very next drain - see armBallSave()'s own comment.
@@ -9862,54 +10097,25 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // BALL SAVE reset (fairness mechanics) - this life is genuinely over now, so the next
             // one gets its own fresh save opportunity (see armBallSave()'s "usedThisLife" gate).
             ballSave.usedThisLife = false;
-            backglass.showMessage('DRAINED!', 1400); // no Grim Reaper visual yet (Stage 12) - this is the stand-in
             triggerCameraShake(400, 0.008); // matches checkDrain()'s cameraShake(400, 0.008)
             flashScreen(200, 255, 0, 0); // matches checkDrain()'s cameraFlash(200, 255, 0, 0, true) - red
             // Quick downward dip - a 3D-only "snap toward the void" beat with no 2D equivalent
             // (that camera couldn't move through space at all).
             triggerCameraPunch(400, new BABYLON.Vector3(0, -0.03, 0));
             playDrainSound();
-            drainTimeoutHandle = setTimeout(() => {
-                drainTimeoutHandle = null;
-                const action = () => {
-                    // Bonus/multiplier subsystem (user-requested) - "on drain: calculate bonus x
-                    // multiplier, rapidly count the bonus into score, show the sequence on HUD/
-                    // backglass, then continue normal life/game-over flow." startBonusCount() pays
-                    // out (or no-ops instantly if this ball earned no bonus) BEFORE the lives<=0
-                    // check below, so the payout always plays regardless of whether the game is
-                    // about to end.
-                    startBonusCount(() => {
-                        if (lives <= 0) {
-                            // Stage 12: was "reset lives/score in place" (Stage 6's documented
-                            // simplification, made before any Game Over screen existed to show final
-                            // results on). Now shows the real Game Over screen instead; NEW GAME/restart
-                            // input there is what actually resets state - see showGameOverScreen().
-                            showGameOverScreen();
-                            return;
-                        }
-                        backglass.redraw();
-                        resetBallToPlunger();
-                        // Drop-target bank reset (user-requested upgrade) - real drop-target banks
-                        // reset at the start of each new ball, not mid-ball; this is the "life lost,
-                        // game continues" path (the lives<=0/showGameOverScreen() branch above
-                        // returns before reaching here, so a true game-ending drain doesn't double up
-                        // with startNewGame()'s own reset later).
-                        resetDropTargetBank();
-                        // Bonus/multiplier subsystem reset - "multiplier resets appropriately
-                        // between balls." startBonusCount() above already paid out this ball's
-                        // total before this runs, so it's safe to zero here.
-                        ballBonus.points = 0;
-                        ballBonus.multiplierX = 1;
-                        backglass.state.bonusMultiplierX = 1;
-                        resetCombos();
-                    });
-                };
-                if (isPaused) {
-                    pendingDrainAction = action;
-                } else {
-                    action();
-                }
-            }, 1500);
+            // End-of-ball sequence (user-requested) - replaces a raw setTimeout(1500) whose whole
+            // job was to sit silently between 'DRAINED!' and the bonus count, and whose callback
+            // then did every remaining ball-change job at once with no announcement of any of
+            // them. The BALL LOST message, the bonus payout, the state/vision readout, the ball
+            // return and the per-ball resets are all beats of that sequence now; it owns this
+            // path's pacing from here, including the game-over hand-off.
+            //
+            // No pendingDrainAction wrapper, unlike the ball-save branch above and unlike the
+            // timer this replaces: those defer a wall-clock callback that would otherwise fire
+            // underneath the pause overlay, and the sequence has no wall-clock callback to defer -
+            // it advances on render-loop deltaMs inside the loop's own !isPaused gate, so a pause
+            // stops it where it stands and a resume carries on from there.
+            startEndOfBallSequence();
         }
 
         mainBall.aggregate.body.setCollisionCallbackEnabled(true);
@@ -10212,6 +10418,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             bonusCount.remainingMs = 0;
             bonusCount.awarded = 0;
             bonusCount.total = 0;
+            // Same reasoning again, one level up: the end-of-ball sequence WRAPS that count, so
+            // clearing the count alone would leave a sequence parked on a completion callback
+            // that can now never fire (its `waiting` flag holds until bonusCount calls back, and
+            // the call was just cancelled) - a permanently active sequence that blocks launch
+            // input for the rest of the run. Cancelled outright rather than run to completion:
+            // its remaining beats belong to the ball that drained, and finishEndOfBallSequence()
+            // would reset a plunger this function is about to reset anyway.
+            cancelEndOfBallSequence();
             // Same "starting fresh makes any deferred/in-progress state stale" reasoning as
             // pendingDrainAction above, extended to a Vision Gate capture that might genuinely be
             // in progress (color-cycle timers running, sparkle alive, ball held kinematic) at the
@@ -10492,6 +10706,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // itself renders from, so a test reading it cannot drift from what a player sees.
             window.__backglassDebug = backglass.state;
 
+            // End-of-ball sequence state, for qa/end-of-ball.js - same ?dev=1-only, read-only
+            // convention as __backglassDebug directly above. The beat a drain is currently in is
+            // not recoverable from the panel: several beats can share a message length, and the
+            // gap between "waiting on the bonus count" and "counting down its own beat" is
+            // invisible from outside. `sequence` is the same object the sequence itself runs on,
+            // so a test reading it cannot drift from what actually ran; bonusTotal is the same
+            // read startBonusCount() makes, exposed so a test can assert the payout landed
+            // exactly rather than restating the formula and drifting from it. A wrapper rather
+            // than hanging bonusTotal off `endOfBall` itself - a diagnostic must not add fields
+            // to live gameplay state.
+            window.__endOfBallDebug = { sequence: endOfBall, bonusTotal: pendingBonusTotal };
+
             // Flipper-geometry regression test instrumentation (qa/flipper-geometry.js) - same
             // "?dev=1-only, read-only, zero impact on a real player" convention as
             // window.__triggerDebug directly above. Deliberately narrow (just the two flipper
@@ -10767,6 +10993,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 updateFlipperMotor(rightFlipper, deltaMs);
                 updateDropTargetBank(deltaMs);
                 updateBonusCount(deltaMs);
+                // Ticks in the same gate as updateBonusCount() above, and directly after it, on
+                // purpose: the sequence's BONUS beat parks on that count's completion, so a frame
+                // that advanced the sequence without having advanced the count would be a frame
+                // spent waiting on a subsystem that had not yet had its chance to finish.
+                updateEndOfBallSequence(deltaMs);
                 updateSkillShot(deltaMs);
                 updateBallSave(deltaMs);
                 updateHitCooldowns(deltaMs); // timer audit fix - was a real setTimeout per cooldown, see hitCooldowns' own comment

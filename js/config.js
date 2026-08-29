@@ -1188,9 +1188,52 @@ export const BONUS_MAJOR_SHOT_AMOUNT = 500;
 // predictable and brisk no matter how big the bonus got.
 export const BONUS_COUNT_TICKS = 16;
 export const BONUS_COUNT_TICK_MS = 45; // ~720ms for the full sequence at BONUS_COUNT_TICKS ticks - brisk per the request
+// How long the completed total holds on screen after the final tick, before the end-of-ball
+// sequence moves on. Was a hardcoded 500 inside updateBonusCount(), and it held the words
+// 'BONUS AWARDED' rather than the number: the count-up spent 15 ticks climbing toward a total
+// the player then never actually saw, because the tick that landed it replaced the digits with
+// a label. The final tick now holds the total itself, so this is genuinely "read the number"
+// time and can be shorter than the label version needed.
+export const BONUS_COUNT_HOLD_MS = 420;
 // Reduced motion: skip the tick sequence entirely and award the whole bonus in one step -
 // this is just how long the single resulting message stays legible before continuing.
-export const BONUS_COUNT_REDUCED_MOTION_MS = 150;
+// 150 -> 600. Reduced motion means less MOTION, not less information, and 150ms is under a
+// third of the ~500ms it takes to read a five-digit number off the panel - the one beat the
+// animated path spends a full second on was the one this path made unreadable. Still well
+// under the animated path's own ~1.1s, so the sequence stays shorter here, as intended.
+export const BONUS_COUNT_REDUCED_MOTION_MS = 600;
+
+// ===================================
+// End-of-ball sequence (user-requested). A drain used to communicate one thing - 'DRAINED!' -
+// and then, after a silent delay, either paid a bonus or did not, and put the ball back with no
+// announcement at all. Four beats now carry the four things a player actually needs at a ball
+// change: the ball is gone, here is what the bonus paid, here is where the run stands, here is
+// the next ball.
+//
+// Every duration below is spent by a render-loop-driven step machine (endOfBall in
+// babylon-game.js), NOT by setTimeout, so the whole sequence freezes with a pause the way the
+// bonus count it wraps already did - and so mobile and desktop spend the same beats, since
+// nothing here is tied to input method, pointer type, or frame rate.
+//
+// The budget is deliberately tighter than what it replaces. Time from drain to a launchable
+// ball: 800 + ~1140 (bonus) + 820 = ~2760ms with a bonus to pay, ~2000ms without, against the
+// old path's fixed 2720ms - so the flow gained two beats of real information without costing
+// the player a slower ball change. NEXT BALL is a message rather than a step, and the ball is
+// already back at the plunger while it shows, so it holds nothing up.
+// ===================================
+export const END_OF_BALL_LOST_MS = 800;
+// Only reached when this ball earned no bonus at all. Short on purpose - "you scored nothing
+// here" is worth stating once so the beat is never silently missing, but it is not worth a
+// full beat of the player's time.
+export const END_OF_BALL_NO_BONUS_MS = 380;
+// STATE + vision progress. The longest beat after the bonus: it is the only one carrying two
+// facts, and it is the only place either of them is legible during a ball change - a backglass
+// message covers the panel's own STATE row and VISION window outright (see redraw()'s early
+// return), so these readouts are hidden for the whole sequence unless a beat states them.
+export const END_OF_BALL_STATE_MS = 820;
+// NEXT BALL. Not a step in the machine - the sequence ends as this is posted, with the ball
+// already returned, so the player can launch straight through it.
+export const END_OF_BALL_NEXT_BALL_MS = 900;
 
 // ===================================
 // Lightweight combo scoring (user-requested) - short chains of already-scored "major shot"
