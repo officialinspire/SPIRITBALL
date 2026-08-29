@@ -10614,57 +10614,103 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // --- Game Over screen, ported from GameOverScene in ../index.js. Triggered from
         // handleDrain() above when lives reach 0 (previously that just reset score/lives in
         // place - see this stage's implementation note). ---
+        // Detail readout labels (Game Over retheme, user-requested - "replace military/progression
+        // language"). Every one of these used to end in a combat verb: Bumper HITS, Orbit SHOTS,
+        // Vision Gate CAPTURES, Target Bank CLEARS, Kickbacks USED, Power-Ups COLLECTED. Read as a
+        // block that was the register of an after-action report, on the closing screen of a game
+        // about visions.
+        //
+        // Fixed by one rule rather than nineteen rewrites: drop the verb and name the feature. The
+        // count is already in its own column, so "BUMPERS 42" says everything "Bumper Hits: 42"
+        // did, in the machine's own vocabulary and in fewer characters - which is also what lets
+        // this block be two columns instead of a nineteen-line list.
+        //
+        // Two are deliberately NOT reduced to a bare noun. SKILL SHOTS keeps its verb because a
+        // skill shot is the name of a real pinball mechanic, not a hit counter, and BALL SAVES the
+        // same. BEST COMBO drops "Tier" - the ladder word this pass was asked to remove, and one
+        // the player never sees anywhere else.
+        const GAME_OVER_DETAIL_LABELS = [
+            ['BUMPERS', 'bumperHits'],
+            ['COMET', 'cometHits'],
+            ['SATURN', 'saturnHits'],
+            ['TARGETS', 'targetHits'],
+            ['RE-ENTRY LANES', 'laneHits'],
+            ['INLANES', 'inlaneHits'],
+            ['OUTLANES', 'outlaneHits'],
+            ['LEFT ORBIT', 'leftOrbitShots'],
+            ['RIGHT ORBIT', 'rightOrbitShots'],
+            ['VISION GATE', 'visionGateCaptures'],
+            ['POWER-UPS', 'powerUpsCollected'],
+            ['TARGET BANKS', 'targetBankCompletions'],
+            ['LANE BANKS', 'laneBankCompletions'],
+            ['COMBOS', 'combosCompleted'],
+            ['BEST COMBO', 'comboMaxTier'],
+            ['SKILL SHOTS', 'skillShotsAwarded'],
+            ['BALL SAVES', 'ballSaves'],
+            ['KICKBACKS', 'kickbacksUsed']
+        ];
+
         function showGameOverScreen() {
             gameOverActive = true;
             playGameOverSound();
+            // Raw digits, not thousands-separated - #player-hud and the backglass HIGH SCORE
+            // window both print scores this way on purpose (see that window's own comment: two
+            // score readouts formatting the same kind of number differently is what makes a
+            // cabinet feel assembled from parts). Tabular figures in the CSS do the alignment
+            // work a separator would otherwise be doing here.
             document.getElementById('gameover-score').textContent = String(score);
-            // Final Rank (improvement-prompts/05-*.md) - previously deliberately omitted per
-            // Stage 12's implementation note, since no real rank-progression system existed yet
-            // to back it; backglass.state.rank now holds this run's genuine final rank.
-            document.getElementById('gameover-rank-line').textContent = 'FINAL STATE: ' + backglass.state.rank;
+
+            // FINAL STATE. backglass.state.rank holds this run's genuine final state, and
+            // rankColor the matching STATE_COLORS entry - set together at every site that assigns
+            // either, so this cannot show one state's name in another's colour.
+            const stateEl = document.getElementById('gameover-rank-line');
+            stateEl.textContent = backglass.state.rank;
+            stateEl.style.color = backglass.state.rankColor || STATE_COLORS[0];
+
+            // Promoted out of the detail block into the summary, per the requested hierarchy -
+            // it is the one tally that measures the actual objective of a run.
+            document.getElementById('gameover-visions').textContent = String(stats.missionsCompleted);
 
             // High-score audit fix - see newHighScoreThisGame's own declaration comment for why
             // this can't just compare score to backglass.state.highScore here (addScore() already
             // synced them by now, in both the "genuinely beat it" and "merely tied it" cases).
+            // Unchanged logic; only what it writes changed, from one concatenated sentence into
+            // the row's label and value.
+            const hsRow = document.getElementById('gameover-highscore-row');
+            const hsLabel = document.getElementById('gameover-highscore-label');
             const hsLine = document.getElementById('gameover-highscore-line');
             if (newHighScoreThisGame) {
-                hsLine.textContent = 'NEW HIGH SCORE!';
+                hsLabel.textContent = 'NEW HIGH SCORE';
+                hsLine.textContent = String(backglass.state.highScore);
+                hsRow.classList.add('is-new-record');
                 hsLine.classList.add('pulse-text');
             } else {
-                hsLine.textContent = 'HIGH SCORE: ' + backglass.state.highScore;
+                hsLabel.textContent = 'HIGH SCORE';
+                hsLine.textContent = String(backglass.state.highScore);
+                hsRow.classList.remove('is-new-record');
                 hsLine.classList.remove('pulse-text');
             }
 
+            // Label and value as separate nodes, not one 'Label: 42' string, so the CSS can lay
+            // the row out as a readout with the number in the digit face - which is what the rest
+            // of this machine's surfaces do with a label/value pair.
             const statsEl = document.getElementById('gameover-stats');
             statsEl.innerHTML = '';
-            const statLines = [
-                ['Visions Completed', stats.missionsCompleted],
-                ['Bumper Hits', stats.bumperHits],
-                ['Comet Hits', stats.cometHits],
-                ['Saturn Hits', stats.saturnHits],
-                ['Target Hits', stats.targetHits],
-                ['Lane Hits', stats.laneHits],
-                ['Inlane Hits', stats.inlaneHits],
-                ['Outlane Hits', stats.outlaneHits],
-                ['Left Orbit Shots', stats.leftOrbitShots],
-                ['Right Orbit Shots', stats.rightOrbitShots],
-                ['Vision Gate Captures', stats.visionGateCaptures],
-                ['Power-Ups Collected', stats.powerUpsCollected],
-                ['Target Bank Clears', stats.targetBankCompletions],
-                ['Lane Bank Clears', stats.laneBankCompletions],
-                ['Combos', stats.combosCompleted],
-                ['Best Combo Tier', stats.comboMaxTier],
-                ['Skill Shots', stats.skillShotsAwarded],
-                ['Ball Saves', stats.ballSaves],
-                ['Kickbacks Used', stats.kickbacksUsed]
-            ];
-            statLines.forEach(([label, value]) => {
-                if (value > 0) {
-                    const p = document.createElement('p');
-                    p.textContent = label + ': ' + value;
-                    statsEl.appendChild(p);
-                }
+            let shown = 0;
+            GAME_OVER_DETAIL_LABELS.forEach(([label, key]) => {
+                const value = stats[key];
+                if (!(value > 0)) return;
+                shown++;
+                const row = document.createElement('p');
+                row.appendChild(document.createTextNode(label));
+                const v = document.createElement('span');
+                v.textContent = String(value);
+                row.appendChild(v);
+                statsEl.appendChild(row);
             });
+            // A run that scored none of these gets no empty RUN DETAIL heading over an empty grid
+            // - the old screen drew the container regardless and left a gap.
+            document.getElementById('gameover-detail').hidden = shown === 0;
 
             document.getElementById('gameover-restart-instructions').textContent =
                 touchControlsActive() ? 'TAP ⚡ TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';

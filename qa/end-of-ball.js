@@ -127,55 +127,82 @@ async function launchWithBallSaveSpent(page, label) {
   await launchBall(page);
 }
 
-// Samples the sequence until it goes idle (or the ceiling is hit), recording every beat entry and
-// every distinct backglass message. Runs entirely inside the page so a sample costs one evaluate,
-// not one round trip each.
-async function watchSequence(page, ceilingMs) {
-  return page.evaluate(async (ceiling) => {
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Records the sequence from INSIDE the render loop, one guaranteed sample per frame, rather than
+// from a setTimeout poll.
+//
+// The poll was the first version and it produced false failures on unchanged code: this sandbox
+// renders at ~1.6fps with frame deltas up to 677ms, and a frame that long saturates the main
+// thread, so timer callbacks land in whatever slack is left between frames rather than every 10ms.
+// The sequence advances at most one beat per frame, so a beat lives for exactly one inter-frame
+// gap - and the 380ms NO BONUS beat, which never spans more than one, was simply never sampled.
+// Confirmed by running this file unchanged against the previous commit, where it failed the same
+// checks (worse, in fact: 39/47 there against 42/47 here) - a test failing on code it passed on
+// before is the test's bug.
+//
+// scene.onBeforeRenderObservable fires inside scene.render(), which the render loop calls AFTER
+// its update block - so an observer here sees the post-update state of every single frame and
+// cannot be starved. __flipperDebug.scene is exposed for exactly this ("so a test can hook
+// scene.onBeforeRenderObservable for per-physics-tick sampling, immune to the render loop's own
+// throttling under slow/headless rendering"). It also reads remainingMs at the true moment of
+// entry, before any frame has decremented it, which the poll could only approximate.
+//
+// Armed BEFORE the drain: FORCE_DRAIN steps physics by hand and so starts the sequence
+// synchronously inside its own evaluate, and the first beat should not have to survive until the
+// recorder shows up.
+async function armSequenceTrace(page) {
+  await page.evaluate(() => {
     const seq = window.__endOfBallDebug.sequence, bg = window.__backglassDebug;
-    const beats = [];       // { beat, enteredAtMs, lengthMs }  lengthMs = remainingMs at entry
-    const messages = [];    // { text, atMs }
-    const t0 = performance.now();
-    let lastBeat = null, lastMsg = null, finishedAtMs = -1;
-    let sawActive = false;
-    for (let k = 0; k < 900; k++) {
-      const now = performance.now() - t0;
-      if (seq.active) sawActive = true;
+    const rec = {
+      beats: [], messages: [], t0: performance.now(),
+      lastBeat: null, lastMsg: null, sawActive: false, finishedAtMs: -1
+    };
+    rec.observer = window.__flipperDebug.scene.onBeforeRenderObservable.add(() => {
+      const now = performance.now() - rec.t0;
+      if (seq.active) rec.sawActive = true;
       const beat = seq.active ? seq.beat : -1;
-      if (beat !== lastBeat) {
-        // remainingMs read at the first sample inside a beat IS its configured length minus at
-        // most one frame - the sequence sets it and then only ever subtracts deltaMs.
-        beats.push({ beat, atMs: Math.round(now), lengthMs: Math.round(seq.remainingMs), waiting: seq.waiting });
-        lastBeat = beat;
+      if (beat !== rec.lastBeat) {
+        rec.beats.push({ beat, atMs: Math.round(now), lengthMs: Math.round(seq.remainingMs), waiting: seq.waiting });
+        rec.lastBeat = beat;
       }
-      if (bg.message && bg.message !== lastMsg) {
-        messages.push({ text: bg.message, atMs: Math.round(now) });
-        lastMsg = bg.message;
+      if (bg.message && bg.message !== rec.lastMsg) {
+        rec.messages.push({ text: bg.message, atMs: Math.round(now) });
+        rec.lastMsg = bg.message;
       }
-      if (sawActive && !seq.active && finishedAtMs < 0) finishedAtMs = now;
-      // Keep sampling a little past the finish so the NEXT BALL message, posted in the same
-      // statement that clears the sequence, is captured.
-      if (finishedAtMs >= 0 && now - finishedAtMs > 400) break;
-      if (now > ceiling) break;
-      await sleep(10);
-    }
+      if (rec.sawActive && !seq.active && rec.finishedAtMs < 0) rec.finishedAtMs = now;
+    });
+    window.__eobTrace = rec;
+  });
+}
+
+// Waits for the sequence to finish, then reads the trace back and detaches the observer.
+async function watchSequence(page, ceilingMs) {
+  await page.waitForFunction(
+    () => window.__eobTrace.sawActive && window.__eobTrace.finishedAtMs >= 0,
+    null, { timeout: ceilingMs, polling: 100 }
+  ).catch(() => {});
+  // A short tail past the finish, so the NEXT BALL message - posted in the same statement that
+  // clears the sequence - is captured by at least one more frame.
+  await page.waitForTimeout(500);
+  return page.evaluate(() => {
+    const rec = window.__eobTrace;
+    window.__flipperDebug.scene.onBeforeRenderObservable.remove(rec.observer);
+    const seq = window.__endOfBallDebug.sequence;
     return {
-      beats, messages,
-      finishedAtMs: Math.round(finishedAtMs),
+      beats: rec.beats, messages: rec.messages,
+      finishedAtMs: Math.round(rec.finishedAtMs),
       stillActive: seq.active,
       score: parseInt(document.getElementById('hud-score').textContent, 10) || 0,
       lives: parseInt(document.getElementById('hud-lives').textContent, 10) || 0,
       gameOverShown: getComputedStyle(document.getElementById('gameover-overlay')).display !== 'none',
-      ballAtPlunger: Math.abs(window.__flipperDebug.mainBall.mesh.position.y) < 0.05
+      ballAtPlunger: window.__flipperDebug.mainBall.mesh.position.y > 0.005
     };
-  }, ceilingMs);
+  });
 }
 
 // Each beat's entry countdown against the constant that beat is supposed to arm. The BONUS beat is
-// excluded: it arms no countdown of its own at all when a real bonus is running (it parks on the
-// count with remainingMs left at 0, which is why its sampled value can read negative), and the
-// NO BONUS branch is the only case where it owns a clock.
+// excluded while it is WAITING: it arms no countdown of its own at all when a real bonus is
+// running (it parks on the count with remainingMs left at 0), and the NO BONUS branch is the only
+// case where it owns a clock. The pre-drain idle sample carries no budget and is skipped.
 function budgetOf(r, cfg) {
   const budget = { 0: cfg.lost, 2: cfg.state };
   const seen = [];
@@ -189,7 +216,15 @@ function budgetOf(r, cfg) {
   return { ok: ok && seen.length >= 2, seen };
 }
 
-function beatOrder(r) { return r.beats.map((b) => BEAT_NAME[b.beat]); }
+// The beats of the SEQUENCE, which is not the same as every state the recorder saw. The trace is
+// armed before the drain (so the first beat does not have to survive until the recorder shows up),
+// which means its first entry is the idle state the game was already in. Dropping it here keeps
+// that arming detail out of every assertion downstream - the trailing idle is kept, because "the
+// sequence ended" is a real thing to assert.
+function beatOrder(r) {
+  const names = r.beats.map((b) => BEAT_NAME[b.beat]);
+  return names[0] === 'idle' ? names.slice(1) : names;
+}
 function msgTexts(r) { return r.messages.map((m) => m.text); }
 
 async function main() {
@@ -241,6 +276,7 @@ async function main() {
       score: parseInt(document.getElementById('hud-score').textContent, 10) || 0,
       total: window.__endOfBallDebug.bonusTotal()
     }));
+    await armSequenceTrace(page);
     await page.evaluate(FORCE_DRAIN);
     const r = await watchSequence(page, 12000);
     desktopWithBonus = r;
@@ -299,6 +335,7 @@ async function main() {
   {
     const { page, pageErrors } = await newGamePage(browser);
     await launchWithBallSaveSpent(page, 'no bonus');
+    await armSequenceTrace(page);
     await page.evaluate(FORCE_DRAIN);
     const r = await watchSequence(page, 12000);
     desktopNoBonus = r;
@@ -320,6 +357,7 @@ async function main() {
   {
     const { page, pageErrors } = await newGamePage(browser);
     await launchWithBallSaveSpent(page, 'launch gating');
+    await armSequenceTrace(page);
     await page.evaluate(FORCE_DRAIN);
     // Mid-sequence: the ball is still down the drain, so a launch here would fire from a
     // sub-table position - the exact bug the old drainTimeoutHandle guard existed to stop.
@@ -335,12 +373,18 @@ async function main() {
       !(during.inPlay === true && during.y < -0.02), during);
     // Now let it finish and launch during the NEXT BALL message - the beat that is deliberately
     // NOT a step, precisely so the player does not have to wait it out.
-    await page.waitForFunction(() => !window.__endOfBallDebug.sequence.active, null, { timeout: 15000 });
-    const msgUp = await page.evaluate(() => window.__backglassDebug.message);
+    //
+    // Read from the trace, not by racing the message's own timer. The first version waited for the
+    // sequence to go idle and THEN asked the page what the message was, which at ~1.6fps can
+    // easily land after the 900ms message has already cleared - it failed on unchanged code, on
+    // both this tree and the previous commit. The recorder samples every frame, so whether the
+    // message was posted at all is a fact about the run rather than a race against it.
+    const gateTrace = await watchSequence(page, 15000);
+    const msgUp = (gateTrace.messages[gateTrace.messages.length - 1] || {}).text || '';
     await launchBall(page);
     const after = await page.evaluate(() => window.__flipperDebug.isBallInPlay());
-    check('the NEXT BALL message is still up once the sequence has ended',
-      /^BALL \d OF \d$/.test(msgUp), msgUp);
+    check('the NEXT BALL message is posted as the sequence ends',
+      /^BALL \d OF \d$/.test(msgUp), { last: msgUp, all: gateTrace.messages.map((m) => m.text) });
     check('the player can launch through the NEXT BALL message', after === true, { launched: after });
     check('no page errors (launch gating)', pageErrors.length === 0, pageErrors);
     await page.close();
@@ -394,6 +438,7 @@ async function main() {
           total: window.__endOfBallDebug.bonusTotal()
         }));
       }
+      await armSequenceTrace(page);
       await page.evaluate(FORCE_DRAIN);
       last = await watchSequence(page, 14000);
       if (last.gameOverShown) break;
@@ -422,6 +467,7 @@ async function main() {
     const { page, pageErrors } = await newGamePage(browser, { touch: true });
     const touchOn = await page.evaluate(() => document.documentElement.dataset.touchControls);
     await launchWithBallSaveSpent(page, 'mobile');
+    await armSequenceTrace(page);
     await page.evaluate(FORCE_DRAIN);
     const r = await watchSequence(page, 12000);
     console.log('  beats  :', JSON.stringify(beatOrder(r)));
