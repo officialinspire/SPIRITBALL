@@ -10570,19 +10570,60 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // touchstart, bypassing the suppression, was confirmed to double-toggle pause/resume back
         // to back. touch-action: none (index.html) plus the page's own
         // width=device-width viewport meta already eliminate the legacy ~300ms tap-delay 'click'
-        // is sometimes blamed for, so the extra listener buys nothing today. Removed in favor of
-        // a single canonical 'click' listener - the exact same pattern every other button in this
-        // pause/controls flow already uses (pause-resume-btn/pause-newgame-btn/pause-controls-btn/
-        // controls-back-btn are all click-only) - which structurally cannot double-fire, since
-        // only one event type is registered at all.
+        // is sometimes blamed for, so the extra listener bought no latency win. It was therefore
+        // removed in favour of a single canonical 'click' listener - the same pattern every other
+        // button in this pause/controls flow uses (pause-resume-btn/pause-newgame-btn/
+        // pause-controls-btn/controls-back-btn are all click-only) - which structurally cannot
+        // double-fire, since only one event type is registered at all.
+        //
+        // That reasoning holds for those four buttons and does NOT hold for this one, which is
+        // what the correction below fixes. They only ever exist on an overlay, where nothing else
+        // can be held; this one sits over live play, where something almost always is - and tap
+        // latency was never the reason it needs a touch path.
+        //
+        // Demo-session QA fix: click-only made this button DEAD on touch whenever another control
+        // was already held. Browsers only synthesise a compatibility 'click' for a primary touch,
+        // so a second-finger tap on a click-only element produces no click at all - measured, the
+        // button received 0 click events while #launch-btn, #flipper-zone-left or
+        // #flipper-zone-right was held, against 1 with nothing held. Holding a flipper is the
+        // normal state during play and a phone has no Escape key, so the only pause control was
+        // unreachable exactly when a player wanted it: they had to let go of the flipper first.
+        //
+        // So the touch listener comes back - but with the redundant guard whose absence is the
+        // whole reason the audit above removed it. That comment's objection was never "touchstart
+        // is wrong", it was "if the preventDefault contract doesn't hold, a synthetic click lands
+        // after touchstart and double-toggles, and nothing here catches it." lastTouchToggleMs
+        // catches it: a touch-driven toggle stamps the clock, and any click arriving inside
+        // CLICK_AFTER_TOUCH_SUPPRESS_MS is treated as that tap's own echo and dropped. The guard
+        // is one-directional on purpose - it can only ever suppress a CLICK, never a touch - so a
+        // deliberate rapid double-tap (pause then immediately resume) still toggles twice.
+        //
+        // Accessibility is unaffected: keyboard and assistive-tech activation of a real <button>
+        // arrives as a click with no preceding touch, so the stamp is stale and the click passes.
+        let lastTouchToggleMs = -Infinity;
+        // Comfortably longer than the ~50-350ms a compatibility click trails its touch by, and
+        // harmless if it over-reaches: the only thing inside the window is a click, and the only
+        // way to be inside it is to have just toggled by touch.
+        const CLICK_AFTER_TOUCH_SUPPRESS_MS = 700;
         function togglePauseFromButton(e) {
             e.preventDefault();
+            if (e.type === 'touchstart') {
+                lastTouchToggleMs = performance.now();
+            } else if (performance.now() - lastTouchToggleMs < CLICK_AFTER_TOUCH_SUPPRESS_MS) {
+                return; // the compatibility click for a tap this handler already acted on
+            }
             if (isPaused) {
                 resumeGame();
             } else {
                 openPauseMenu();
             }
         }
+        // Not passive: the whole point is the synchronous preventDefault() above, which a passive
+        // listener is not allowed to make. Deliberately NOT routed through the
+        // trackTouchStart/trackTouchEnd identifier map the flipper/launch zones use - this is a
+        // discrete tap, not a held control, and it must not occupy a slot in that map or the
+        // window-level touchend would try to release a control it never pressed.
+        pauseBtn.addEventListener('touchstart', togglePauseFromButton, { passive: false });
         pauseBtn.addEventListener('click', togglePauseFromButton);
 
         // ESC: single persistent listener (archive/release-prompts/07-*.md's lesson - check state each

@@ -271,6 +271,67 @@ const check=(l,ok,d)=>{ ok?pass++:fail++; console.log(`  ${ok?'OK  ':'FAIL'} ${l
       lives:(document.getElementById('hud-lives')||{}).textContent }));
     check('NEW GAME resets the run and closes the panel',
       !(await vis('pause-overlay')) && await phys() && after.score==='0' && after.lives==='3', after);
+    // --- REGRESSION: the pause button must work while another control is HELD ----------------
+    // Demo-session QA found #pause-btn completely dead on touch whenever a flipper or the launch
+    // button was already down: it was click-only, and a browser synthesises a compatibility click
+    // only for a PRIMARY touch, so a second-finger tap produced no click at all. Holding a flipper
+    // is the normal state during play and a phone has no Escape key, so the one pause control was
+    // unreachable exactly when it was wanted.
+    //
+    // This suite already tapped the pause button - and passed 106/106 with the bug present -
+    // because p.touchscreen.tap() is a single, primary touch and never reproduces the case. Real
+    // multi-touch needs CDP: Input.dispatchTouchEvent, with every active point listed on each
+    // event, and touchEnd carrying the point being RELEASED (not the ones that remain - passing
+    // the remainder tells the browser the wrong finger lifted, which silently fires the control
+    // the other finger was holding).
+    if (touch) {
+      const cdp = await ctx.newCDPSession(p);
+      const live = new Map();
+      const centre = (sel) => p.evaluate((q)=>{ const r=document.querySelector(q).getBoundingClientRect();
+        return {x:r.left+r.width/2, y:r.top+r.height/2}; }, sel);
+      const tDown = async (sel,id)=>{ const c=await centre(sel); live.set(id,c);
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',
+          touchPoints:[...live.entries()].map(([i,q])=>({id:i,x:q.x,y:q.y}))}); };
+      const tUp = async (id)=>{ const q=live.get(id); if(!q) return; live.delete(id);
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[{id,x:q.x,y:q.y}]}); };
+
+      for (const held of ['#launch-btn', '#flipper-zone-left', '#flipper-zone-right', null]) {
+        // Start from running, with a ball launched so a pause is meaningful.
+        if (await vis('pause-overlay')) { await p.click('#pause-resume-btn'); await p.waitForTimeout(500); }
+        if (!(await p.evaluate(()=>window.__flipperDebug.isBallInPlay()))) {
+          await tDown('#launch-btn',1); await p.waitForTimeout(200); await tUp(1); await p.waitForTimeout(700);
+        }
+        // Count real pause-STATE transitions, not button events. Counting events would call a
+        // correctly-suppressed compatibility click a failure - the guard's whole job is to let
+        // that click arrive and do nothing - so the observable has to be the thing the player
+        // sees. openPauseMenu()/resumeGame() both write pauseOverlay.style.display, so a
+        // MutationObserver on that attribute counts exactly the toggles that really happened.
+        await p.evaluate(()=>{ window.__pbToggles=0;
+          if(window.__pbObs) window.__pbObs.disconnect();
+          const el=document.getElementById('pause-overlay');
+          let last=getComputedStyle(el).display!=='none';
+          window.__pbObs=new MutationObserver(()=>{ const now=getComputedStyle(el).display!=='none';
+            if(now!==last){ last=now; window.__pbToggles++; } });
+          window.__pbObs.observe(el,{attributes:true,attributeFilter:['style']}); });
+        if (held) { await tDown(held,1); await p.waitForTimeout(220); }
+        await tDown('#pause-btn', held?2:1); await p.waitForTimeout(90); await tUp(held?2:1);
+        await p.waitForTimeout(700);
+        const r = await p.evaluate(()=>{ window.__pbObs.disconnect();
+          return { paused:getComputedStyle(document.getElementById('pause-overlay')).display!=='none',
+                   toggles:window.__pbToggles }; });
+        if (held) await tUp(1);
+        check(`pause button responds to a tap while ${held||'nothing'} is held`, r.paused===true,
+          { held:held||'(nothing)', ...r });
+        // The guard that lets the touch path exist at all: a single tap must change the pause
+        // state exactly ONCE. A compatibility click acted on after the touchstart would pause and
+        // immediately resume - the failure mode that got the original touchstart listener removed
+        // - and shows up here as 2 transitions.
+        check(`a single tap on pause toggles exactly once (${held||'nothing'} held)`,
+          r.toggles===1, { held:held||'(nothing)', activations:r.toggles });
+      }
+      if (await vis('pause-overlay')) { await p.click('#pause-resume-btn'); await p.waitForTimeout(500); }
+    }
+
     check('no page errors', errs.length===0, errs.slice(0,3));
     await ctx.close();
   }
