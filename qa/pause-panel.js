@@ -203,12 +203,28 @@ const check=(l,ok,d)=>{ ok?pass++:fail++; console.log(`  ${ok?'OK  ':'FAIL'} ${l
     }
     await p.evaluate(() => {
       const scene = BABYLON.EngineStore.LastCreatedScene, dbg = window.__flipperDebug;
+      // Drives the ball INTO a target, once per iteration, rather than parking it on top of one.
+      //
+      // The parked version was flaky and the flake was structural, not timing: a ball teleported
+      // onto the mesh and held there with zero velocity is already overlapping, and an object that
+      // never stops overlapping generates no fresh collision-start - so whether a hit registered
+      // depended on the engine happening to re-report contact. Measured across four runs
+      // (alternating this commit and the one before it), the mission-completion checks below
+      // failed 3 times out of 4 with no code difference between the trees at all.
+      //
+      // Placing the ball just short of the target and giving it velocity toward it produces a real
+      // approach and therefore a real ENTER every iteration, which is the pattern the rest of the
+      // suites in this repo use. Semantics are otherwise unchanged: same argument list, same
+      // "step N frames" contract, still leaves the body DYNAMIC.
       window.__pp_hold = async (name, frames) => {
         const m = scene.meshes.find((x) => x.name === name); if (!m) return;
-        dbg.mainBall.aggregate.body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
+        const body = dbg.mainBall.aggregate.body;
+        body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
         for (let i = 0; i < (frames || 10); i++) { const q = m.getAbsolutePosition();
-          dbg.mainBall.mesh.position.set(q.x, 0.0135, q.z);
-          dbg.mainBall.aggregate.body.setLinearVelocity(new BABYLON.Vector3(0, 0, 0));
+          dbg.mainBall.mesh.position.set(q.x, 0.0135, q.z - 0.05);
+          dbg.mainBall.mesh.computeWorldMatrix(true);
+          body.setAngularVelocity(new BABYLON.Vector3(0, 0, 0));
+          body.setLinearVelocity(new BABYLON.Vector3(0, 0, 1.0));
           await new Promise((r) => requestAnimationFrame(r)); }
       };
       window.__pp_mission = () => { let v = null;
