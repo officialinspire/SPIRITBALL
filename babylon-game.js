@@ -4385,6 +4385,21 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return '#' + hex.toString(16).padStart(6, '0');
     }
 
+    // How bright a named shot callout is allowed to be, as a multiplier on its own emissive.
+    //
+    // Measured from the real gameplay camera, sampling only pixels a scene pick confirms the label
+    // owns, on opaque plates so the reading is genuinely theirs: at full strength the callouts
+    // rendered at p90 55-195. The BALL, sampled at eight playfield positions, ran p90 47-242 with
+    // a MEDIAN of 112, and the flippers sat at 126-128. So 'L ORBIT' (195) and 'R ORBIT' (174)
+    // were outranking both the ball and the flippers - tier-7 signage above tiers 1 and 3 - and
+    // 'TARGETS' (120) was above the ball's median too.
+    //
+    // These are words painted on a playfield. On a real machine they are ink, lit by whatever
+    // light happens to fall on them; here they were unlit full-strength emissive, which is why
+    // they read as lights. The run-to-run noise floor on static scenery is +/-0-2%, so a change
+    // this size is unambiguous rather than a lucky frame.
+    const LABEL_SIGNAGE_EMISSIVE_LEVEL = 0.5;
+
     function createLabelPlane(scene, text, x, z, color, opts) {
         opts = opts || {};
         const texW = 128, texH = 48;
@@ -4408,6 +4423,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         mat.emissiveTexture = texture;
         mat.opacityTexture = opts.transparent ? texture : null;
         mat.backFaceCulling = false;
+        // Hierarchy pass: the named callouts are dimmed, the gameplay markers are not.
+        //
+        // The chip branch above is the discriminator, and that is not a coincidence - a label that
+        // draws itself a background plate IS a named callout ('L ORBIT', 'VISION GATE'), pure
+        // decoration that names a shot and carries no state. Every chipless user is a gameplay
+        // marker that happens to reuse this helper: the bumper inserts (star/circle glyphs) and
+        // the inlane/outlane flow arrows, which sit on their lamps and mean something. A future
+        // transparent callout would have to opt in here.
+        //
+        // emissiveTexture.level is the scalar Babylon already multiplies the emissive sample by,
+        // so this turns an existing dial down rather than adding anything.
+        if (!opts.transparent) texture.level = LABEL_SIGNAGE_EMISSIVE_LEVEL;
 
         // Verified via Playwright screenshot (not assumed): a flat, playfield-level decal reads
         // as an edge-on sliver from this game's actual low, close, steeply-angled fixed camera
@@ -7044,6 +7071,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // its whole extent, and a long thin cone bloomed along its length stops being a tail and
         // becomes a beam. Their own alpha already gives them the soft edge they need.
         obstacles.cometTailMeshes.forEach((m) => glowLayer.addExcludedMesh(m));
+        // Note for anyone reaching for addExcludedMesh() to dim the shot callouts: it does the
+        // opposite. Measured on this scene, excluding them made the glyphs themselves BRIGHTER
+        // (SKILL SHOT +53%, VISION GATE +18%, TARGETS +15%, KICKBACK +14%) against a run-to-run
+        // noise floor of +/-0-2% on static scenery. The halo goes away and the core comes up, so
+        // the thing the eye actually lands on gets louder, not quieter. They are dimmed at the
+        // source instead - see LABEL_SIGNAGE_EMISSIVE_LEVEL in createLabelPlane().
 
         // Hoisted to a `let` (not a const declared only inside the if-block) so the dev HUD's
         // "post-processing" checkbox (below, once devMode is confirmed) can toggle
