@@ -83,7 +83,9 @@ import {
     INLANE_GUIDE_TOP_X_M, INLANE_GUIDE_BOTTOM_X_M, SIDE_LANES, ORBIT_RAIL_BOTTOM_Z_M,
     ORBIT_RAIL_TOP_Z_M, ORBIT_ENTRANCE_Z_M, ORBIT_COMPLETION_Z_M, ORBIT_TRIGGER_WIDTH_M,
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
+    MISSION_CUE_MS, MISSION_SELECT_MESSAGE_MS,
     VISION_GATE_RADIUS_M, VISION_GATE_COLLAR_RADIUS_M, SCORE_VISION_GATE, VISION_GATE_SEQUENCE_MS,
+    VISION_GATE_HALO_SPIN_RAD_MS, VISION_GATE_HALO_DRIFT_RATE,
     COOLDOWN_VISION_GATE_MS, VISION_GATE_EJECT_SPEED_MS, HEX_VISION_GATE, BALL_REST_X_PX,
     BALL_REST_Z_PX, BALL_REST_Z_M, BALL_REST_Y_M, LANE_INNER_WALL_X_PX, LANE_INNER_WALL_WIDTH_PX,
     LANE_WALL_Z_TOP_PX, LANE_WALL_Z_BOTTOM_PX, PLUNGER_CHARGE_TIME_MS, PLUNGER_MIN_POWER_MS,
@@ -96,13 +98,14 @@ import {
     LANE_BANK_RESET_DELAY_MS, SCORE_SLINGSHOT, SCORE_SATURN, MISSION_COMPLETE_BONUS,
     SCORE_INLANE, SCORE_OUTLANE, SCORE_ORBIT, BONUS_MULTIPLIER_MAX,
     BONUS_MISSION_COMPLETE_AMOUNT, BONUS_MAJOR_SHOT_AMOUNT, BONUS_COUNT_TICKS, BONUS_COUNT_TICK_MS,
-    BONUS_COUNT_REDUCED_MOTION_MS, COMBO_ORBIT_TYPES, COMBO_STEP_WINDOW_MS, COMBO_TRIPLE_STEP_WINDOW_MS,
+    BONUS_COUNT_REDUCED_MOTION_MS, BONUS_COUNT_HOLD_MS,
+    END_OF_BALL_LOST_MS, END_OF_BALL_NO_BONUS_MS, END_OF_BALL_STATE_MS, END_OF_BALL_NEXT_BALL_MS, COMBO_ORBIT_TYPES, COMBO_STEP_WINDOW_MS, COMBO_TRIPLE_STEP_WINDOW_MS,
     COMBO_CHAIN_WINDOW_MS, COMBO_MAX_TIER, COMBO_BASE_SCORE, COMBO_MESSAGE_MS,
-    COMBO_DEFS, RANK_NAMES, MISSION_DEFS, missionRequiredCount,
+    COMBO_DEFS, RANK_NAMES, STATE_COLORS, MISSION_DEFS, missionRequiredCount,
     COOLDOWN_BUMPER_MS, COOLDOWN_COMET_MS, COOLDOWN_SLINGSHOT_MS, COOLDOWN_MISSION_TARGET_MS,
     COOLDOWN_REENTRY_LANE_MS, COOLDOWN_SATURN_MS, COOLDOWN_SIDE_LANE_MS, COOLDOWN_ORBIT_MS,
     COOLDOWN_WALL_MS, COOLDOWN_FLIPPER_MS, DRAIN_ZONE_WIDTH_M, DRAIN_ZONE_DEPTH_PX,
-    DRAIN_ZONE_CENTER_Y_PX, STARTING_LIVES, hexToColor3, HEX_BALL,
+    DRAIN_ZONE_CENTER_Y_PX, STARTING_LIVES, hexToColor3, hexStringToRgb, HEX_BALL,
     HEX_EYEBALL, HEX_FLIPPER, HEX_WALL, HEX_BUMPERS,
     HEX_CHAKRA, HEX_SATURN, HEX_SATURN_RING, HEX_COMET,
     HEX_MISSION_ACTIVE, HEX_LANE_LAMP, HEX_OUTLANE_LAMP, HEX_ORBIT_LAMP, HEX_SKILL_SHOT_LAMP,
@@ -869,10 +872,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // configured-but-broken slot; that's expected, standard browser diagnostic behavior for any
     // failed HTTP request, not a bug in this function.
     //
-    // entry: one SKIN_MANIFEST value, i.e. { path, kind } - kind picks which material property
-    // gets the loaded texture ('albedo' -> albedoTexture/diffuseTexture, 'emissive' ->
-    // emissiveTexture), matching whichever of those properties that material's own procedural
-    // look already relies on for its base color. Passing a falsy entry (e.g. an out-of-range
+    // entry: one SKIN_MANIFEST value, i.e. { path, kind } (plus an optional albedoScale) - kind
+    // picks which material property gets the loaded texture ('albedo' -> albedoTexture/
+    // diffuseTexture, 'emissive' -> emissiveTexture), matching whichever of those properties that
+    // material's own procedural look already relies on for its base color; albedoScale, where a
+    // slot declares one, caps how bright the loaded artwork is allowed to render (see below, and
+    // js/skins.js for why a slot would want that). Passing a falsy entry (e.g. an out-of-range
     // missionTargetFace index) is a safe no-op, not an error - callers don't need to guard first.
     function applySkinTexture(scene, material, entry) {
         if (!entry || !entry.path || !material) return;
@@ -898,9 +903,21 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     // Only for 'albedo': an emissive texture is additive light output, not a
                     // multiplied tint, so emissiveColor staying at its current (usually lamp-
                     // system-controlled) value is correct as-is.
+                    //
+                    // entry.albedoScale (see js/skins.js) replaces that white with a flat grey
+                    // when a slot declares one, which is the same multiply - just at a documented
+                    // ceiling instead of wide open. It exists for surfaces whose place in the
+                    // board's visual hierarchy is not the artwork's decision to make (cabinetRails
+                    // is the case today: structural boundary, must stay under the gameplay
+                    // elements it frames). Clamped rather than trusted: a slot is data, and data
+                    // outside 0..1 here would either black the surface out or push it back above
+                    // the plain-white default this is supposed to sit below.
                     if (entry.kind !== 'emissive') {
-                        if (material.albedoColor) material.albedoColor.set(1, 1, 1);
-                        else if (material.diffuseColor) material.diffuseColor.set(1, 1, 1);
+                        const level = typeof entry.albedoScale === 'number'
+                            ? Math.max(0, Math.min(1, entry.albedoScale))
+                            : 1;
+                        if (material.albedoColor) material.albedoColor.set(level, level, level);
+                        else if (material.diffuseColor) material.diffuseColor.set(level, level, level);
                     }
                 },
                 () => {
@@ -982,6 +999,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Cabinet/table artwork skin slot (visual-architecture pass, user-requested) - shared by
         // every structural boundary wall below. No-op until assets/skins/cabinet/cabinet-rails.png
         // actually exists (see SKINS.md) - the chrome look above stays exactly as-is either way.
+        //
+        // Placed AFTER albedoColor/albedoTexture above, not before, and that order is load-bearing
+        // in both directions. On a successful load this overwrites both (the artwork's own colours
+        // replace the baked-in COLOR_WALL profile, and albedoColor drops to the slot's albedoScale
+        // so the rails stay under the gameplay elements they frame). On no path or a failed load
+        // it touches neither, so the procedural profile above IS the shipped look rather than a
+        // placeholder waiting on a fetch that may never resolve.
+        //
+        // One shared material across all 7 walls below is also what constrains the artwork itself:
+        // every wall is a CreateBox carrying the default full-square UV on all 6 faces, so a single
+        // clamped image is stretched onto 42 faces spanning 0.36:1 to 22.67:1. Only detail that
+        // varies along v survives that intact - which is precisely why createCabinetRailTexture()
+        // draws a V-only profile, and why the slot's artwork spec is a vertical strip. Both the
+        // manifest entry in js/skins.js and SKINS.md carry the measurements.
         applySkinTexture(scene, wallMat, SKIN_MANIFEST.cabinetRails);
 
         // [x2d, y2d, width2d, height2d, rotation2d] - lifted directly from setupTable() in
@@ -1358,6 +1389,37 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // stopped outright) - this is ambient/decorative motion, not gameplay-critical feedback, the
     // same category buildDrainVortex()'s emitRate reduction already established.
     const SATURN_SPIN_RATE_RAD_MS = 0.0006;
+    // Vision Gate idle life. Deliberately the cheapest thing that can make a fixture look alive:
+    // one rotation write and (outside reduced motion) one Color3 write per frame, on two meshes,
+    // with no particle system running. The gate is visited a handful of times per game, so an
+    // always-on emitter would be paying a per-frame cost for something the player is not looking
+    // at - the "no constant particle spam" line this pass was asked to hold.
+    //
+    // Reduced motion is treated the way this file already treats the two different concerns
+    // separately: the ROTATION is slowed rather than removed (ambient motion, same as
+    // updateSaturnRotation() above), but the spectral hue drift is removed outright, because a
+    // colour cycle is a photosensitivity trigger rather than a vestibular one - the same
+    // distinction startVisionGateColorCycle() makes for the capture sequence.
+    function updateVisionGateIdle(obstacles, deltaMs, clockMs) {
+        const halo = obstacles.visionGateHalo;
+        if (!halo) return;
+        const reduced = window.SPIRITBALL_reducedMotion;
+        halo.rotation.y += (reduced ? VISION_GATE_HALO_SPIN_RAD_MS * 0.15 : VISION_GATE_HALO_SPIN_RAD_MS) * deltaMs;
+        if (reduced) return;
+        // A slow drift across the violet end of the spectrum - never a full hue cycle, which would
+        // make an idle fixture flash. Sine-driven between the gate's own colour and a cyan-shifted
+        // neighbour, so at either extreme it still reads as "the Vision Gate", just breathing:
+        // red falls away, green rises, blue holds. Written straight into the existing Color3
+        // rather than allocating a new one, since this runs every frame.
+        const t = (Math.sin(clockMs * VISION_GATE_HALO_DRIFT_RATE) + 1) / 2; // 0..1
+        const level = 0.30; // the halo's step in this fixture's emissive hierarchy - see the collar
+        halo.material.emissiveColor.set(
+            COLOR_VISION_GATE.r * (1 - 0.45 * t) * level,
+            (COLOR_VISION_GATE.g + (0.85 - COLOR_VISION_GATE.g) * t) * level,
+            COLOR_VISION_GATE.b * level
+        );
+    }
+
     function updateSaturnRotation(saturnRings, deltaMs) {
         const rate = window.SPIRITBALL_reducedMotion ? SATURN_SPIN_RATE_RAD_MS * 0.15 : SATURN_SPIN_RATE_RAD_MS;
         saturnRings[0].rotation.y += rate * deltaMs;
@@ -2433,7 +2495,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             highScore: 0, message: '', messageTimer: null,
             // Mission/rank progression (improvement-prompts/05-*.md) - missionName is null when
             // no mission is active, matching the original 2D HUD's "Select Mission" idle state.
-            rank: RANK_NAMES[0], missionName: null, missionProgress: 0, missionRequired: 0,
+            rank: RANK_NAMES[0], rankColor: STATE_COLORS[0],
+            missionName: null, missionProgress: 0, missionRequired: 0,
+            // First-play readability (user-requested - "without adding a tutorial screen"). When
+            // no vision is running this window said "NONE ACTIVE", which is true and useless: it
+            // is the one large, permanently-visible, already-labelled slot on the whole cabinet,
+            // and it was spending itself telling a new player that nothing is happening. It now
+            // carries one short contextual instruction instead - what to do RIGHT NOW - and falls
+            // back to the old text if nothing sets it, so a missed call site degrades rather than
+            // blanks. Set by updatePlayerStatusHud(), which already runs on a throttle and
+            // already reads exactly the state this depends on.
+            idleHint: null,
             // Score-multiplier power-up (board redesign) - true while a collected orb's 2x
             // window is running (see updatePowerUp() in main()).
             multiplierActive: false,
@@ -2623,6 +2695,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const MI_Y = ROW_Y + ROW_H + 12;                // mission window
         const MI_H = height - MI_Y - 14;
 
+        // '#rrggbb' -> 'rgba(r, g, b, a)' for the tinted message halo, over config's shared
+        // hexStringToRgb() - the ASCENSION screen flash needs the same parse, so it lives there.
+        function hexToRgba(hex, alpha) {
+            return 'rgba(' + hexStringToRgb(hex).join(', ') + ', ' + alpha + ')';
+        }
+
         // Greedy word wrap into AT MOST two lines - the remainder of a very long string all lands
         // on the second one rather than spilling into a third, because a third line on a panel
         // this size would have to be small enough to be pointless. Assumes ctx.font is already
@@ -2669,10 +2747,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 if ((!tooWide && !tooTall) || fontSize <= 48) break;
                 fontSize -= 4;
             }
-            ctx.fillStyle = '#ffffff';
+            // Tinted only when the caller asked for it; otherwise the same white/cyan-halo
+            // treatment every message has always had. The halo follows the glyph colour rather
+            // than staying fixed cyan - a gold ASCENSION sitting in a cyan halo reads as a
+            // rendering mistake, not a colour choice.
+            ctx.fillStyle = state.messageColor || '#ffffff';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.shadowColor = 'rgba(160, 250, 255, 0.55)';
+            ctx.shadowColor = state.messageColor ? hexToRgba(state.messageColor, 0.55) : 'rgba(160, 250, 255, 0.55)';
             ctx.shadowBlur = 10;
             const lineH = fontSize * 1.12;
             const firstY = mY + mH / 2 + 2 - ((lines.length - 1) * lineH) / 2;
@@ -2748,7 +2830,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 badgeX -= 14;
             }
 
-            const rankLegendEnd = drawLegend('RANK', PAD + 4, ROW_Y + 6, 46, 'rgba(150, 245, 255, 0.8)', 7);
+            // Legend reads STATE, not RANK (user-requested terminology pass). This is the widest
+            // of the retheme's string changes in consequence, not just in characters: drawLegend()
+            // returns where it stopped, and rankX is that + 22, so a longer legend eats directly
+            // into the room the shrink-to-fit below has for the value. Re-measured after the
+            // change - see RANK_NAMES' fit note in js/config.js for the numbers.
+            const rankLegendEnd = drawLegend('STATE', PAD + 4, ROW_Y + 6, 46, 'rgba(150, 245, 255, 0.8)', 7);
             const rankX = rankLegendEnd + 22;
             // Shrink-to-fit against whatever the badges left. Without this a long rank name runs
             // straight underneath them - "Ascendant" alongside both badges was overlapping in a
@@ -2759,7 +2846,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 rankSize -= 3;
                 ctx.font = '700 ' + rankSize + 'px ' + BG_VALUE_FONT;
             }
-            ctx.fillStyle = '#7dffe0';
+            // Was a fixed '#7dffe0'. That exact value is still STATE_COLORS[0], so a fresh game
+            // is pixel-identical here; later states drift along the palette. state.rankColor is
+            // set beside state.rank at every site that assigns it, and falls back to index 0 so a
+            // missed site degrades to the old look rather than to an unset fillStyle.
+            ctx.fillStyle = state.rankColor || STATE_COLORS[0];
             ctx.textBaseline = 'middle';
             ctx.fillText(state.rank, rankX, ROW_Y + ROW_H / 2 - 2);
             ctx.textBaseline = 'top';
@@ -2770,7 +2861,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const missionActive = !!state.missionName;
             drawWindow(PAD, MI_Y, width - PAD * 2, MI_H,
                 missionActive ? 'rgba(255, 170, 0, 0.45)' : 'rgba(120, 245, 255, 0.16)');
-            drawLegend('MISSION', PAD + 26, MI_Y + 18, 46,
+            // VISION, not MISSION (user-requested). The window's value line below is drawn at a
+            // fixed PAD + 26, so unlike the STATE legend above this one's width does not constrain
+            // the name it labels.
+            drawLegend('VISION', PAD + 26, MI_Y + 18, 46,
                 missionActive ? 'rgba(255, 210, 140, 0.9)' : 'rgba(150, 245, 255, 0.45)', 7);
             if (missionActive) {
                 // Shrink-to-fit so a long mission name never spills past the window's bezel.
@@ -2792,9 +2886,22 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 ctx.fillText(state.missionProgress + '/' + state.missionRequired, width - PAD - 26, barY - 18);
                 ctx.textAlign = 'left';
             } else {
-                ctx.font = '700 64px ' + BG_VALUE_FONT;
-                ctx.fillStyle = 'rgba(150, 245, 255, 0.35)';
-                ctx.fillText('NONE ACTIVE', PAD + 26, MI_Y + 70);
+                // Shrink-to-fit, for the same reason the mission name above has it: this line is
+                // now variable-length player-facing text, and "HOLD SPACE TO LAUNCH" is nearly
+                // twice the width of the "NONE ACTIVE" this slot was sized around.
+                const hint = state.idleHint || 'NONE ACTIVE';
+                let hintSize = 64;
+                ctx.font = '700 ' + hintSize + 'px ' + BG_VALUE_FONT;
+                while (ctx.measureText(hint).width > width - PAD * 2 - 52 && hintSize > 34) {
+                    hintSize -= 3;
+                    ctx.font = '700 ' + hintSize + 'px ' + BG_VALUE_FONT;
+                }
+                // Brighter than the old idle grey (0.35 -> 0.62). This is an instruction a new
+                // player is meant to read, not a greyed-out "nothing here" placeholder - but still
+                // well below the amber an ACTIVE vision uses, so a running objective always wins
+                // the slot's visual priority.
+                ctx.fillStyle = 'rgba(150, 245, 255, 0.62)';
+                ctx.fillText(hint, PAD + 26, MI_Y + 70);
             }
 
             texture.update();
@@ -2805,9 +2912,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // acceptance criteria) - the tradeoff is a very quick second hit can cut the first
         // message's dwell time short, judged an acceptable simplification over building a real
         // message queue for a stage whose actual on-screen legibility can't be checked here.
-        function showMessage(text, durationMs) {
+        // `color` is optional and defaults to the white every message used before it existed -
+        // only the ASCENSION toast passes one, so this cannot quietly tint the other two dozen
+        // messages (see STATE_COLORS' own comment on keeping the panel quiet).
+        function showMessage(text, durationMs, color) {
             if (state.messageTimer) clearTimeout(state.messageTimer);
             state.message = text;
+            state.messageColor = color || null;
             // Dev diagnostics (?dev=1 only, see updateDevHud() in main()) - unlike state.message
             // above, this is never cleared back to '', so the dev HUD can always show "last
             // scoring/game event" even well after the toast itself has faded. Purely a diagnostic
@@ -2816,6 +2927,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             redraw();
             state.messageTimer = setTimeout(() => {
                 state.message = '';
+                state.messageColor = null;
                 state.messageTimer = null;
                 redraw();
             }, durationMs || 1100); // 1100ms matches showPopup()'s tween duration in ../index.js
@@ -2898,11 +3010,25 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     }
 
     // Moulded pop-bumper cap face. Turned concentric rings plus faint radial spokes: the shapes a
-    // real cap is moulded with, and - more usefully here - shapes that catch the light differently
-    // as the cap is viewed from different angles, so the cap reads as a solid moulded object
-    // instead of a flat pale disc. Overridden wholesale by SKIN_MANIFEST.bumperCap when that
-    // artwork exists (applySkinTexture() runs after this and reassigns albedoTexture), so this is
-    // strictly the fallback look, never something a skin has to fight.
+    // real cap is moulded with. Overridden wholesale by SKIN_MANIFEST.bumperCap when that artwork
+    // exists (applySkinTexture() runs after this and reassigns albedoTexture), so this is strictly
+    // the fallback look, never something a skin has to fight.
+    //
+    // Worth knowing before editing this, because the drawing below does not say it: the cap is a
+    // SPHERE with equirectangular UV, so this square is a lat/long map, NOT the top-down disc its
+    // centred-circle drawing code implies. Measured (eight labelled bands rendered onto the real
+    // caps in the real scene), the dome's apex samples the image's BOTTOM edge and the image's
+    // centre - where these rings are concentric about - lands on the rim, near the silhouette
+    // edge. The consequence is that the rings and spokes are far subtler on the visible face than
+    // this drawing suggests: at the cap's 28x24..36x30 on-screen size what actually reads is the
+    // pale plastic tone and the gloss highlight, not the turned pattern.
+    //
+    // Deliberately left as-is rather than redrawn to sit correctly under the mapping: it renders
+    // as a clean, glossy off-white cap, which is exactly the fallback's job, and changing it would
+    // change the shipped look of every bumper for a pattern that is sub-pixel at this size. The
+    // note is here so the next person to touch it knows the geometry they are drawing onto - and
+    // so the bumperCap artwork spec in js/skins.js/SKINS.md is not mistakenly written to "match
+    // the rings" that a player cannot actually see.
     function createBumperCapTexture(scene) {
         const size = 128;
         const texture = new BABYLON.DynamicTexture('bumperCapTex', { width: size, height: size }, scene, true);
@@ -3046,6 +3172,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // material, so real artwork replaces this wholesale (applySkinTexture() runs after it is
     // assigned). The caller sets albedoColor to white for the usual reason - albedoTexture is
     // multiplied by it, and keeping the cyan tint would square it.
+    //
+    // This function is also the reference the artwork spec is written against: the V-only band
+    // layout below (crown 0.000-0.055, falloff -0.130, body -0.700, lower body -0.860, base band
+    // -1.000) is the profile a real cabinet-rails image has to reproduce to sit correctly on the
+    // same 42 faces, and its v=0-is-the-top orientation is the one the artwork inherits. A file
+    // that ignores it does not fail - it just lands its highlight somewhere down the wall. See
+    // SKINS.md's cabinetRails section, which quotes these band boundaries as pixel rows.
     function createCabinetRailTexture(scene, color) {
         const w = 32, h = 128;
         const texture = new BABYLON.DynamicTexture('cabinetRailTex', { width: w, height: h }, scene, true);
@@ -3155,9 +3288,30 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // replaces this wholesale on the same property (applySkinTexture() runs after this is
     // assigned) rather than fighting it.
     //
-    // legend: 'up'/'down' draws a lane arrow pointing up-table/down-table (canvas -Y maps to +Z on
-    // a cylinder cap - verified by rendering a UV probe, not assumed); null draws concentric rings
-    // for the indicators that mark a state rather than a direction.
+    // legend picks the symbol printed on the lens. Each lane FAMILY gets its own, because a
+    // family's identity is the one thing a player has to read at a glance and colour alone was
+    // carrying all of it: inlane and outlane both drew the same down-arrow, and orbit drew the
+    // same up-arrow as the skill shot, so two pairs of unrelated lanes were visually identical.
+    // The four family symbols are chosen to have maximally different SILHOUETTES rather than
+    // different detail, because measured, an insert is only 20-40px across at the gameplay camera
+    // and detail below that resolves to mush:
+    //
+    //   'flow'   INLANE    double chevron down-table - return / flow
+    //   'void'   OUTLANE   bold X                    - danger / void
+    //   'cycle'  ORBIT     ring with an arrowhead    - cycle / infinity
+    //   'ground' RE-ENTRY  earth mark, stacked bars  - return-to-body / grounding
+    //
+    // chevrons / cross / circle / stacked horizontals stay distinguishable from each other when
+    // they are only a handful of pixels tall, which four variations on an arrow would not.
+    //
+    // 'up'/'down' remain for the arrows that genuinely mark a DIRECTION rather than a family - the
+    // skill-shot lanes ('up'). 'down' is no longer used by any lane family but is kept because it
+    // costs nothing and losing it would make re-introducing a directional insert a code change
+    // rather than an argument. null draws concentric rings, for indicators that mark a state
+    // rather than a direction (kickback, ball save).
+    //
+    // Canvas +Y maps down-table, which is why 'down' puts its tip at c + 34 (the original arrow's
+    // own convention, verified by a UV probe when it was written, and reused here unchanged).
     function createInsertLensTexture(scene, name, legend) {
         const size = 128, c = size / 2;
         const texture = new BABYLON.DynamicTexture('insertLensTex' + name, { width: size, height: size }, scene, true);
@@ -3186,6 +3340,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         ctx.arc(c, c, c * (lit - 0.04), 0, Math.PI * 2);
         ctx.stroke();
 
+        // Every family symbol is stroked with round caps and joins at a deliberately heavy width.
+        // At the sizes these render, a thin elegant line disappears entirely and a mitred corner
+        // reads as a stray pixel; weight and rounded ends are what survive downsampling.
+        ctx.strokeStyle = 'rgba(255,255,255,0.98)';
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
         if (legend === 'up' || legend === 'down') {
             // Classic notched lane arrow. dir flips it along the table's Z axis.
             const dir = legend === 'down' ? 1 : -1;
@@ -3200,6 +3361,79 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             ctx.lineTo(c - 26, c - dir * 6);
             ctx.closePath();
             ctx.fill();
+        } else if (legend === 'flow') {
+            // INLANE - return / flow. Two nested chevrons pointing down-table: the direction the
+            // ball returns from, said twice so it reads as movement rather than as a static arrow.
+            ctx.lineWidth = 10;
+            for (const off of [-16, 8]) {
+                ctx.beginPath();
+                ctx.moveTo(c - 24, c + off);
+                ctx.lineTo(c, c + off + 20);
+                ctx.lineTo(c + 24, c + off);
+                ctx.stroke();
+            }
+        } else if (legend === 'void') {
+            // OUTLANE - danger / void. A bold X, the one symbol here with no curves and no
+            // vertical axis, so it cannot be mistaken for any of the other three at any size.
+            ctx.lineWidth = 12;
+            const d = 24;
+            ctx.beginPath();
+            ctx.moveTo(c - d, c - d); ctx.lineTo(c + d, c + d);
+            ctx.moveTo(c + d, c - d); ctx.lineTo(c - d, c + d);
+            ctx.stroke();
+        } else if (legend === 'cycle') {
+            // ORBIT - cycle / infinity. A ring broken at the top with an arrowhead on the open
+            // end: the gap plus the head is what turns a plain circle into a direction of travel,
+            // and the ring is the only closed curve in the set.
+            //
+            // The head is placed and pointed from the arc's own tangent rather than by hand-picked
+            // offsets. A first version offset it by eye and rendered as a blob hanging off the
+            // ring at the wrong angle - at this size an arrowhead that is a few degrees out does
+            // not read as an arrow at all, it reads as damage.
+            ctx.lineWidth = 11;
+            const r = 30;
+            const gapHalf = Math.PI * 0.24;       // half the opening, centred on 12 o'clock
+            const top = -Math.PI / 2;
+            const from = top + gapHalf;           // sweep clockwise from the gap's right edge...
+            const to = top - gapHalf + Math.PI * 2; // ...all the way round to its left edge
+            ctx.beginPath();
+            ctx.arc(c, c, r, from, to);
+            ctx.stroke();
+            // Tangent at the arc's END, in the direction of increasing angle - i.e. the way the
+            // stroke was travelling when it stopped.
+            const hx = c + Math.cos(to) * r, hy = c + Math.sin(to) * r;
+            const tx = -Math.sin(to), ty = Math.cos(to);
+            const nx = -ty, ny = tx;              // perpendicular, for the head's base
+            const len = 17, half = 11;
+            ctx.fillStyle = 'rgba(255,255,255,0.98)';
+            ctx.beginPath();
+            ctx.moveTo(hx + tx * len, hy + ty * len);
+            ctx.lineTo(hx + nx * half, hy + ny * half);
+            ctx.lineTo(hx - nx * half, hy - ny * half);
+            ctx.closePath();
+            ctx.fill();
+        } else if (legend === 'ground') {
+            // RE-ENTRY - return-to-body / grounding. The electrical earth mark: a stem descending
+            // into three stacked bars of decreasing width.
+            //
+            // Chosen over the obvious "chevron landing on a baseline" because that version shared
+            // its basic shape with the inlane's chevrons, and two symbols that differ only by an
+            // added bar are exactly the pair that stops being distinguishable first as the insert
+            // shrinks. Stacked horizontals against chevrons, a cross and a circle gives all four
+            // families a silhouette nothing else in the set approaches.
+            ctx.lineWidth = 10;
+            ctx.beginPath();
+            ctx.moveTo(c, c - 30);
+            ctx.lineTo(c, c - 6);
+            ctx.stroke();
+            const bars = [[28, -4], [18, 10], [8, 24]];
+            for (const [halfW, dy] of bars) {
+                ctx.lineWidth = 10;
+                ctx.beginPath();
+                ctx.moveTo(c - halfW, c + dy);
+                ctx.lineTo(c + halfW, c + dy);
+                ctx.stroke();
+            }
         } else {
             // Two concentric rings - the "this is a state lamp, not a shot" legend.
             ctx.strokeStyle = 'rgba(255,255,255,0.96)';
@@ -3212,6 +3446,223 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }
 
         texture.update();
+        return texture;
+    }
+
+    // Premium flipper bat face (flipper-visual pass, user-requested - "look like real premium
+    // pinball bats with SPIRITBALL identity"). The bat was a bare CreateBox wearing one flat
+    // magenta PBR material with a heavy uniform emissive, which the board-graphics audit measured
+    // reading as a solid glowing tube: p95 225, blown to near-white at the pivot, no bat shape, no
+    // rubber, no hinge, and a bloom halo landing mostly OFF the mesh (the flippers owned 0.6% of
+    // the frame's brightest pixels at 1.04% coverage, while the lane geometry they bleed onto
+    // owned 40.7%).
+    //
+    // Everything here is surface. The box's dimensions, pivot, motion, collision filter and
+    // restitution are untouched - this only changes what that box is painted with.
+    //
+    // UV layout, measured by painting four labelled bands onto the real bats in the real scene
+    // rather than assumed: u = 0 is the PIVOT end and u = 1 is the TIP, identically on both
+    // flippers (they share this material and the same local-space mesh offset, so left/right
+    // symmetry is structural rather than something this drawing has to maintain). v runs across
+    // the bat, and the large camera-facing striking face carries the full square - it is the
+    // surface a player actually looks at, not the narrow top edge.
+    //
+    // Drawn symmetric about v = 0.5 on purpose: the rubber has to land on BOTH long edges anyway
+    // (a real flipper's sleeve wraps it), and a v-symmetric design cannot be installed upside
+    // down on any face of the box, which removes a whole class of "which way up is this" bug.
+    //
+    // Returns { albedo, emissive } - two textures from one drawing pass. Splitting them is the
+    // point of the exercise: the albedo carries the bat, and the emissive is near-black except
+    // for the accent and hinge ring, so the body stops self-illuminating and only the detail
+    // glows. That is what lets the flat emissive come down far enough for the ball to out-shine
+    // the flippers again.
+    function createFlipperBatTextures(scene) {
+        const W = 512, H = 64;
+        const albedo = new BABYLON.DynamicTexture('flipperBatTex', { width: W, height: H }, scene, true);
+        const emissive = new BABYLON.DynamicTexture('flipperBatEmisTex', { width: W, height: H }, scene, true);
+        const a = albedo.getContext();
+        const e = emissive.getContext();
+
+        const RUBBER = 0.155;                  // fraction of the bat's width taken by each sleeve
+        const bodyTop = H * RUBBER, bodyBot = H * (1 - RUBBER);
+
+        // --- albedo -------------------------------------------------------------------------
+        // Rubber sleeve first, as the ground everything else sits inside. Near-black with a warm
+        // violet bias rather than neutral: a real sleeve picks up the playfield's colour, and pure
+        // grey read as a dead band against this board's magenta.
+        a.fillStyle = '#120a16';
+        a.fillRect(0, 0, W, H);
+
+        // Bat body - a magenta face that cools and darkens toward the tip. Real bats are lit from
+        // the base end by the playfield inserts under them, and the falloff is most of what makes
+        // a long flat object read as having a near end and a far end rather than as a bar.
+        const body = a.createLinearGradient(0, 0, W, 0);
+        body.addColorStop(0.00, '#ff5cf2');
+        body.addColorStop(0.30, '#f02fe0');
+        body.addColorStop(0.72, '#c018bd');
+        body.addColorStop(1.00, '#8a1090');
+        a.fillStyle = body;
+        a.fillRect(0, bodyTop, W, bodyBot - bodyTop);
+
+        // Taper. The box cannot narrow - its collider depends on staying a box - so the taper is
+        // painted: the sleeve is allowed to eat into the body toward the tip, which reads from the
+        // gameplay camera as a bat that gets thinner rather than as a rectangle that gets darker.
+        a.fillStyle = '#120a16';
+        a.beginPath();
+        a.moveTo(W, bodyTop); a.lineTo(W, bodyTop + (bodyBot - bodyTop) * 0.30);
+        a.lineTo(W * 0.52, bodyTop); a.closePath(); a.fill();
+        a.beginPath();
+        a.moveTo(W, bodyBot); a.lineTo(W, bodyBot - (bodyBot - bodyTop) * 0.30);
+        a.lineTo(W * 0.52, bodyBot); a.closePath(); a.fill();
+
+        // Moulded highlight along the body's upper half - the single strongest "this is a curved
+        // plastic object" cue available on a flat face.
+        const gloss = a.createLinearGradient(0, bodyTop, 0, bodyTop + (bodyBot - bodyTop) * 0.55);
+        gloss.addColorStop(0, 'rgba(255,255,255,0.34)');
+        gloss.addColorStop(1, 'rgba(255,255,255,0)');
+        a.fillStyle = gloss;
+        a.fillRect(0, bodyTop, W, (bodyBot - bodyTop) * 0.55);
+
+        // Bright printed keylines where body meets rubber. This is the rubber-edge CONTRAST the
+        // pass exists for: a dark band alone reads as a shadow, but a dark band with a lit edge on
+        // it reads as a separate material bolted to the bat.
+        a.strokeStyle = 'rgba(255,220,255,0.92)';
+        a.lineWidth = 3;
+        a.beginPath(); a.moveTo(0, bodyTop); a.lineTo(W, bodyTop);
+        a.moveTo(0, bodyBot); a.lineTo(W, bodyBot); a.stroke();
+
+        // Hinge hub at the pivot end - a dark boss with a bright collar, the fixture a real bat is
+        // bolted to. Also gives the base end something to BE, instead of the blown-out blob the
+        // audit screenshotted.
+        const hubX = W * 0.055, hubR = H * 0.30;
+        a.fillStyle = '#1d1024';
+        a.beginPath(); a.arc(hubX, H / 2, hubR, 0, Math.PI * 2); a.fill();
+        a.strokeStyle = 'rgba(255,190,255,0.85)';
+        a.lineWidth = 3.5;
+        a.beginPath(); a.arc(hubX, H / 2, hubR, 0, Math.PI * 2); a.stroke();
+        a.fillStyle = 'rgba(255,255,255,0.55)';
+        a.beginPath(); a.arc(hubX, H / 2, hubR * 0.30, 0, Math.PI * 2); a.fill();
+
+        // SPIRITBALL identity mark, centred on the bat: the third-eye lens the board already
+        // speaks in (the Vision Gate, the bumpers' circled-dot insert), drawn as a pointed oval
+        // with a bright pupil and a pair of chevrons running toward the tip. Bold and closed -
+        // measured, a bat renders about 150x25 screen pixels, which carries a silhouette and a
+        // couple of strokes and nothing finer.
+        const eyeX = W * 0.46, eyeRy = (bodyBot - bodyTop) * 0.34, eyeRx = eyeRy * 2.0;
+        a.strokeStyle = 'rgba(255,240,255,0.95)';
+        a.lineWidth = 3.5;
+        a.beginPath();
+        a.moveTo(eyeX - eyeRx, H / 2);
+        a.quadraticCurveTo(eyeX, H / 2 - eyeRy * 2.1, eyeX + eyeRx, H / 2);
+        a.quadraticCurveTo(eyeX, H / 2 + eyeRy * 2.1, eyeX - eyeRx, H / 2);
+        a.closePath(); a.stroke();
+        a.fillStyle = 'rgba(255,255,255,0.92)';
+        a.beginPath(); a.arc(eyeX, H / 2, eyeRy * 0.52, 0, Math.PI * 2); a.fill();
+        a.strokeStyle = 'rgba(255,225,255,0.75)';
+        a.lineWidth = 3;
+        a.lineCap = 'round';
+        for (let i = 0; i < 2; i++) {
+            const cx = W * (0.70 + i * 0.085);
+            a.beginPath();
+            a.moveTo(cx, H / 2 - eyeRy * 0.85);
+            a.lineTo(cx + W * 0.030, H / 2);
+            a.lineTo(cx, H / 2 + eyeRy * 0.85);
+            a.stroke();
+        }
+        albedo.update();
+
+        // --- emissive -----------------------------------------------------------------------
+        // Black everywhere the bat should merely be LIT rather than a light source. The body keeps
+        // a low, tip-falling grey so it still reads as backlit plastic; the rubber emits nothing
+        // at all, which is what makes the sleeve read as rubber next to a glowing face.
+        e.fillStyle = '#000000';
+        e.fillRect(0, 0, W, H);
+        const bodyE = e.createLinearGradient(0, 0, W, 0);
+        bodyE.addColorStop(0.00, '#3a3a3a');
+        bodyE.addColorStop(0.55, '#2a2a2a');
+        bodyE.addColorStop(1.00, '#141414');
+        e.fillStyle = bodyE;
+        e.fillRect(0, bodyTop + 2, W, (bodyBot - bodyTop) - 4);
+        // The lit detail: keylines, hinge collar, eye and chevrons. These are the only parts of a
+        // flipper that should still punch after the body has been quietened.
+        e.strokeStyle = 'rgba(255,255,255,0.80)';
+        e.lineWidth = 3;
+        e.beginPath(); e.moveTo(0, bodyTop); e.lineTo(W, bodyTop);
+        e.moveTo(0, bodyBot); e.lineTo(W, bodyBot); e.stroke();
+        e.strokeStyle = 'rgba(255,255,255,0.85)';
+        e.lineWidth = 3.5;
+        e.beginPath(); e.arc(hubX, H / 2, hubR, 0, Math.PI * 2); e.stroke();
+        e.fillStyle = 'rgba(255,255,255,0.95)';
+        e.beginPath(); e.arc(hubX, H / 2, hubR * 0.30, 0, Math.PI * 2); e.fill();
+        e.strokeStyle = 'rgba(255,255,255,0.95)';
+        e.lineWidth = 3.5;
+        e.beginPath();
+        e.moveTo(eyeX - eyeRx, H / 2);
+        e.quadraticCurveTo(eyeX, H / 2 - eyeRy * 2.1, eyeX + eyeRx, H / 2);
+        e.quadraticCurveTo(eyeX, H / 2 + eyeRy * 2.1, eyeX - eyeRx, H / 2);
+        e.closePath(); e.stroke();
+        e.fillStyle = 'rgba(255,255,255,1)';
+        e.beginPath(); e.arc(eyeX, H / 2, eyeRy * 0.52, 0, Math.PI * 2); e.fill();
+        e.strokeStyle = 'rgba(255,255,255,0.70)';
+        e.lineWidth = 3;
+        e.lineCap = 'round';
+        for (let i = 0; i < 2; i++) {
+            const cx = W * (0.70 + i * 0.085);
+            e.beginPath();
+            e.moveTo(cx, H / 2 - eyeRy * 0.85);
+            e.lineTo(cx + W * 0.030, H / 2);
+            e.lineTo(cx, H / 2 + eyeRy * 0.85);
+            e.stroke();
+        }
+        emissive.update();
+        return { albedo, emissive };
+    }
+
+    // Vision Gate beacon shaft. The beacon used to be a plain translucent cylinder, and from the
+    // gameplay camera that rendered as a 7x130px hard-edged magenta bar running straight through
+    // Saturn and 50px past the top rail into empty starfield - measured in the board-graphics
+    // audit, where it read as a rendering artifact rather than as a beam of light. A beam needs
+    // two things a solid-colour cylinder cannot give: it has to be brightest where it leaves its
+    // source and it has to END by fading out, not by stopping.
+    //
+    // Both come from one 32x256 gradient: full brightness at the base, falling to nothing at the
+    // top, with the alpha channel carrying the same curve so the shaft dissolves into the sky.
+    // Drawn once at load, shared, no per-frame cost. Greyscale for the usual reason - it is an
+    // emissiveTexture, so it multiplies whatever colour the material carries, and the gate's
+    // colour has to stay free to be driven by the capture sequence.
+    function createGateBeaconTexture(scene) {
+        const w = 32, h = 256;
+        const texture = new BABYLON.DynamicTexture('gateBeaconTex', { width: w, height: h }, scene, true);
+        const ctx = texture.getContext();
+        ctx.clearRect(0, 0, w, h);
+        // v=0 is the top of the shaft (the far end), v=1 the base at the playfield.
+        //
+        // The curve holds full brightness through the lower 55% and fades only above it, which is
+        // not the obvious choice and was arrived at by looking. A plain squared falloff (bright at
+        // the base, dark by mid-shaft) is the physically tidy answer and it made the beacon
+        // effectively disappear: from the fixed gameplay camera the boss bumper occludes the gate's
+        // base, so the only part of the shaft a player can actually see is the part a base-weighted
+        // gradient throws away. Brightness has to live where the shaft CLEARS the bumper, and the
+        // fade has to happen above that, at the end that was previously a hard cut across the sky.
+        const holdTo = 0.55;                  // fraction of the height (from the base) kept at full
+        for (let y = 0; y < h; y++) {
+            const t = y / (h - 1);            // 0 at top, 1 at base
+            const a = t >= holdTo ? 1 : Math.pow(t / holdTo, 1.6);
+            ctx.fillStyle = 'rgba(255,255,255,' + a.toFixed(4) + ')';
+            ctx.fillRect(0, y, w, 1);
+        }
+        // A brighter core down the middle third, so the shaft has an axis rather than being a
+        // uniform slab - the same "give it a centre to read" trick the comet tail uses.
+        const core = ctx.createLinearGradient(0, 0, w, 0);
+        core.addColorStop(0.00, 'rgba(255,255,255,0)');
+        core.addColorStop(0.50, 'rgba(255,255,255,0.62)');
+        core.addColorStop(1.00, 'rgba(255,255,255,0)');
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = core;
+        ctx.fillRect(0, Math.round(h * 0.35), w, h - Math.round(h * 0.35));
+        ctx.globalCompositeOperation = 'source-over';
+        texture.update();
+        texture.hasAlpha = true;
         return texture;
     }
 
@@ -3454,10 +3905,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // 07-*.md, not a separately-tracked color). Always fires regardless of reduced-motion - this
     // IS the "hit confirmed" feedback the doc says must stay intact; only its particle COUNT is
     // reduced on low-tier devices, which is a performance gate, not a motion gate.
-    function spawnHitBurst(scene, texture, mesh, highFidelity) {
+    // colorOverride is optional. Without it this reads the struck mesh's own material exactly as
+    // it always has, so every existing call site is unchanged; the ASCENSION beat passes the
+    // state's palette colour so its burst is spectral rather than whatever the ball happens to
+    // be. Short-circuits the material read entirely when given, so the caller is free to pass a
+    // mesh whose material has neither albedoColor nor diffuseColor.
+    function spawnHitBurst(scene, texture, mesh, highFidelity, colorOverride, name) {
         if (!devParticlesEnabled) return null; // dev HUD "particle effects" toggle - see its own declaration comment
-        const color = mesh.material.albedoColor || mesh.material.diffuseColor;
-        const burst = new BABYLON.ParticleSystem('hitBurst', highFidelity ? 30 : 12, scene);
+        const color = colorOverride || mesh.material.albedoColor || mesh.material.diffuseColor;
+        // Optional name, defaulting to the 'hitBurst' every call site produced before it existed.
+        // The ASCENSION beat names its own so it is distinguishable in scene.particleSystems from
+        // the ordinary hit bursts firing at the same instant - without that, "did the ascension
+        // burst fire?" is unanswerable, because the bumper hits driving the vision are spawning
+        // their own bursts in the same frames. qa/ascension-beat.js relies on this.
+        const burst = new BABYLON.ParticleSystem(name || 'hitBurst', highFidelity ? 30 : 12, scene);
         burst.particleTexture = texture;
         burst.emitter = mesh.position.clone();
         burst.minEmitBox = BABYLON.Vector3.Zero();
@@ -3924,6 +4385,21 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return '#' + hex.toString(16).padStart(6, '0');
     }
 
+    // How bright a named shot callout is allowed to be, as a multiplier on its own emissive.
+    //
+    // Measured from the real gameplay camera, sampling only pixels a scene pick confirms the label
+    // owns, on opaque plates so the reading is genuinely theirs: at full strength the callouts
+    // rendered at p90 55-195. The BALL, sampled at eight playfield positions, ran p90 47-242 with
+    // a MEDIAN of 112, and the flippers sat at 126-128. So 'L ORBIT' (195) and 'R ORBIT' (174)
+    // were outranking both the ball and the flippers - tier-7 signage above tiers 1 and 3 - and
+    // 'TARGETS' (120) was above the ball's median too.
+    //
+    // These are words painted on a playfield. On a real machine they are ink, lit by whatever
+    // light happens to fall on them; here they were unlit full-strength emissive, which is why
+    // they read as lights. The run-to-run noise floor on static scenery is +/-0-2%, so a change
+    // this size is unambiguous rather than a lucky frame.
+    const LABEL_SIGNAGE_EMISSIVE_LEVEL = 0.5;
+
     function createLabelPlane(scene, text, x, z, color, opts) {
         opts = opts || {};
         const texW = 128, texH = 48;
@@ -3947,6 +4423,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         mat.emissiveTexture = texture;
         mat.opacityTexture = opts.transparent ? texture : null;
         mat.backFaceCulling = false;
+        // Hierarchy pass: the named callouts are dimmed, the gameplay markers are not.
+        //
+        // The chip branch above is the discriminator, and that is not a coincidence - a label that
+        // draws itself a background plate IS a named callout ('L ORBIT', 'VISION GATE'), pure
+        // decoration that names a shot and carries no state. Every chipless user is a gameplay
+        // marker that happens to reuse this helper: the bumper inserts (star/circle glyphs) and
+        // the inlane/outlane flow arrows, which sit on their lamps and mean something. A future
+        // transparent callout would have to opt in here.
+        //
+        // emissiveTexture.level is the scalar Babylon already multiplies the emissive sample by,
+        // so this turns an existing dial down rather than adding anything.
+        if (!opts.transparent) texture.level = LABEL_SIGNAGE_EMISSIVE_LEVEL;
 
         // Verified via Playwright screenshot (not assumed): a flat, playfield-level decal reads
         // as an edge-on sliver from this game's actual low, close, steeply-angled fixed camera
@@ -4073,8 +4561,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // emissiveColor is deliberately NOT touched here - it belongs to the lamp system and nothing
     // else may write it (see createLampSystem()). The texture assigned here is multiplied by
     // whatever state that system has the lamp in, so off/dim/lit/blink behave exactly as before.
+    // Insert-legibility pass (user-requested - "keep lamp states functional and obvious when
+    // lit/unlit"). The albedo floor comes DOWN again, from (0.042,0.042,0.05)+colour*0.09, and the
+    // reason is measured rather than aesthetic. Rendering the inserts in isolation (only the
+    // insert meshes, glow layer off, so nothing else contributes) and then zeroing emissiveColor
+    // showed that 89-94% of an UNLIT insert's brightness was albedo response to the scene lights -
+    // a constant the lamp system cannot touch. That floor is what was flattening the on/off read:
+    // driving a lamp its full dim->lit range (0.12 -> 0.9, a 7.5x change in emitted light) moved
+    // the rendered insert only 1.25-1.41x, because most of what was on screen was never the lamp.
+    //
+    // Cutting the floor to roughly a sixth puts the emissive swing back in charge without making
+    // an unlit insert invisible - it still reads as a dark lens with a hint of its family colour,
+    // which is what unlit moulded plastic looks like. Measured over an albedo sweep, the dim->lit
+    // ratio goes 1.41x (old floor) -> 1.62x -> 1.75x here, against a hard ceiling of 2.01x at
+    // albedo zero; the last stop was rejected because a pure-black unlit lens loses the family's
+    // colour identity entirely, which costs more than the remaining 0.26x buys.
+    //
+    // Roughness was swept alongside and deliberately left alone: 0.55 vs 0.95 moved the ratio by
+    // 0.01x, so the residual floor is not a specular lobe and raising roughness would only flatten
+    // the lens for nothing. qa/lane-inserts.js measures the ratio on every run, so a future edit
+    // that quietly re-raises this floor fails loudly instead of silently costing the board its
+    // state signal.
     function styleInsertLampMat(mat, color, lensTexture) {
-        mat.albedoColor = new BABYLON.Color3(0.042, 0.042, 0.05).add(color.scale(0.09));
+        mat.albedoColor = new BABYLON.Color3(0.008, 0.008, 0.010).add(color.scale(0.016));
         mat.metallic = 0.04;
         mat.roughness = 0.55;
         mat.emissiveTexture = lensTexture;
@@ -4150,7 +4659,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const insertLensTextures = {
             down: createInsertLensTexture(scene, 'ArrowDown', 'down'),
             up: createInsertLensTexture(scene, 'ArrowUp', 'up'),
-            ring: createInsertLensTexture(scene, 'Ring', null)
+            ring: createInsertLensTexture(scene, 'Ring', null),
+            // One per lane FAMILY - see createInsertLensTexture()'s comment for why each family
+            // needs its own silhouette rather than its own colour. Still shared across both
+            // mirrored sides of a family, which is the sharing that actually mattered for memory.
+            flow: createInsertLensTexture(scene, 'Flow', 'flow'),
+            void: createInsertLensTexture(scene, 'Void', 'void'),
+            cycle: createInsertLensTexture(scene, 'Cycle', 'cycle'),
+            ground: createInsertLensTexture(scene, 'Ground', 'ground')
         };
 
         // Shared floor-tint materials for addLaneFloorTint() above - one per lane family (inlane,
@@ -4254,6 +4770,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // for all 4 caps, matching this material's own existing shared-instance design above.
         // No-op until assets/skins/bumpers/bumper-cap.png actually exists (see SKINS.md); the
         // glossy off-white plastic look stays the fallback either way.
+        //
+        // The slot carries an albedoScale (see js/skins.js) specifically so a load here cannot
+        // undo the 0.54/0.58 albedo two lines above. That value is not a default - it is the
+        // hierarchy pass' measured answer to the caps clipping at 255 - and applySkinTexture()'s
+        // plain white reset would discard it, putting artwork on screen ~1.85x brighter than the
+        // fallback it replaced.
+        //
+        // Everything that makes a bumper a bumper is untouched by this call by construction: the
+        // collider and kick live on the parent body mesh (this cap mesh has no physics body at
+        // all), scoring and cooldown live in the hit handler, and pulseBumperLamp() deliberately
+        // flashes only bodyMat/lampMat - never this shared instance, which would light all four
+        // caps at once. A skin can change what the cap looks like and nothing else.
         applySkinTexture(scene, bumperCapMat, SKIN_MANIFEST.bumperCap);
 
         // Machined-metal fixture, distinct from the shared obstacleHousingMat every other rail and
@@ -4478,6 +5006,21 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // material ABOVE, so this call cleanly replaces it when a skin exists rather than
             // racing it. Nothing in this decorative block touches the box's dimensions or the
             // aggregate below, so custom art can never alter the physics.
+            //
+            // Nor can it alter the DROP. updateDropTargetBank() lerps this mesh's position.y
+            // between TARGET_RAISED_Y_M and TARGET_DROPPED_Y_M and reads nothing from the
+            // material; the trigger aggregate below deliberately stays put while the flag sinks.
+            // qa/skin-mission-targets.js stages a real hit and asserts both halves - the flag
+            // reaches the dropped position and the trigger's transform does not move - identically
+            // with and without artwork loaded.
+            //
+            // No albedoScale on these slots, unlike cabinetRails/bumperCap: albedoColor is already
+            // white here (the chakra colour lives in the texture, not the tint - see targetMats
+            // above), so applySkinTexture()'s white reset is a no-op and there is no existing
+            // tuning for a ceiling to protect. What artwork DOES inherit is this material's flat
+            // chakra emissiveColor, by design - see js/skins.js for the per-index values an artist
+            // needs to design around, and createTargetFaceTexture() for why the procedural face
+            // carries no emissive texture of its own.
             applySkinTexture(scene, mesh.material, SKIN_MANIFEST.missionTargetFace[i]);
             mesh.metadata = { kind: 'missionTarget', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
@@ -5184,10 +5727,31 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const reentryLaneMeshes = [];
         REENTRY_LANES.forEach((pos, i) => {
             const laneMat = new BABYLON.PBRMaterial('laneMat' + i, scene);
-            laneMat.albedoColor = new BABYLON.Color3(0.5, 0.5, 0.15);
+            // Insert-legibility pass (user-requested). Two changes, both measured.
+            //
+            // albedoColor 0.5/0.5/0.15 -> a near-black olive. That old value made these the worst
+            // offenders on the board for state readability: rendered in isolation with emissive
+            // zeroed, 85% of an UNLIT lane's brightness was albedo response to the scene lights,
+            // so the lamp system's own 0.12 -> 0.9 swing could only move the rendered lane 1.47-
+            // 1.56x. They read as three permanently-lit olive blocks whether the bank was lit or
+            // not. Same reasoning and same direction as styleInsertLampMat()'s floor above.
+            //
+            // These also had NO symbol at all - three identical untextured boxes marking the
+            // objective of a whole vision (RETURN TO BODY, "COMPLETE THE RE-ENTRY LANES"). They
+            // now carry the family's earth-mark legend on the same emissiveTexture channel every
+            // other insert uses, so the lamp system drives them identically and nothing about
+            // registerLamp()/setLaneLit() changes.
+            laneMat.albedoColor = new BABYLON.Color3(0.028, 0.028, 0.009);
+            laneMat.emissiveTexture = insertLensTextures.ground;
             laneMat.metallic = 0.1;
             laneMat.roughness = 0.4;
             laneMat.alpha = 0.6;
+            // Re-entry lane insert skin slot - the fourth lane family, added alongside the three
+            // that already existed. Emissive like its siblings, for the same reason: a loaded
+            // texture is multiplied by whatever state the lamp system has this lane in, so artwork
+            // can restyle the symbol without ever overriding lit/unlit. No-op until
+            // assets/skins/lanes/lane-insert-reentry.png exists (see SKINS.md).
+            applySkinTexture(scene, laneMat, SKIN_MANIFEST.laneInsertReentry);
 
             const mesh = BABYLON.MeshBuilder.CreateBox('reentryLane' + i, {
                 width: REENTRY_LANE_RADIUS_M * 2,
@@ -5330,10 +5894,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // split just above that already existed for the dev-only trigger overlay.
                 const laneLampColor = laneKind.kind === 'outlane' ? COLOR_OUTLANE_LAMP : COLOR_LANE_LAMP;
                 const lampMat = new BABYLON.PBRMaterial(laneKind.kind + 'LampMat' + laneDef.side, scene);
-                // Arrow points down-table on both: an inlane and an outlane are both lanes the
-                // ball rolls DOWN, toward the flipper and toward the drain respectively, so the
-                // legend marks the direction of travel rather than a shot to aim at.
-                styleInsertLampMat(lampMat, laneLampColor, insertLensTextures.down);
+                // One symbol per family, not one arrow for both. These two lanes sit side by side
+                // and mean opposite things - an inlane returns the ball to a flipper, an outlane
+                // loses it - and until this pass they carried the SAME down-arrow, leaving colour
+                // as the only thing distinguishing "safe" from "drain". The inlane gets a double
+                // chevron (return / flow), the outlane a bold X (danger / void), which is the one
+                // symbol in the set with no curve and no vertical axis.
+                styleInsertLampMat(lampMat, laneLampColor,
+                    laneKind.kind === 'outlane' ? insertLensTextures.void : insertLensTextures.flow);
                 // Lane insert skin slot (visual-architecture pass, user-requested) - shared per
                 // kind (inlane/outlane), both sides. Emissive, not albedo, matching the lamp
                 // system's own emissive-only on/off convention (registerLamp() in main()) - a
@@ -5499,7 +6067,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // Up-table arrow on both orbit inserts: an orbit is a shot you drive UP the lane,
                 // and the entrance insert marking that direction is the cue a player reads when
                 // deciding whether to take it.
-                styleInsertLampMat(lampMat, COLOR_ORBIT_LAMP, insertLensTextures.up);
+                // Cycle ring, not the skill shot's up-arrow. An orbit is a loop the ball travels
+                // around and back, which the skill-shot arrow said nothing about - and sharing that
+                // arrow made two unrelated shot types look like the same call to action.
+                styleInsertLampMat(lampMat, COLOR_ORBIT_LAMP, insertLensTextures.cycle);
                 // Lane insert skin slot (visual-architecture pass, user-requested) - shared by
                 // both orbit trigger kinds (entrance/completion) and both sides, same emissive-
                 // over-the-lamp-system reasoning as the inlane/outlane inserts above. No-op until
@@ -5550,10 +6121,37 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }, scene);
         well.position.set(VISION_GATE_POS.x, -0.005, VISION_GATE_POS.z);
         const wellMat = new BABYLON.PBRMaterial('visionGateWellMat', scene);
-        wellMat.albedoColor = new BABYLON.Color3(0.02, 0, 0.05);
+        // Darker than before (0.02,0,0.05 -> near black) so the throat below actually reads as a
+        // depth gradient. A well floor that is already lit has nothing for a funnel to be darker
+        // than, which is what made the old gate read as a flat marker with a ring around it.
+        wellMat.albedoColor = new BABYLON.Color3(0.008, 0, 0.018);
         wellMat.metallic = 0.1;
         wellMat.roughness = 0.6;
         well.material = wellMat;
+
+        // Portal throat - a cone widening upward from the well floor to the collar, giving the
+        // gate an actual inside. This is the piece that turns "a disc with a ring on it" into
+        // "a hole you could drop a ball into" from a fixed camera that can never look down it:
+        // the cone's inner wall catches light along a curve, so the eye reads a depth cue rather
+        // than a silhouette. Decorative only - no PhysicsAggregate, like the ring and the well,
+        // so nothing here can touch the verified clearances the guard posts define.
+        const throat = BABYLON.MeshBuilder.CreateCylinder('visionGateThroat', {
+            diameterTop: VISION_GATE_COLLAR_RADIUS_M * 2.05,
+            diameterBottom: VISION_GATE_COLLAR_RADIUS_M * 1.7,
+            height: 0.016,
+            tessellation: 24,
+            sideOrientation: BABYLON.Mesh.DOUBLESIDE // seen from outside AND down the inside
+        }, scene);
+        throat.position.set(VISION_GATE_POS.x, 0.001, VISION_GATE_POS.z);
+        const throatMat = new BABYLON.PBRMaterial('visionGateThroatMat', scene);
+        throatMat.albedoColor = new BABYLON.Color3(0.05, 0.012, 0.08);
+        throatMat.metallic = 0.25;
+        throatMat.roughness = 0.42;
+        // The faintest inner glow, an order of magnitude below the rim ring. This is the bottom of
+        // the gate's emissive hierarchy and it is meant to be barely-there: it says "something is
+        // lit down there" without competing with the rim that defines the portal's edge.
+        throatMat.emissiveColor = COLOR_VISION_GATE.scale(0.07);
+        throat.material = throatMat;
 
         // Glowing rim ring - decorative only (see the block comment above), but the visual "this
         // is a real fixture, not a flat marker" cue, and the mesh startVisionGateCapture()'s
@@ -5572,21 +6170,97 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         ring.position.set(VISION_GATE_POS.x, 0.01, VISION_GATE_POS.z);
         ring.rotation.x = Math.PI / 2; // lay flat against the table plane
 
+        // Outer collar - a second, wider, DIMMER torus outside the rim ring. Two concentric rings
+        // at different brightnesses is what gives a flat table fixture an apparent depth: the eye
+        // reads the bright inner rim as the portal's mouth and the dim outer band as the housing
+        // it is set into, which a single ring can only ever say is "a circle drawn on the floor".
+        // Deliberately the DIMMEST lit element here (0.13 against the rim's 0.4) - it is structure,
+        // not signal, and the emissive hierarchy this pass establishes runs
+        // throat 0.07 < collar 0.13 < rim 0.40 < halo 0.30(spectral) < beacon 0.55.
+        // Tessellation 16, not the 28 this started at. A torus costs tessellation-squared
+        // triangles and these render about 20px across: measured, 28 cost 1682 triangles to draw
+        // a shape whose polygonal edges are sub-pixel either way. 16 is ~550 for the same picture.
+        const collar = BABYLON.MeshBuilder.CreateTorus('visionGateCollar', {
+            diameter: VISION_GATE_COLLAR_RADIUS_M * 3.35,
+            thickness: 0.0042,
+            tessellation: 16
+        }, scene);
+        collar.position.set(VISION_GATE_POS.x, 0.007, VISION_GATE_POS.z);
+        collar.rotation.x = Math.PI / 2;
+        const collarMat = new BABYLON.PBRMaterial('visionGateCollarMat', scene);
+        collarMat.albedoColor = COLOR_VISION_GATE.scale(0.45);
+        collarMat.metallic = 0.55;
+        collarMat.roughness = 0.3;
+        collarMat.emissiveColor = COLOR_VISION_GATE.scale(0.13);
+        collar.material = collarMat;
+
+        // Spectral halo - the one moving part of the idle gate. A thin torus tilted off the table
+        // plane and rotated slowly about Y, so it reads as energy circling the mouth rather than
+        // as another static ring. Tilted deliberately: a flat ring spinning about its own axis is
+        // invisible (a circle of revolution maps to itself), so the tilt is what makes the motion
+        // legible at all from a fixed camera.
+        //
+        // This is the whole of the "subtle rotating energy" budget - one mesh, one rotation write
+        // per frame in updateVisionGateIdle(), and NO particle system. An idle emitter running
+        // forever on a fixture the ball visits a few times a game is exactly the constant particle
+        // spam this pass was asked to avoid; the particles stay where they earn their cost, on the
+        // capture itself.
+        // Performance tier (user-requested): the halo is the one purely-ambient piece of this
+        // fixture - it carries no state, marks no shot, and exists only to make an idle gate feel
+        // alive - so it is also the one piece a low-tier device can simply not have. Skipping it
+        // there drops a mesh, a material and the per-frame rotation/colour writes in
+        // updateVisionGateIdle(), which no-ops cleanly on a null halo. Everything that carries
+        // MEANING - the rim, collar, throat, beacon, and the whole capture sequence - is built on
+        // every tier, because dropping those would change what the board tells the player.
+        const halo = detectHighFidelity() ? BABYLON.MeshBuilder.CreateTorus('visionGateHalo', {
+            diameter: VISION_GATE_COLLAR_RADIUS_M * 2.15,
+            thickness: 0.0028,
+            tessellation: 16
+        }, scene) : null;
+        if (halo) {
+            halo.position.set(VISION_GATE_POS.x, 0.016, VISION_GATE_POS.z);
+            halo.rotation.x = Math.PI / 2 - 0.38; // tilted off the table plane so the spin reads
+            const haloMat = new BABYLON.PBRMaterial('visionGateHaloMat', scene);
+            haloMat.albedoColor = new BABYLON.Color3(0, 0, 0); // unlit: this is energy, not a surface
+            haloMat.metallic = 0;
+            haloMat.roughness = 1;
+            haloMat.emissiveColor = COLOR_VISION_GATE.scale(0.30);
+            haloMat.alpha = 0.85;
+            halo.material = haloMat;
+        }
+
         // Vertical light beacon - a thin, tall emissive-only spire standing up from the gate,
         // reading clearly against the open dark sky above the table instead of competing with
         // the crowded playfield at the gate's own height. Same material/color-cycle target as the
         // ring (see startVisionGateCapture()) - between the two, the gate is identifiable from
         // across the whole board, not just up close.
+        // Reworked from a flat-topped solid cylinder into a tapered shaft that fades out. The old
+        // one measured (board-graphics audit) as a 7x130px hard-edged bar punching through Saturn
+        // and 50px above the top rail into empty starfield - a beam of light that ends in a
+        // straight cut across the sky reads as a missing polygon, not as light.
+        //
+        // Three changes, all presentation: the height comes down 0.16 -> 0.115 so the shaft stays
+        // over the board instead of running off the top of the frame; diameterTop narrows to a
+        // near-point so it tapers; and createGateBeaconTexture()'s vertical gradient carries the
+        // brightness AND the alpha, so it actually dissolves at its far end. backFaceCulling off
+        // because a translucent shaft seen from outside should show its far wall through its near
+        // one - that is what gives a volumetric beam its density.
         const beacon = BABYLON.MeshBuilder.CreateCylinder('visionGateBeacon', {
-            diameter: 0.006,
-            height: 0.16,
-            tessellation: 12
+            diameterTop: 0.0016,
+            diameterBottom: 0.0092,
+            height: 0.115,
+            tessellation: 14
         }, scene);
-        beacon.position.set(VISION_GATE_POS.x, 0.08, VISION_GATE_POS.z);
+        beacon.position.set(VISION_GATE_POS.x, 0.0575, VISION_GATE_POS.z);
         const beaconMat = new BABYLON.PBRMaterial('visionGateBeaconMat', scene);
-        beaconMat.albedoColor = COLOR_VISION_GATE;
-        beaconMat.emissiveColor = COLOR_VISION_GATE.scale(0.5);
-        beaconMat.alpha = 0.55; // translucent - reads as a beam of light, not a solid post
+        beaconMat.albedoColor = new BABYLON.Color3(0, 0, 0); // unlit: this is light, not a surface
+        beaconMat.metallic = 0;
+        beaconMat.roughness = 1;
+        beaconMat.emissiveColor = COLOR_VISION_GATE.scale(0.62);
+        beaconMat.emissiveTexture = createGateBeaconTexture(scene);
+        beaconMat.opacityTexture = beaconMat.emissiveTexture; // same curve drives the fade-out
+        beaconMat.alpha = 0.72;
+        beaconMat.backFaceCulling = false;
         beacon.material = beaconMat;
         ring.material = visionGateMat;
 
@@ -6017,7 +6691,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return {
             missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
             sideLaneLampMeshes, orbitLampMeshes, debugTriggerMeshes,
-            kickbackLampMesh, ballSaveLampMesh, saturnRings, saturnRim, cometTailMeshes, powerUpMesh, visionGateMesh: ring
+            kickbackLampMesh, ballSaveLampMesh, saturnRings, saturnRim, cometTailMeshes, powerUpMesh, visionGateMesh: ring,
+            visionGateHalo: halo, visionGateCollarMesh: collar, visionGateThroat: throat, visionGateBeacon: beacon
         };
     }
 
@@ -6265,7 +6940,22 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // that id from this point on, never its mesh/material directly.
         const lampSystem = createLampSystem();
         obstacles.missionTargetLamps.forEach((mesh, i) => {
-            lampSystem.registerLamp('missionTarget' + i, mesh, COLOR_CHAKRA[i % COLOR_CHAKRA.length], LAMP_MODE.ON);
+            // dimScale raised well above the 0.12 default (first-play readability pass). These
+            // lamps now PULSE whenever no vision is running - see syncMissionTargetLamps() below -
+            // and a pulse that troughs at the standard 0.12 reads as a lamp cutting out rather
+            // than as a target inviting a shot. 0.45 breathes instead of blinking. ON mode is
+            // unaffected: that uses litScale, which is untouched.
+            // Registered PULSE, not ON, and that is the boot state rather than a default worth
+            // overriding later: a fresh game always starts with no vision active, so the very
+            // first thing a new player sees is the three targets inviting a shot.
+            //
+            // Deliberately NOT a syncMissionTargetLamps() call here even though that would read
+            // more symmetrically - `mission` is declared further down this same function, so
+            // calling the helper at registration time would read it inside its temporal dead zone
+            // and throw at boot. Registering the correct starting mode directly avoids needing
+            // the helper before the state it reads exists.
+            lampSystem.registerLamp('missionTarget' + i, mesh, COLOR_CHAKRA[i % COLOR_CHAKRA.length],
+                LAMP_MODE.PULSE, { dimScale: 0.45 });
         });
         obstacles.reentryLaneMeshes.forEach((mesh, i) => {
             lampSystem.registerLamp('reentryLane' + i, mesh, COLOR_MISSION_ACTIVE, LAMP_MODE.OFF);
@@ -6381,6 +7071,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // its whole extent, and a long thin cone bloomed along its length stops being a tail and
         // becomes a beam. Their own alpha already gives them the soft edge they need.
         obstacles.cometTailMeshes.forEach((m) => glowLayer.addExcludedMesh(m));
+        // Note for anyone reaching for addExcludedMesh() to dim the shot callouts: it does the
+        // opposite. Measured on this scene, excluding them made the glyphs themselves BRIGHTER
+        // (SKILL SHOT +53%, VISION GATE +18%, TARGETS +15%, KICKBACK +14%) against a run-to-run
+        // noise floor of +/-0-2% on static scenery. The halo goes away and the core comes up, so
+        // the thing the eye actually lands on gets louder, not quieter. They are dimmed at the
+        // source instead - see LABEL_SIGNAGE_EMISSIVE_LEVEL in createLabelPlane().
 
         // Hoisted to a `let` (not a const declared only inside the if-block) so the dev HUD's
         // "post-processing" checkbox (below, once devMode is confirmed) can toggle
@@ -6489,11 +7185,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // DefaultRenderingPipeline color-grade pulse - works identically regardless of
         // detectHighFidelity(), where the pipeline doesn't exist at all on low-tier devices.
         const flashOverlay = document.getElementById('flash-overlay');
-        function flashScreen(durationMs, r, g, b) {
+        // peakOpacity is optional and defaults to the 0.5 this had before it existed, so the drain
+        // flash below is byte-identical. The ASCENSION beat passes a much lower peak deliberately:
+        // a drain can white the screen out because the ball is already gone, but an ascension
+        // fires mid-play with the ball still live, and a half-opacity veil over a moving ball is
+        // exactly the "affects ball visibility" problem this game keeps guarding against.
+        function flashScreen(durationMs, r, g, b, peakOpacity) {
             if (window.SPIRITBALL_reducedMotion) return;
             flashOverlay.style.background = 'rgb(' + (r ?? 255) + ',' + (g ?? 255) + ',' + (b ?? 255) + ')';
             flashOverlay.style.transition = 'none';
-            flashOverlay.style.opacity = '0.5';
+            flashOverlay.style.opacity = String(peakOpacity ?? 0.5);
             void flashOverlay.offsetWidth; // force a reflow so the transition below animates from 0.5, not skips straight to 0
             flashOverlay.style.transition = 'opacity ' + durationMs + 'ms ease-out';
             flashOverlay.style.opacity = '0';
@@ -6517,12 +7218,34 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const plunger = createPlunger(scene, plungerMat);
 
         // CONFIG.colors.flipper (0xff00ff) - already an exact match for the placeholder color
-        // used since Stage 4, now upgraded to a proper emissive-glass PBR material.
+        // used since Stage 4, then an emissive-glass PBR material, now a painted premium bat.
+        // See createFlipperBatTextures() for the face itself and the measured UV layout it is
+        // drawn against; everything below is the material tuning that face needs.
+        //
+        // ONE material instance for both bats, unchanged - that plus their identical local-space
+        // mesh offset is what makes left/right symmetry structural rather than maintained.
         const flipperMat = new BABYLON.PBRMaterial('flipperMat', scene);
-        flipperMat.albedoColor = COLOR_FLIPPER;
-        flipperMat.metallic = 0.4;
-        flipperMat.roughness = 0.4;
-        flipperMat.emissiveColor = COLOR_FLIPPER.scale(0.5);
+        const flipperBat = createFlipperBatTextures(scene);
+        // White, because the bat texture bakes its own colour - the same reason every other
+        // textured material in this file (targets, cabinet rails, bumper caps) sets white here.
+        // Leaving COLOR_FLIPPER on would multiply the magenta twice and crush the face to mud.
+        flipperMat.albedoColor = new BABYLON.Color3(1, 1, 1);
+        flipperMat.albedoTexture = flipperBat.albedo;
+        // 0.4 -> 0.25 metallic and 0.4 -> 0.3 roughness: a flipper bat is moulded plastic over a
+        // metal core, and the old values gave it a half-metal response that flattened the printed
+        // face. Tighter roughness is what lets the painted gloss streak actually catch a highlight.
+        flipperMat.metallic = 0.25;
+        flipperMat.roughness = 0.30;
+        // THE BALL-PROMINENCE CHANGE. This was a flat COLOR_FLIPPER.scale(0.5) applied to every
+        // pixel of the bat, which is what made it a glowing tube and what threw the bloom halo
+        // that the audit found landing on the lane inserts rather than on the flippers. It is now
+        // multiplied by an emissive texture that is BLACK over the rubber, low grey over the body
+        // and bright only on the eye, hinge collar and keylines - so the mean emissive across the
+        // bat falls sharply while the detail that should read still punches. The scalar is raised
+        // to 0.62 precisely because the texture removes so much: 0.62 x a mostly-dark map is far
+        // less total light than 0.5 x solid white.
+        flipperMat.emissiveColor = COLOR_FLIPPER.scale(0.62);
+        flipperMat.emissiveTexture = flipperBat.emissive;
 
         // REAL-MACHINE FLIPPER MOUNTING - see FLIPPER_PIVOT_X_M's "MOUNTING LAYOUT" comment in
         // config.js for the full root-cause story of why the flippers kept "feeling backwards"
@@ -6887,9 +7610,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Space mid-pause produced backglass.state.message === 'LAUNCH!' while the pause overlay
         // was still showing.
         function handleLaunchRelease() {
-            // Gameplay-QA regression fix: drainTimeoutHandle !== null means a real drain just
-            // happened but resetBallToPlunger() hasn't run yet (see handleDrain()'s own two
-            // setTimeout branches) - the ball is still wherever it physically landed (mid-fall,
+            // Gameplay-QA regression fix: a drain just happened but resetBallToPlunger() hasn't
+            // run yet - the ball is still wherever it physically landed (mid-fall,
             // well below the table), not at the plunger. Without this guard, a launch input
             // landing in that window fired a full "launch" (message/shake/sound/haptic, armed
             // skill shot/ball save) from that stale sub-table position, which the pending reset
@@ -6898,9 +7620,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // by qa/regression-suite.js's "CONCRETE BUG" test. Doesn't affect the deliberately
             // supported "held Space through a drain, released after" case (archive/release-
             // prompts/13-*.md, see the comment above handleLaunchPress()) - by the time a real
-            // release happens after the reset has actually completed, drainTimeoutHandle is
-            // already back to null.
-            if (ballInPlay || isPaused || drainTimeoutHandle !== null) return;
+            // release happens after the reset has actually completed, both flags are already back
+            // to their idle values.
+            //
+            // Two flags because there are two such windows, and after the end-of-ball pass they
+            // no longer overlap: drainTimeoutHandle is the BALL SAVED return delay (still a
+            // timer), endOfBall.active is a real drain's end-of-ball sequence (no timer at all). The sequence clears itself in the same statement
+            // that returns the ball to the plunger (finishEndOfBallSequence()), so this blocks a
+            // stale-position launch for exactly as long as the ball is genuinely still down the
+            // drain, and not one frame into the NEXT BALL message - the player can launch through
+            // that message, which is the point of it not being a beat.
+            if (ballInPlay || isPaused || drainTimeoutHandle !== null || endOfBall.active) return;
             if (!plungerCharging) {
                 plungerPower = PLUNGER_MIN_POWER_MS;
             }
@@ -7488,8 +8218,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 missionHudName.textContent = backglass.state.missionName;
                 missionHudProgress.textContent = backglass.state.missionProgress + '/' + backglass.state.missionRequired;
                 missionHud.hidden = false;
+                backglass.state.idleHint = null; // the window belongs to the running vision now
             } else {
                 missionHud.hidden = true;
+                // First-play readability (user-requested). One short instruction in the backglass
+                // slot that would otherwise read "NONE ACTIVE", picked from the state the player
+                // is actually in. No tutorial page, no timers, no new UI - this is the existing
+                // window saying something useful instead of something empty.
+                //
+                // The two states a new player gets stuck in are the two answered here: a ball
+                // sitting on the plunger with no idea it needs launching (the title screen said
+                // so, but that screen is gone by the time it matters), and a ball in play with no
+                // idea that hitting a target is what starts a vision.
+                //
+                // Wording follows document.documentElement.dataset.touchControls rather than a
+                // media query of its own, because that attribute is this file's authoritative
+                // answer to "which controls can the player actually SEE right now" (see
+                // updateMobileControlsVisibility()'s comment on why a coarse-pointer query gives
+                // the wrong answer at small desktop widths). Sharing it means this hint and the
+                // title screen's control hint cannot contradict each other.
+                const touch = document.documentElement.dataset.touchControls === 'on';
+                backglass.state.idleHint = ballInPlay
+                    ? 'HIT A LIT TARGET'
+                    : (touch ? 'HOLD LAUNCH BUTTON' : 'HOLD SPACE TO LAUNCH');
             }
 
             effectBallSave.hidden = !ballSave.active;
@@ -7547,8 +8298,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // exactly as it already does) as a rapid, visible count-up on the backglass. Calls
         // `onComplete` once the whole sequence (including reduced-motion's single-step version)
         // has finished, so handleDrain()'s normal life/game-over flow can continue.
+        // The one definition of "what is this ball's bonus worth". Extracted so the end-of-ball
+        // sequence below can ask whether there is a bonus to pay - it needs to know BEFORE
+        // calling startBonusCount(), because a zero bonus resolves synchronously and would
+        // otherwise complete the BONUS beat inside the call that started it. A read, never a
+        // payout: startBonusCount() is still the only thing in this file that moves these points
+        // into the score.
+        function pendingBonusTotal() {
+            return ballBonus.points * ballBonus.multiplierX;
+        }
+
         function startBonusCount(onComplete) {
-            const total = ballBonus.points * ballBonus.multiplierX;
+            const total = pendingBonusTotal();
             if (total <= 0) {
                 onComplete();
                 return;
@@ -7580,8 +8341,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Called every frame (render loop, gated by !isPaused like updatePowerUp()/
         // updateDropTargetBank()) while a count is running. `ticksRemaining <= 0` covers two
         // cases the same way: the reduced-motion single-step already ran in startBonusCount()
-        // above, or the normal tick loop just finished its last tick and its "BONUS AWARDED"
-        // dwell time has now elapsed - either way, time to finish.
+        // above, or the normal tick loop just finished its last tick and BONUS_COUNT_HOLD_MS of
+        // holding the completed total has now elapsed - either way, time to finish.
         function updateBonusCount(deltaMs) {
             if (!bonusCount.active) return;
             bonusCount.remainingMs -= deltaMs;
@@ -7617,11 +8378,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // "BONUS x{multiplierX}" message already claims.
             addScore(step, false);
             playBonusTickSound();
+            // The last tick holds the same climbing-number format every other tick uses, not the
+            // words 'BONUS AWARDED' it used to swap in. That swap threw away the one number the
+            // count-up existed to show: ticks 1-15 walked the total upward and the tick that
+            // finally landed it replaced the digits with a label, so the completed bonus was the
+            // only value in the sequence a player never actually got to read. Keeping the format
+            // makes the whole beat one number settling on its final value and holding there,
+            // which is also its own "this is finished" signal - the digits stop moving.
             backglass.showMessage(
-                isLastTick ? 'BONUS AWARDED' : 'BONUS x' + bonusCount.multiplierX + ': ' + bonusCount.awarded.toLocaleString(),
-                isLastTick ? 500 : BONUS_COUNT_TICK_MS + 60
+                'BONUS x' + bonusCount.multiplierX + ': ' + bonusCount.awarded.toLocaleString(),
+                isLastTick ? BONUS_COUNT_HOLD_MS + 120 : BONUS_COUNT_TICK_MS + 60
             );
-            bonusCount.remainingMs = isLastTick ? 500 : BONUS_COUNT_TICK_MS;
+            bonusCount.remainingMs = isLastTick ? BONUS_COUNT_HOLD_MS : BONUS_COUNT_TICK_MS;
         }
 
         // Power-up orb (board redesign): collectPowerUp() runs when the ball hits it while active
@@ -7717,6 +8485,31 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             triggerCameraPunch(400, cameraForwardDir.scale(0.012));
             playVisionGateSound();
             spawnHitBurst(scene, particleTexture, obstacles.visionGateMesh, highFidelity);
+            // Capture flash (gate-polish pass, user-requested - "dramatically brighter only during
+            // capture"). Two beats on top of the glow boost and colour cycle that were already
+            // here, both reusing existing helpers rather than adding an effect system:
+            //
+            // A brief violet screen wash, at the same restrained peak the ASCENSION beat uses -
+            // enough to register as the board firing, well short of a white-out. flashScreen()
+            // already no-ops under reduced motion, so no guard is needed here.
+            flashScreen(240, 170, 60, 255, 0.20);
+            // And a physical snap on the portal itself: the whole ring assembly pops outward,
+            // which is what sells the gate as a mouth that just swallowed something rather than a
+            // lamp that changed colour. pulseMesh() is the file's existing tested hit reaction
+            // (scale + emissive flash, self-restoring), so the gate borrows the same motion
+            // vocabulary every bumper and target already speaks.
+            //
+            // The COLLAR is the primary and the rim ring rides along as an extra, which is the
+            // opposite of the obvious wiring and is deliberate. pulseMesh() flashes its primary's
+            // emissive to white and restores the value it cloned ~100ms later; on the rim ring
+            // that clone is taken before startVisionGateColorCycle()'s first step lands, so the
+            // restore would drag the ring back to its REST colour mid-sequence and hold it there
+            // until the next cycle step - a visible dip to dim, 100ms into the brightest moment
+            // the gate has. Extras get the scale half only and never have their emissive touched,
+            // so wiring it this way keeps the ring's colour wholly owned by the cycle while the
+            // pop still reads across the whole assembly.
+            pulseMesh(obstacles.visionGateCollarMesh, 1.22,
+                [obstacles.visionGateMesh, obstacles.visionGateHalo].filter(Boolean));
             // buildChakraSparkle() already no-ops (returns null) under reduced motion - no extra
             // guard needed here, just the null-check before disposing it later.
             visionGate.sparkle = buildChakraSparkle(scene, particleTexture, obstacles.visionGateMesh, highFidelity);
@@ -7848,19 +8641,187 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             ball.mesh.position.set(VISION_GATE_POS.x, BALL_REST_Y_M, VISION_GATE_POS.z - 0.03);
             body.setLinearVelocity(new BABYLON.Vector3(-0.05, 0, -VISION_GATE_EJECT_SPEED_MS));
             clampBodySpeed(body, MAX_BALL_SPEED_MS);
+
+            // Eject feedback (gate-polish pass, user-requested). Until this pass the eject was
+            // visually silent: the capture built to a colour-cycling, glowing, particle-throwing
+            // crescendo and then the ball simply reappeared moving, with the gate dropping back to
+            // rest in the same frame. The moment the ball is actually returned to play is the
+            // payoff of the whole sequence and it had no beat of its own.
+            //
+            // Deliberately SMALLER than the capture, in every channel - a shorter, dimmer flash, a
+            // gentler pulse, a lighter punch. The capture is the event; this is the release, and
+            // matching their intensities would flatten the arc the capture spends 1.8s building.
+            // Ordered after the physics above so nothing here can be blamed for the eject vector.
+            flashScreen(160, 150, 70, 255, 0.11);
+            // Collar as primary again, for the same ownership reason as the capture pulse above -
+            // here the rim ring has just been handed back to the lamp system by
+            // cancelVisionGateCapture(), and an emissive flash on it would be fighting updateLamps()
+            // instead of the colour cycle. Same hazard, same fix.
+            pulseMesh(obstacles.visionGateCollarMesh, 1.12,
+                [obstacles.visionGateMesh].filter(Boolean));
+            spawnHitBurst(scene, particleTexture, obstacles.visionGateMesh, highFidelity,
+                COLOR_VISION_GATE, 'visionGateEjectBurst');
+            // A short punch along the ball's own exit direction (-Z, the gate's open mouth), so
+            // the camera reads as being shoved by the ball leaving rather than by a generic event.
+            // Magnitude 0.0054 against the capture's 0.012 - looked at, not assumed. The first
+            // version was 0.0108, which is 90% of the capture's punch and made the release read as
+            // a second event of equal weight rather than as the tail of the first one.
+            triggerCameraPunch(200, new BABYLON.Vector3(0, 0.002, -0.005));
         }
 
         // Selects AND starts a mission in one action (see MISSION_DEFS' comment for why) -
         // triggered by hitting a mission target while no mission is active.
+        // First-play readability (user-requested - "lamp highlighting"). The three mission targets
+        // were registered LAMP_MODE.ON and never changed mode again, so they sat statically lit
+        // and were indistinguishable from the board's decoration. They are the entry point to the
+        // entire vision system and nothing on the table said so.
+        //
+        // They now pulse while no vision is running - the lamp system's existing invitation mode,
+        // driven by the mode it already supports - and go steady once a vision is active, so the
+        // invitation stops the moment it has been taken up. That inversion is the point: a pulse
+        // that never stops is decoration, and a pulse that stops when you obey it is instruction.
+        //
+        // Under reduced motion updateLamps() already slows the pulse period rather than removing
+        // it (see LAMP_BLINK_PERIOD_MS' own comment on why a lamp's state is real information),
+        // so this needs no reduced-motion branch of its own.
+        function syncMissionTargetLamps() {
+            const inviting = mission.state !== 'active';
+            for (let i = 0; i < obstacles.missionTargetLamps.length; i++) {
+                lampSystem.setLampMode('missionTarget' + i, inviting ? LAMP_MODE.PULSE : LAMP_MODE.ON);
+            }
+        }
+
+        // Vision-selection feedback (user-requested - "player should understand what to hit next
+        // within ~1 second"). Selecting a vision used to change only TEXT: a 900ms backglass
+        // message, the VISION window, and the mission HUD. Nothing on the PLAYFIELD moved, so the
+        // objective's own hardware - the thing the player now has to aim at - looked exactly as it
+        // had a moment earlier, and "HIT THE POP BUMPERS" left them hunting for which lumps on the
+        // table were pop bumpers.
+        //
+        // This lights the objective's elements once, briefly, right after selection. Deliberately
+        // ONE sweep and then nothing: a persistent marker on live gameplay hardware is the
+        // permanent-arrow clutter this pass was told not to create, and the backglass window +
+        // mission HUD already carry the objective for as long as it is running.
+        //
+        // Every branch reuses a mechanism this file already had, rather than inventing a cue
+        // system: lanes go through the lamp system's own flashLamp() (tick-driven, so it cannot
+        // fire while paused and leave a lamp stuck bright - see its own comment), and bumpers go
+        // through pulseBumperLamp(), the exact emissive lift a real bumper hit already uses.
+        //
+        // The comet gets the same emissive-lift treatment written out, NOT pulseMesh(), and that
+        // is a deliberate avoidance rather than an inconsistency: pulseMesh() scales the mesh, and
+        // the comet is the one objective element carrying a physics body with an explicit collision
+        // radius. Scaling it would be a mechanics change on a pass that is not allowed one.
+        function cueMissionObjective(index) {
+            const type = MISSION_DEFS[index].type;
+            if (type === 'lane') {
+                for (let i = 0; i < obstacles.reentryLaneMeshes.length; i++) {
+                    lampSystem.flashLamp('reentryLane' + i, MISSION_CUE_MS, COLOR_MISSION_ACTIVE);
+                }
+                return;
+            }
+            if (type === 'bumper') {
+                // The shared CAP material, not each bumper's own bodyMat/lampMat, and that choice
+                // fixes a real bug rather than being a stylistic preference. pulseBumperLamp() -
+                // the hit reaction - saves and restores exactly those per-bumper materials on a
+                // 90ms timer. Two independent save/restore pairs on one material do not compose:
+                // a bumper hit landing in the last 90ms of a 620ms cue would snapshot the LIFTED
+                // value, the cue would then restore the true rest value, and the hit's own restore
+                // would fire afterwards and put the lifted value back - leaving that bumper stuck
+                // bright until something else happened to write it.
+                //
+                // bumperCapMat is written once at construction and never again; the hit reaction
+                // deliberately excludes it (flashing one shared instance would light all four caps
+                // at once - see its own comment). For a HIT that is a bug, but for a CUE meaning
+                // "hit the pop bumpers, all of them" it is exactly the right semantics, and it
+                // leaves the hit reaction's materials entirely alone.
+                liftEmissive([scene.getMaterialByName('bumperCapMat')],
+                    new BABYLON.Color3(0.38, 0.38, 0.45));
+                return;
+            }
+            if (type === 'comet') {
+                const comet = scene.getMeshByName('comet');
+                // The comet's resting emissive is near-black - it is the board's one deliberately
+                // unlit feature - so a multiplier does nothing useful here and it is lifted to an
+                // absolute value instead.
+                liftEmissive([comet && comet.material], COLOR_COMET.scale(0.55));
+            }
+        }
+
+        // Briefly lifts a set of materials' emissive and puts it back. Written out rather than
+        // reusing pulseBumperLamp() for the bumper branch above, even though that helper does
+        // exactly this shape, because its 90ms is the duration of a BUMPER HIT REACTION - and a
+        // cue is not a hit. Measured on the first version, borrowing it gave the bumpers a 90ms
+        // blink against the lanes' 620ms, so the one objective a new player is most likely to be
+        // shown first was also the one whose cue was easiest to miss. Sharing the helper would
+        // also mean any future retune of the hit reaction silently retimes this.
+        //
+        // The restore is a plain setTimeout, unlike the lamp system's tick-driven flashLamp(). A
+        // pause landing inside the window leaves the element lit under the overlay for the
+        // remainder, then restores on schedule - timers are not pause-gated, so this self-heals
+        // rather than sticking. At MISSION_CUE_MS that is at most a few hundred milliseconds of a
+        // brighter bumper behind a pause menu, which is not worth a second timer system.
+        //
+        // Re-entrancy is handled explicitly rather than assumed away. Two overlapping lifts on one
+        // material do not compose: the second would snapshot the already-LIFTED value as its
+        // "rest", and whichever restore ran last would leave the material stuck bright. That is
+        // not hypothetical - it is exactly the bug that moved the bumper cue off the hit
+        // reaction's materials, and completing a vision and immediately selecting the same one
+        // again inside MISSION_CUE_MS would reach it a second way. liftPending keeps the FIRST
+        // snapshot as the authority and lets a later lift only re-arm the timer, so the material
+        // always lands back on the value it had before any cue touched it.
+        const liftPending = new Map(); // material -> { rest: Color3, timer }
+        // Takes an absolute colour rather than a multiplier, deliberately. A multiplier is the
+        // obvious signature and it is the wrong one here: the three cued surfaces rest at wildly
+        // different levels (the bumper caps at 0.20, the comet near black, the lanes at their dim
+        // 0.12), so the same factor would produce three different brightnesses and the cue would
+        // read as three different events. Absolute targets land all three within 1.0-1.25, which
+        // is what makes "this is the cue" recognisable across objectives.
+        function liftEmissive(materials, absoluteColor) {
+            const targets = materials.filter((m) => m && m.emissiveColor);
+            if (!targets.length) return;
+            targets.forEach((m) => {
+                const existing = liftPending.get(m);
+                // Only snapshot when nothing is already holding this material's true rest value.
+                const rest = existing ? existing.rest : m.emissiveColor.clone();
+                if (existing) clearTimeout(existing.timer);
+                m.emissiveColor = absoluteColor.clone();
+                const timer = setTimeout(() => {
+                    liftPending.delete(m);
+                    if (m.emissiveColor) m.emissiveColor.copyFrom(rest);
+                }, MISSION_CUE_MS);
+                liftPending.set(m, { rest, timer });
+            });
+        }
+
         function startMission(index) {
             mission.state = 'active';
             mission.selectedIndex = index;
             mission.progress = 0;
             mission.required = missionRequiredCount(mission.rank);
+            syncMissionTargetLamps(); // invitation taken up - the targets stop pulsing
             backglass.state.missionName = MISSION_DEFS[index].name;
             backglass.state.missionProgress = 0;
             backglass.state.missionRequired = mission.required;
-            backglass.showMessage('MISSION: ' + MISSION_DEFS[index].name, 900);
+            // Name AND objective (user-requested). One string, not a second showMessage() call:
+            // showMessage() has no queue, so a follow-up would just silently overwrite this one
+            // (see its own comment). The trailing colon after the name is what makes
+            // drawMessage()'s greedy two-line wrap break exactly on the name/objective boundary
+            // for all three visions - measured; a dash or a slash there orphans the separator at
+            // the start of line 2. See MISSION_DEFS for the full surface-by-surface measurement,
+            // including why the steady VISION window and #mission-hud do NOT carry this.
+            // 900 -> 1400ms. The brief is that a player understands what to hit next within about
+            // a second, and this single message carries BOTH the vision's name and its objective
+            // across two wrapped lines - 900ms to read two lines and then look at the table for the
+            // cue below is not a second's worth of reading, it is a glimpse. The wrap itself is
+            // unchanged; only the dwell is longer.
+            backglass.showMessage(
+                'VISION: ' + MISSION_DEFS[index].name + ': ' + MISSION_DEFS[index].objective,
+                MISSION_SELECT_MESSAGE_MS
+            );
+            // Light the objective's own hardware, once, so the text above has something on the
+            // table to point at. Runs last so it lands with the message rather than before it.
+            cueMissionObjective(index);
         }
 
         // Called from the hit handlers below with the scoring category that just happened
@@ -7881,27 +8842,78 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.state = 'idle';
             mission.selectedIndex = null;
             mission.progress = 0;
-            // Bug fix (playtest audit): at max rank (Fleet Admiral), mission.rank was already
-            // capped by this same Math.min() below, but the message always read "RANK UP: Fleet
-            // Admiral" regardless - misleading every time a mission completed after reaching max
-            // rank, since no rank-up actually happened. Confirmed via a forced-max-rank Playwright
-            // test. Now only shown when the rank index genuinely changed.
+            syncMissionTargetLamps(); // back to inviting the next vision
+            // Bug fix (playtest audit): at the top rank (index RANK_NAMES.length - 1), mission.rank
+            // was already capped by this same Math.min() below, but the message still read
+            // "ASCENSION: <top state>" regardless - misleading every time a vision completed after
+            // reaching max rank, since no rank-up actually happened. Confirmed via a forced-max-
+            // rank Playwright test. Now only shown when the rank index genuinely changed. (Written
+            // against the old naval ladder, where the top rank was 'Fleet Admiral'; the ladder has
+            // since been rethemed - see RANK_NAMES - and the index arithmetic is what matters.)
             const rankedUp = mission.rank < RANK_NAMES.length - 1;
             mission.rank = Math.min(mission.rank + 1, RANK_NAMES.length - 1);
             stats.missionsCompleted++;
             backglass.state.missionName = null;
             backglass.state.missionProgress = 0;
             backglass.state.rank = RANK_NAMES[mission.rank];
+            backglass.state.rankColor = STATE_COLORS[mission.rank];
             addScore(MISSION_COMPLETE_BONUS);
             // Bonus/multiplier subsystem (user-requested) - a "substantial" contribution to the
             // hidden end-of-ball pool, on top of (not instead of) the immediate MISSION_COMPLETE_
             // BONUS above. Doesn't touch mission/rank state or messaging at all - purely additive.
             ballBonus.points += BONUS_MISSION_COMPLETE_AMOUNT;
-            backglass.showMessage(rankedUp ? 'RANK UP: ' + RANK_NAMES[mission.rank] : 'MISSION COMPLETE!', 1600);
-            // A stronger beat than any regular hit's - completing a mission and ranking up is the
-            // single biggest moment the game currently has, deserves to read as one.
+            // Two beats, one slot, chosen by which one actually happened (see rankedUp above).
+            // A normal completion IS the progression - it is what advanced the state - so it
+            // announces the state gained. At the top of the ladder there is no state left to
+            // gain, so it names the thing that WAS gained instead of repeating a state the
+            // player already has. Was 'VISION COMPLETE!'; there is deliberately no plain
+            // "vision complete" message, because every completion is one or the other of these.
+            const stateHex = STATE_COLORS[mission.rank];
+            backglass.showMessage(
+                rankedUp ? 'ASCENSION: ' + RANK_NAMES[mission.rank] : 'INSIGHT GAINED',
+                1600,
+                // Tinted with the state being announced - the one moment the ladder's colour is
+                // worth spending attention on. INSIGHT GAINED takes the top state's colour since
+                // that is the state the player is sitting at when it fires.
+                stateHex
+            );
+            // A stronger beat than any regular hit's - completing a vision and ascending is the
+            // single biggest moment the game currently has, deserves to read as one. Camera shake
+            // and punch are unchanged; the two additions below are what lift it above an ordinary
+            // hit, and every piece is an existing primitive with an optional argument, not a new
+            // effect system and not a cutscene.
+            //
+            // The whole beat is over well inside a second and NOTHING is paused: physics keeps
+            // stepping, the ball keeps travelling, input stays live. Longest element is the
+            // existing rank-up arpeggio at ~740ms; the flash is 260ms and the burst's particles
+            // are dead by ~600ms. The backglass message outlives all of it at 1600ms, but that is
+            // a panel readout the player can ignore, not an interruption.
+            const [sr, sg, sb] = hexStringToRgb(stateHex);
+            // Brief spectral wash in the state's own colour. Peak 0.22, not flashScreen()'s
+            // default 0.5 - see that function's comment for why a mid-play flash must not be a
+            // whiteout. Already a no-op under reduced motion inside flashScreen() itself.
+            flashScreen(260, sr, sg, sb, 0.22);
+            // Chakra spark burst at the ball, in the state's colour. Emitted where the ball IS,
+            // which is also where the player's eye needs to stay - the ball is still live and
+            // still travelling through all of this.
+            //
+            // Reduced motion suppresses this extra burst the same way buildChakraSparkle() does
+            // (returns null outright) rather than the vortex's reduce-the-rate approach, because
+            // there is nothing to reduce in a one-shot. Deliberately gated HERE at the call site
+            // and not inside spawnHitBurst(), which every ordinary hit shares - silencing those
+            // too would be a change to existing feedback nobody asked for. A reduced-motion player
+            // still gets the tinted ASCENSION message and the arpeggio, the same "clear, if
+            // motion-free, acknowledgement" triggerLaunchFiredFlash() already settles on.
+            if (!window.SPIRITBALL_reducedMotion) {
+                spawnHitBurst(scene, particleTexture, mainBall.mesh, highFidelity,
+                    new BABYLON.Color3(sr / 255, sg / 255, sb / 255), 'ascensionBurst');
+            }
             triggerCameraShake(500, 0.01);
             triggerCameraPunch(500, new BABYLON.Vector3(0, 0.02, -0.03));
+            // Unchanged: the existing four-note rising arpeggio (392 -> 523 -> 659 -> 784) is
+            // already the right shape for an ascension and already distinct from every other
+            // sound in the game. Refining it would mostly mean lengthening it, which the ~1s
+            // budget does not have room for.
             playRankUpSound();
             vibrateDevice(HAPTIC_MISSION_COMPLETE_PATTERN); // differentiated haptics (user-requested) - a short multi-pulse "fanfare", distinct from every single-tick haptic elsewhere
             // Drop-target bank reset (user-requested upgrade) - a mission completing is one of
@@ -8693,8 +9705,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 backglass.showMessage('RE-ENTRY!', 800);
                 triggerCameraShake(80, 0.003); // matches hitReentryLane()'s cameraShake(80, 0.003)
                 playRolloverClickSound(990); // rollover switch click layer, distinct from the generic playHitSound()
-                // Unchanged from before this upgrade - still feeds the 'RE-ENTRY CIRCUIT' mission
-                // on every scoring hit, lit or not. Kept fully separate from the bank-complete
+                // Unchanged from before this upgrade - still feeds the 'lane' mission (displayed
+                // as 'RETURN TO BODY', see MISSION_DEFS) on every scoring hit, lit or not. What is
+                // passed here is the TYPE, never the name. Kept fully separate from the bank-complete
                 // check below (see laneBank's own block comment for why).
                 progressMission('lane');
                 if (newlyLit && laneBank.every((lane) => lane.lit)) {
@@ -8808,16 +9821,25 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }
         }
 
-        // Bug fix (playtest audit): handleDrain()'s post-drain setTimeout below is a plain JS
-        // timer, not gated by scene.physicsEnabled the way real physics stepping is - confirmed
-        // via Playwright that pausing during its 1500ms window did NOT stop it from firing
-        // underneath the pause overlay (resetBallToPlunger()/showGameOverScreen() would run while
-        // the player couldn't see it happening, and in the Game-Over case, gameOverOverlay could
-        // end up display:flex at the same time as pauseOverlay). pendingDrainAction defers that
-        // action until resumeGame() actually runs it, instead of letting it fire invisibly.
+        // Bug fix (playtest audit): handleDrain()'s post-drain setTimeout is a plain JS timer,
+        // not gated by scene.physicsEnabled the way real physics stepping is - confirmed via
+        // Playwright that pausing during its window did NOT stop it from firing underneath the
+        // pause overlay (resetBallToPlunger()/showGameOverScreen() would run while the player
+        // couldn't see it happening, and in the Game-Over case, gameOverOverlay could end up
+        // display:flex at the same time as pauseOverlay). pendingDrainAction defers that action
+        // until resumeGame() actually runs it, instead of letting it fire invisibly.
+        //
+        // Scope note after the end-of-ball pass: this now guards ONE path, the BALL SAVED return
+        // delay. The real-drain path that motivated it no longer schedules a timer - it runs a
+        // render-loop-driven sequence inside the loop's own !isPaused gate (see
+        // startEndOfBallSequence()), which is immune to this class of bug by construction rather
+        // than by deferral. Kept as-is rather than converted alongside it: a ball save is not a
+        // ball change, its 700ms is one delay and not a sequence, and rewriting a working path
+        // that this pass was not asked to touch would be scope it did not have.
         let pendingDrainAction = null;
 
-        // Drain lifecycle audit fix: the raw setTimeout below (either branch) was never
+        // Drain lifecycle audit fix: the raw setTimeout below (the BALL SAVED return delay, and
+        // before the end-of-ball pass the real-drain delay too) was never
         // cancellable - pendingDrainAction only guards the "still paused when the timer fires"
         // case. If the timer was still in flight (not yet fired) when startNewGame() ran - e.g.
         // the player opened the pause menu mid-delay and immediately hit New Game, all well before
@@ -8860,6 +9882,206 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // inside cancelVisionGateCapture() (see its own comment). Purely a diagnostic breadcrumb.
         let lastResetReason = null;
 
+        // ===================================
+        // End-of-ball sequence (user-requested). A ball change used to say one thing and then go
+        // quiet: 'DRAINED!' for 1400ms, 100ms of nothing, a bonus count that only happened if this
+        // ball had earned something, and then the ball silently reappearing at the plunger. Three
+        // of the four things a player needs at a ball change were missing or conditional - what
+        // the bonus paid (skipped entirely at zero), where the run now stands, and that a new ball
+        // is up at all.
+        //
+        // Four ordered beats, driven off the render loop's own deltaMs rather than a setTimeout
+        // chain. That is the same idiom updateBonusCount()/updatePowerUp()/updateDropTargetBank()
+        // already use here, and it buys two things the old raw setTimeout(1500) needed a
+        // workaround for: the sequence freezes with a pause instead of firing invisibly underneath
+        // the overlay (which is what pendingDrainAction exists to patch around on the paths that
+        // still use timers), and its pacing does not depend on how much wall-clock a given frame
+        // takes on a given device.
+        //
+        // "Mobile and desktop behave identically" is a property of that structure rather than
+        // something checked at each beat: nothing in this sequence reads pointer type, touch
+        // controls, viewport, or input method, and every duration is a shared constant. The only
+        // device-conditional thing anywhere near a drain is vibrateDevice() on the ball-save path,
+        // which is a capability that either exists or does not, on a path this sequence never
+        // touches.
+        //
+        // Deliberately NOT a fifth beat for anything else. The brief was a brisk transition, not
+        // an arcade bookkeeping reel: no per-shot itemisation, no stats roll, no "SHOOT AGAIN"
+        // ceremony. Beats are also skipped rather than padded when they have nothing to say - see
+        // the game-over branch, which drops STATE and NEXT BALL because the Game Over screen it
+        // hands off to already prints the final state, and there is no next ball.
+        const END_OF_BALL_BEAT_LOST = 0;
+        const END_OF_BALL_BEAT_BONUS = 1;
+        const END_OF_BALL_BEAT_STATE = 2;
+        // `waiting` means this beat is not on a clock of its own - it is parked until the bonus
+        // count signals completion through its own onComplete. Kept separate from remainingMs so
+        // a paused frame cannot advance a beat that is waiting on another subsystem.
+        const endOfBall = { active: false, beat: -1, remainingMs: 0, waiting: false, gameOver: false };
+
+        // Starts the sequence for a real drain (never a ball save - that is not a ball change).
+        // Called with lives already decremented, so `lives <= 0` here is the authoritative "this
+        // was the last ball" answer for the whole sequence and is latched rather than re-read: a
+        // dev reset or any other write to `lives` mid-sequence must not turn a game-ending drain
+        // into a ball change halfway through it.
+        function startEndOfBallSequence() {
+            endOfBall.active = true;
+            endOfBall.gameOver = lives <= 0;
+            enterEndOfBallBeat(END_OF_BALL_BEAT_LOST);
+        }
+
+        // Wipes the sequence without running any of its remaining beats. Same "starting fresh
+        // makes in-progress state stale" reasoning startNewGame() already applies to bonusCount
+        // and pendingDrainAction: left running, a sequence belonging to the ball that just
+        // drained would keep posting messages over a fresh game and would eventually reset a
+        // ball the player may have already launched.
+        function cancelEndOfBallSequence() {
+            endOfBall.active = false;
+            endOfBall.beat = -1;
+            endOfBall.remainingMs = 0;
+            endOfBall.waiting = false;
+            endOfBall.gameOver = false;
+        }
+
+        function enterEndOfBallBeat(beat) {
+            endOfBall.beat = beat;
+            endOfBall.waiting = false;
+            // Every showMessage() below is given its beat's duration plus a margin. showMessage()
+            // clears itself on a raw setTimeout (wall-clock, like every other message in this
+            // file), while the beat advances on gameplay deltaMs - so on an ordinary frame the
+            // next beat overwrites the message well before its own clear fires, and a pause landing
+            // mid-beat costs a blank panel rather than a stuck one. Same margin idiom
+            // updateBonusCount()'s per-tick messages already use.
+            if (beat === END_OF_BALL_BEAT_LOST) {
+                // 'BALL LOST', not the 'DRAINED!' this replaces. "Drained" is pinball jargon: it
+                // is the correct word and it is exactly the word a first-time player does not
+                // have. The lives readout has already ticked down and pulsed by the time this
+                // shows, so the count is covered - this beat only has to name the event.
+                backglass.showMessage('BALL LOST', END_OF_BALL_LOST_MS + 200);
+                endOfBall.remainingMs = END_OF_BALL_LOST_MS;
+                return;
+            }
+            if (beat === END_OF_BALL_BEAT_BONUS) {
+                // Asked before starting, because startBonusCount() resolves a zero bonus by
+                // calling onComplete() synchronously - which would finish this beat inside the
+                // call that began it and leave the machine advancing twice in one frame.
+                if (pendingBonusTotal() <= 0) {
+                    // The old flow simply had no bonus beat at all when nothing was earned, which
+                    // is how a subsystem becomes invisible: a player who never lands a major shot
+                    // never learns that a bonus pool exists to be filled. Stating it costs 380ms.
+                    backglass.showMessage('NO BONUS', END_OF_BALL_NO_BONUS_MS + 200);
+                    endOfBall.remainingMs = END_OF_BALL_NO_BONUS_MS;
+                    return;
+                }
+                // The existing count-up, unchanged and unduplicated - this beat owns none of the
+                // payout, the pacing, or the messages, it only waits for them. remainingMs stays
+                // at 0 the whole time; `waiting` is what holds the machine.
+                endOfBall.waiting = true;
+                startBonusCount(() => {
+                    endOfBall.waiting = false;
+                });
+                return;
+            }
+            // STATE + vision progress. Both are permanent backglass readouts - the STATE row and
+            // the VISION window - and both are hidden for the entire sequence, because redraw()
+            // returns early while a message is up rather than drawing the transient zone under
+            // it. So this beat is not duplicating the panel; it is the only time either value is
+            // readable during a ball change.
+            //
+            // Two facts, one string, one showMessage() call: showMessage() has no queue, so a
+            // second call would silently overwrite the first (see its own comment). Left to
+            // drawMessage()'s greedy two-line wrap and shrink-to-fit, which is what the mission
+            // select message already relies on for the same reason.
+            //
+            // Tinted with this state's own colour, the second of the two sites STATE_COLORS is
+            // used for (the other being the ASCENSION toast) - so the ladder the player is
+            // climbing is legible as colour here too, not just as a word.
+            // The rank's own internal space is made non-breaking, which looks like a fussy detail
+            // and is not. drawMessage() wraps greedily on spaces, so the only two-word rank name
+            // splits across the two lines at the size the fit loop settles on: measured, every
+            // rank produced ['STATE <RANK>', 'VISION n/n'] except COSMIC SELF with a vision
+            // running, which produced ['STATE COSMIC', 'SELF VISION 3/3'] - the player's own
+            // hard-won top state broken in half. One token cannot be split, so this fixes it for
+            // every rank name, present or future, without special-casing the wrap or padding the
+            // string to a length that happens to shrink the font enough.
+            //
+            // U+00A0 rather than a narrower trick because it is what the shipped font stack
+            // actually draws: rendered at the panel's own 86px floor, 'STATE COSMIC\u00a0SELF' and
+            // 'STATE COSMIC SELF' come back pixel-identical (0 differing pixels, against 579 for a
+            // one-letter control), so there is no tofu box and no width change - just a space the
+            // wrap is not allowed to break on.
+            const rankName = RANK_NAMES[mission.rank].replace(/ /g, '\u00a0');
+            // mission.progress survives a drain by design - only dropTargetBank, ballBonus and
+            // the combo chain reset between balls - so this genuinely reads as "carry on from
+            // here" rather than as a scoreline. 'VISION READY' rather than a zero for the idle
+            // case: there is no vision to be 0/3 of, and the useful thing to say is that hitting
+            // a target will start one.
+            const visionPart = mission.state === 'active'
+                ? 'VISION ' + mission.progress + '/' + mission.required
+                : 'VISION READY';
+            backglass.showMessage('STATE ' + rankName + ' ' + visionPart,
+                END_OF_BALL_STATE_MS + 200, STATE_COLORS[mission.rank]);
+            endOfBall.remainingMs = END_OF_BALL_STATE_MS;
+        }
+
+        // Advanced from the render loop's existing !isPaused block, alongside updateBonusCount()
+        // - which this sequence's BONUS beat is parked on, so the two must tick in the same gate
+        // or a paused bonus count would hold a running sequence open forever.
+        function updateEndOfBallSequence(deltaMs) {
+            if (!endOfBall.active) return;
+            if (endOfBall.waiting) return;
+            endOfBall.remainingMs -= deltaMs;
+            if (endOfBall.remainingMs > 0) return;
+
+            if (endOfBall.beat === END_OF_BALL_BEAT_LOST) {
+                enterEndOfBallBeat(END_OF_BALL_BEAT_BONUS);
+                return;
+            }
+            if (endOfBall.beat === END_OF_BALL_BEAT_BONUS) {
+                if (endOfBall.gameOver) {
+                    // Straight to Game Over after the payout, exactly as the old flow did: the
+                    // bonus is paid before the lives check either way, so a last-ball bonus is
+                    // never swallowed. STATE and NEXT BALL are dropped rather than shortened -
+                    // the Game Over screen prints FINAL STATE itself, and there is no next ball
+                    // to announce.
+                    cancelEndOfBallSequence();
+                    showGameOverScreen();
+                    return;
+                }
+                enterEndOfBallBeat(END_OF_BALL_BEAT_STATE);
+                return;
+            }
+            finishEndOfBallSequence();
+        }
+
+        // NEXT BALL. Deliberately not a beat of the machine: the ball returns and the message is
+        // posted in the same instant, and the sequence is over before the message finishes, so
+        // the player can launch straight through it instead of waiting out one more dwell. That
+        // is also what keeps this whole flow no slower to a playable ball than the two-beat
+        // version it replaces, despite carrying two more beats of information.
+        function finishEndOfBallSequence() {
+            cancelEndOfBallSequence();
+            backglass.redraw();
+            resetBallToPlunger();
+            // Drop-target bank reset (user-requested upgrade) - real drop-target banks reset at
+            // the start of each new ball, not mid-ball. Unchanged from the old onComplete; only
+            // its call site moved.
+            resetDropTargetBank();
+            // Bonus/multiplier subsystem reset - "multiplier resets appropriately between balls."
+            // The BONUS beat above has already paid this ball's total, so zeroing here is safe.
+            ballBonus.points = 0;
+            ballBonus.multiplierX = 1;
+            backglass.state.bonusMultiplierX = 1;
+            resetCombos();
+            // Posted last, after resetBallToPlunger() has put the ball back and after redraw(),
+            // so nothing above can overwrite it. Ball number rather than lives remaining: "BALL 2
+            // OF 3" says where the player is in the run, where "2 BALLS LEFT" says the same thing
+            // in the units of the readout that is already on screen and already just pulsed.
+            backglass.showMessage(
+                'BALL ' + (STARTING_LIVES - lives + 1) + ' OF ' + STARTING_LIVES,
+                END_OF_BALL_NEXT_BALL_MS
+            );
+        }
+
         // Ported from checkDrain() in ../index.js: lose a life, end this ball's turn. No
         // GameOverScene equivalent exists yet (Stage 12), so hitting 0 lives just resets lives
         // and score in place after the same pause the 2D version used before showing Grim
@@ -8871,7 +10093,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
             // BALL SAVE (fairness mechanics, user-requested) - checked before anything else
             // touches lives/scoring, so a saved drain genuinely costs nothing: no life lost, no
-            // DRAINED! beat, and none of the per-ball resets below run (dropTargetBank/laneBank/
+            // end-of-ball sequence at all (this is not a ball change - see
+            // startEndOfBallSequence()), and none of the per-ball resets below run (dropTargetBank/laneBank/
             // combos/ballBonus all stay exactly as they were - the ball never really left play).
             // Consumes the save immediately (ballSave.usedThisLife = true) so it can't retrigger
             // from the very next drain - see armBallSave()'s own comment.
@@ -8907,54 +10130,25 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // BALL SAVE reset (fairness mechanics) - this life is genuinely over now, so the next
             // one gets its own fresh save opportunity (see armBallSave()'s "usedThisLife" gate).
             ballSave.usedThisLife = false;
-            backglass.showMessage('DRAINED!', 1400); // no Grim Reaper visual yet (Stage 12) - this is the stand-in
             triggerCameraShake(400, 0.008); // matches checkDrain()'s cameraShake(400, 0.008)
             flashScreen(200, 255, 0, 0); // matches checkDrain()'s cameraFlash(200, 255, 0, 0, true) - red
             // Quick downward dip - a 3D-only "snap toward the void" beat with no 2D equivalent
             // (that camera couldn't move through space at all).
             triggerCameraPunch(400, new BABYLON.Vector3(0, -0.03, 0));
             playDrainSound();
-            drainTimeoutHandle = setTimeout(() => {
-                drainTimeoutHandle = null;
-                const action = () => {
-                    // Bonus/multiplier subsystem (user-requested) - "on drain: calculate bonus x
-                    // multiplier, rapidly count the bonus into score, show the sequence on HUD/
-                    // backglass, then continue normal life/game-over flow." startBonusCount() pays
-                    // out (or no-ops instantly if this ball earned no bonus) BEFORE the lives<=0
-                    // check below, so the payout always plays regardless of whether the game is
-                    // about to end.
-                    startBonusCount(() => {
-                        if (lives <= 0) {
-                            // Stage 12: was "reset lives/score in place" (Stage 6's documented
-                            // simplification, made before any Game Over screen existed to show final
-                            // results on). Now shows the real Game Over screen instead; NEW GAME/restart
-                            // input there is what actually resets state - see showGameOverScreen().
-                            showGameOverScreen();
-                            return;
-                        }
-                        backglass.redraw();
-                        resetBallToPlunger();
-                        // Drop-target bank reset (user-requested upgrade) - real drop-target banks
-                        // reset at the start of each new ball, not mid-ball; this is the "life lost,
-                        // game continues" path (the lives<=0/showGameOverScreen() branch above
-                        // returns before reaching here, so a true game-ending drain doesn't double up
-                        // with startNewGame()'s own reset later).
-                        resetDropTargetBank();
-                        // Bonus/multiplier subsystem reset - "multiplier resets appropriately
-                        // between balls." startBonusCount() above already paid out this ball's
-                        // total before this runs, so it's safe to zero here.
-                        ballBonus.points = 0;
-                        ballBonus.multiplierX = 1;
-                        backglass.state.bonusMultiplierX = 1;
-                        resetCombos();
-                    });
-                };
-                if (isPaused) {
-                    pendingDrainAction = action;
-                } else {
-                    action();
-                }
-            }, 1500);
+            // End-of-ball sequence (user-requested) - replaces a raw setTimeout(1500) whose whole
+            // job was to sit silently between 'DRAINED!' and the bonus count, and whose callback
+            // then did every remaining ball-change job at once with no announcement of any of
+            // them. The BALL LOST message, the bonus payout, the state/vision readout, the ball
+            // return and the per-ball resets are all beats of that sequence now; it owns this
+            // path's pacing from here, including the game-over hand-off.
+            //
+            // No pendingDrainAction wrapper, unlike the ball-save branch above and unlike the
+            // timer this replaces: those defer a wall-clock callback that would otherwise fire
+            // underneath the pause overlay, and the sequence has no wall-clock callback to defer -
+            // it advances on render-loop deltaMs inside the loop's own !isPaused gate, so a pause
+            // stops it where it stands and a resume carries on from there.
+            startEndOfBallSequence();
         }
 
         mainBall.aggregate.body.setCollisionCallbackEnabled(true);
@@ -9002,10 +10196,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // mounted-panel treatment is reserved for the in-gameplay backglass, 09-*.md, which earns
         // its 3D-ness by being part of the cabinet during play).
         //
-        // Final Rank and a Missions Completed stat line (see showGameOverScreen() below) were
-        // deliberately NOT shown when this stage was built - no mission FSM existed yet, so a
-        // "Final Rank" would've just been a permanently-fake "Rookie." Both now show real,
-        // earned values - see improvement-prompts/05-*.md.
+        // The FINAL STATE line and a Visions Completed stat line (see showGameOverScreen() below)
+        // were deliberately NOT shown when this stage was built - no mission FSM existed yet, so a
+        // final state would've just been a permanently-fake placeholder. Both now show real,
+        // earned values - see improvement-prompts/05-*.md. (Both read "Final Rank"/"Missions
+        // Completed" until the user-requested terminology pass; the state itself is still
+        // mission.rank internally.)
         const menuOverlay = document.getElementById('menu-overlay');
         // Visual length of the title screen's exit fade. Must match #menu-overlay.is-starting's
         // transition-duration in index.html; nothing about gameplay is gated on it.
@@ -9069,6 +10265,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function hideMenuScreen() {
             if (!menuUp) return;
             menuUp = false;
+            // Name the starting state here too, not only in startNewGame(). Dismissing the title
+            // screen never calls startNewGame() - it only hides the overlay and ends attract mode,
+            // because a page load already begins with fresh state - so putting the message solely
+            // there would have skipped the FIRST game of every session, which is exactly the run
+            // where the player has not seen the ladder yet. This function is the one thing both
+            // dismissal paths (Space and tap-anywhere) share, and its menuUp guard above means it
+            // cannot fire twice. startNewGame() covers restart and pause -> NEW GAME.
+            backglass.showMessage('STATE: ' + RANK_NAMES[0]);
             menuOverlay.classList.add('is-starting');
             // Matches the transition duration in index.html. Under prefers-reduced-motion that
             // transition is removed, so the overlay is already invisible well before this fires
@@ -9140,10 +10344,43 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // --- Pause / Controls flow, ported from pauseGame()/resumeGame()/showSettingsMenu() in
         // ../index.js. scene.physicsEnabled toggling confirmed against Babylon's actual source
         // (see the render loop's pause-gate comment below) - not guessed. ---
+        // Pause panel's status footer (presentation only - see index.html's pause block). The
+        // progression state lives on the backglass, and the pause scrim covers the backglass, so
+        // pausing used to hide the one number the panel had room to show. This reads the state
+        // the panel is ALREADY displaying and writes it into the footer; it sets no state, owns
+        // no state, and is safe to call whenever the overlay becomes visible.
+        const pauseStatusState = document.getElementById('pause-status-state');
+        const pauseSummaryScore = document.getElementById('pause-summary-score');
+        const pauseSummaryVisionRow = document.getElementById('pause-summary-vision-row');
+        const pauseSummaryVision = document.getElementById('pause-summary-vision');
+        const pauseSummaryProgress = document.getElementById('pause-summary-progress');
+        function syncPauseStatus() {
+            if (!pauseStatusState) return;
+            pauseStatusState.textContent = backglass.state.rank;
+            pauseStatusState.style.color = backglass.state.rankColor || STATE_COLORS[0];
+            // String(score), matching setScore()'s own formatting rather than adding thousands
+            // separators here: #player-hud stays visible through the pause, and a summary that
+            // renders the same number differently from the readout beside it reads as a bug.
+            if (pauseSummaryScore) pauseSummaryScore.textContent = String(score);
+            if (pauseSummaryVisionRow) {
+                // Shown only while a vision is actually running. backglass.state.missionName is
+                // null between visions (see its own declaration), which is the same signal
+                // #mission-hud and the backglass window both already use for their idle state.
+                const activeVision = backglass.state.missionName;
+                pauseSummaryVisionRow.hidden = !activeVision;
+                if (activeVision) {
+                    pauseSummaryVision.textContent = activeVision;
+                    pauseSummaryProgress.textContent =
+                        backglass.state.missionProgress + '/' + backglass.state.missionRequired;
+                }
+            }
+        }
+
         function openPauseMenu() {
             if (isPaused || gameOverActive || isMenuUp()) return;
             isPaused = true;
             scene.physicsEnabled = false;
+            syncPauseStatus();
             pauseOverlay.style.display = 'flex';
         }
 
@@ -9177,6 +10414,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         function backFromControlsScreen() {
             controlsOverlay.style.display = 'none';
+            // Also refreshed on the way back from Controls - the panel is being re-shown, and a
+            // deferred drain resolved during the detour could have moved the state.
+            syncPauseStatus();
             pauseOverlay.style.display = 'flex';
         }
 
@@ -9211,6 +10451,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             bonusCount.remainingMs = 0;
             bonusCount.awarded = 0;
             bonusCount.total = 0;
+            // Same reasoning again, one level up: the end-of-ball sequence WRAPS that count, so
+            // clearing the count alone would leave a sequence parked on a completion callback
+            // that can now never fire (its `waiting` flag holds until bonusCount calls back, and
+            // the call was just cancelled) - a permanently active sequence that blocks launch
+            // input for the rest of the run. Cancelled outright rather than run to completion:
+            // its remaining beats belong to the ball that drained, and finishEndOfBallSequence()
+            // would reset a plunger this function is about to reset anyway.
+            cancelEndOfBallSequence();
             // Same "starting fresh makes any deferred/in-progress state stale" reasoning as
             // pendingDrainAction above, extended to a Vision Gate capture that might genuinely be
             // in progress (color-cycle timers running, sparkle alive, ball held kinematic) at the
@@ -9286,8 +10534,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.selectedIndex = null;
             mission.progress = 0;
             mission.required = 0;
+            syncMissionTargetLamps();
             mission.rank = 0;
             backglass.state.rank = RANK_NAMES[0];
+            backglass.state.rankColor = STATE_COLORS[0];
             backglass.state.missionName = null;
             backglass.state.missionProgress = 0;
             // Power-up (board redesign) - also per-run state, same reasoning as mission/rank above.
@@ -9307,6 +10557,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const menuHighScoreEl = document.getElementById('menu-highscore');
             if (menuHighScoreEl) menuHighScoreEl.textContent = String(backglass.state.highScore);
             backglass.redraw();
+            // Name the starting state out loud (user-requested). Every other progression beat
+            // announces itself on this panel, so the run beginning at the bottom of the ladder
+            // should too - the STATE row alone changes silently. No duration passed: this takes
+            // showMessage()'s own 1100ms default rather than inventing a new number, and it is
+            // last-message-wins like every other toast, so the first launch's own message simply
+            // replaces it if the player is quick.
+            backglass.showMessage('STATE: ' + RANK_NAMES[0]);
             resetBallToPlunger();
             isPaused = false;
             scene.physicsEnabled = true;
@@ -9346,19 +10603,60 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // touchstart, bypassing the suppression, was confirmed to double-toggle pause/resume back
         // to back. touch-action: none (index.html) plus the page's own
         // width=device-width viewport meta already eliminate the legacy ~300ms tap-delay 'click'
-        // is sometimes blamed for, so the extra listener buys nothing today. Removed in favor of
-        // a single canonical 'click' listener - the exact same pattern every other button in this
-        // pause/controls flow already uses (pause-resume-btn/pause-newgame-btn/pause-controls-btn/
-        // controls-back-btn are all click-only) - which structurally cannot double-fire, since
-        // only one event type is registered at all.
+        // is sometimes blamed for, so the extra listener bought no latency win. It was therefore
+        // removed in favour of a single canonical 'click' listener - the same pattern every other
+        // button in this pause/controls flow uses (pause-resume-btn/pause-newgame-btn/
+        // pause-controls-btn/controls-back-btn are all click-only) - which structurally cannot
+        // double-fire, since only one event type is registered at all.
+        //
+        // That reasoning holds for those four buttons and does NOT hold for this one, which is
+        // what the correction below fixes. They only ever exist on an overlay, where nothing else
+        // can be held; this one sits over live play, where something almost always is - and tap
+        // latency was never the reason it needs a touch path.
+        //
+        // Demo-session QA fix: click-only made this button DEAD on touch whenever another control
+        // was already held. Browsers only synthesise a compatibility 'click' for a primary touch,
+        // so a second-finger tap on a click-only element produces no click at all - measured, the
+        // button received 0 click events while #launch-btn, #flipper-zone-left or
+        // #flipper-zone-right was held, against 1 with nothing held. Holding a flipper is the
+        // normal state during play and a phone has no Escape key, so the only pause control was
+        // unreachable exactly when a player wanted it: they had to let go of the flipper first.
+        //
+        // So the touch listener comes back - but with the redundant guard whose absence is the
+        // whole reason the audit above removed it. That comment's objection was never "touchstart
+        // is wrong", it was "if the preventDefault contract doesn't hold, a synthetic click lands
+        // after touchstart and double-toggles, and nothing here catches it." lastTouchToggleMs
+        // catches it: a touch-driven toggle stamps the clock, and any click arriving inside
+        // CLICK_AFTER_TOUCH_SUPPRESS_MS is treated as that tap's own echo and dropped. The guard
+        // is one-directional on purpose - it can only ever suppress a CLICK, never a touch - so a
+        // deliberate rapid double-tap (pause then immediately resume) still toggles twice.
+        //
+        // Accessibility is unaffected: keyboard and assistive-tech activation of a real <button>
+        // arrives as a click with no preceding touch, so the stamp is stale and the click passes.
+        let lastTouchToggleMs = -Infinity;
+        // Comfortably longer than the ~50-350ms a compatibility click trails its touch by, and
+        // harmless if it over-reaches: the only thing inside the window is a click, and the only
+        // way to be inside it is to have just toggled by touch.
+        const CLICK_AFTER_TOUCH_SUPPRESS_MS = 700;
         function togglePauseFromButton(e) {
             e.preventDefault();
+            if (e.type === 'touchstart') {
+                lastTouchToggleMs = performance.now();
+            } else if (performance.now() - lastTouchToggleMs < CLICK_AFTER_TOUCH_SUPPRESS_MS) {
+                return; // the compatibility click for a tap this handler already acted on
+            }
             if (isPaused) {
                 resumeGame();
             } else {
                 openPauseMenu();
             }
         }
+        // Not passive: the whole point is the synchronous preventDefault() above, which a passive
+        // listener is not allowed to make. Deliberately NOT routed through the
+        // trackTouchStart/trackTouchEnd identifier map the flipper/launch zones use - this is a
+        // discrete tap, not a held control, and it must not occupy a slot in that map or the
+        // window-level touchend would try to release a control it never pressed.
+        pauseBtn.addEventListener('touchstart', togglePauseFromButton, { passive: false });
         pauseBtn.addEventListener('click', togglePauseFromButton);
 
         // ESC: single persistent listener (archive/release-prompts/07-*.md's lesson - check state each
@@ -9390,57 +10688,103 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // --- Game Over screen, ported from GameOverScene in ../index.js. Triggered from
         // handleDrain() above when lives reach 0 (previously that just reset score/lives in
         // place - see this stage's implementation note). ---
+        // Detail readout labels (Game Over retheme, user-requested - "replace military/progression
+        // language"). Every one of these used to end in a combat verb: Bumper HITS, Orbit SHOTS,
+        // Vision Gate CAPTURES, Target Bank CLEARS, Kickbacks USED, Power-Ups COLLECTED. Read as a
+        // block that was the register of an after-action report, on the closing screen of a game
+        // about visions.
+        //
+        // Fixed by one rule rather than nineteen rewrites: drop the verb and name the feature. The
+        // count is already in its own column, so "BUMPERS 42" says everything "Bumper Hits: 42"
+        // did, in the machine's own vocabulary and in fewer characters - which is also what lets
+        // this block be two columns instead of a nineteen-line list.
+        //
+        // Two are deliberately NOT reduced to a bare noun. SKILL SHOTS keeps its verb because a
+        // skill shot is the name of a real pinball mechanic, not a hit counter, and BALL SAVES the
+        // same. BEST COMBO drops "Tier" - the ladder word this pass was asked to remove, and one
+        // the player never sees anywhere else.
+        const GAME_OVER_DETAIL_LABELS = [
+            ['BUMPERS', 'bumperHits'],
+            ['COMET', 'cometHits'],
+            ['SATURN', 'saturnHits'],
+            ['TARGETS', 'targetHits'],
+            ['RE-ENTRY LANES', 'laneHits'],
+            ['INLANES', 'inlaneHits'],
+            ['OUTLANES', 'outlaneHits'],
+            ['LEFT ORBIT', 'leftOrbitShots'],
+            ['RIGHT ORBIT', 'rightOrbitShots'],
+            ['VISION GATE', 'visionGateCaptures'],
+            ['POWER-UPS', 'powerUpsCollected'],
+            ['TARGET BANKS', 'targetBankCompletions'],
+            ['LANE BANKS', 'laneBankCompletions'],
+            ['COMBOS', 'combosCompleted'],
+            ['BEST COMBO', 'comboMaxTier'],
+            ['SKILL SHOTS', 'skillShotsAwarded'],
+            ['BALL SAVES', 'ballSaves'],
+            ['KICKBACKS', 'kickbacksUsed']
+        ];
+
         function showGameOverScreen() {
             gameOverActive = true;
             playGameOverSound();
+            // Raw digits, not thousands-separated - #player-hud and the backglass HIGH SCORE
+            // window both print scores this way on purpose (see that window's own comment: two
+            // score readouts formatting the same kind of number differently is what makes a
+            // cabinet feel assembled from parts). Tabular figures in the CSS do the alignment
+            // work a separator would otherwise be doing here.
             document.getElementById('gameover-score').textContent = String(score);
-            // Final Rank (improvement-prompts/05-*.md) - previously deliberately omitted per
-            // Stage 12's implementation note, since no real rank-progression system existed yet
-            // to back it; backglass.state.rank now holds this run's genuine final rank.
-            document.getElementById('gameover-rank-line').textContent = 'FINAL RANK: ' + backglass.state.rank;
+
+            // FINAL STATE. backglass.state.rank holds this run's genuine final state, and
+            // rankColor the matching STATE_COLORS entry - set together at every site that assigns
+            // either, so this cannot show one state's name in another's colour.
+            const stateEl = document.getElementById('gameover-rank-line');
+            stateEl.textContent = backglass.state.rank;
+            stateEl.style.color = backglass.state.rankColor || STATE_COLORS[0];
+
+            // Promoted out of the detail block into the summary, per the requested hierarchy -
+            // it is the one tally that measures the actual objective of a run.
+            document.getElementById('gameover-visions').textContent = String(stats.missionsCompleted);
 
             // High-score audit fix - see newHighScoreThisGame's own declaration comment for why
             // this can't just compare score to backglass.state.highScore here (addScore() already
             // synced them by now, in both the "genuinely beat it" and "merely tied it" cases).
+            // Unchanged logic; only what it writes changed, from one concatenated sentence into
+            // the row's label and value.
+            const hsRow = document.getElementById('gameover-highscore-row');
+            const hsLabel = document.getElementById('gameover-highscore-label');
             const hsLine = document.getElementById('gameover-highscore-line');
             if (newHighScoreThisGame) {
-                hsLine.textContent = 'NEW HIGH SCORE!';
+                hsLabel.textContent = 'NEW HIGH SCORE';
+                hsLine.textContent = String(backglass.state.highScore);
+                hsRow.classList.add('is-new-record');
                 hsLine.classList.add('pulse-text');
             } else {
-                hsLine.textContent = 'HIGH SCORE: ' + backglass.state.highScore;
+                hsLabel.textContent = 'HIGH SCORE';
+                hsLine.textContent = String(backglass.state.highScore);
+                hsRow.classList.remove('is-new-record');
                 hsLine.classList.remove('pulse-text');
             }
 
+            // Label and value as separate nodes, not one 'Label: 42' string, so the CSS can lay
+            // the row out as a readout with the number in the digit face - which is what the rest
+            // of this machine's surfaces do with a label/value pair.
             const statsEl = document.getElementById('gameover-stats');
             statsEl.innerHTML = '';
-            const statLines = [
-                ['Missions Completed', stats.missionsCompleted],
-                ['Bumper Hits', stats.bumperHits],
-                ['Comet Hits', stats.cometHits],
-                ['Saturn Hits', stats.saturnHits],
-                ['Target Hits', stats.targetHits],
-                ['Lane Hits', stats.laneHits],
-                ['Inlane Hits', stats.inlaneHits],
-                ['Outlane Hits', stats.outlaneHits],
-                ['Left Orbit Shots', stats.leftOrbitShots],
-                ['Right Orbit Shots', stats.rightOrbitShots],
-                ['Vision Gate Captures', stats.visionGateCaptures],
-                ['Power-Ups Collected', stats.powerUpsCollected],
-                ['Target Bank Clears', stats.targetBankCompletions],
-                ['Lane Bank Clears', stats.laneBankCompletions],
-                ['Combos', stats.combosCompleted],
-                ['Best Combo Tier', stats.comboMaxTier],
-                ['Skill Shots', stats.skillShotsAwarded],
-                ['Ball Saves', stats.ballSaves],
-                ['Kickbacks Used', stats.kickbacksUsed]
-            ];
-            statLines.forEach(([label, value]) => {
-                if (value > 0) {
-                    const p = document.createElement('p');
-                    p.textContent = label + ': ' + value;
-                    statsEl.appendChild(p);
-                }
+            let shown = 0;
+            GAME_OVER_DETAIL_LABELS.forEach(([label, key]) => {
+                const value = stats[key];
+                if (!(value > 0)) return;
+                shown++;
+                const row = document.createElement('p');
+                row.appendChild(document.createTextNode(label));
+                const v = document.createElement('span');
+                v.textContent = String(value);
+                row.appendChild(v);
+                statsEl.appendChild(row);
             });
+            // A run that scored none of these gets no empty RUN DETAIL heading over an empty grid
+            // - the old screen drew the container regardless and left a gap.
+            document.getElementById('gameover-detail').hidden = shown === 0;
 
             document.getElementById('gameover-restart-instructions').textContent =
                 touchControlsActive() ? 'TAP ⚡ TO PLAY AGAIN' : 'PRESS SPACE TO PLAY AGAIN';
@@ -9473,6 +10817,26 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // adding any visible UI.
             triggerEnterLog = [];
             window.__triggerDebug = { log: triggerEnterLog };
+
+            // Backglass state, exposed for qa/onboarding.js under the same ?dev=1-only, read-only
+            // convention as __flipperDebug/__triggerDebug above. The onboarding hints live in this
+            // object as strings, and the alternative - reading them back off the 1024x480 canvas
+            // with pixel sampling, the way qa/state-palette.js has to for colours - cannot tell
+            // "HOLD SPACE TO LAUNCH" from "HIT A LIT TARGET". This is the same object the panel
+            // itself renders from, so a test reading it cannot drift from what a player sees.
+            window.__backglassDebug = backglass.state;
+
+            // End-of-ball sequence state, for qa/end-of-ball.js - same ?dev=1-only, read-only
+            // convention as __backglassDebug directly above. The beat a drain is currently in is
+            // not recoverable from the panel: several beats can share a message length, and the
+            // gap between "waiting on the bonus count" and "counting down its own beat" is
+            // invisible from outside. `sequence` is the same object the sequence itself runs on,
+            // so a test reading it cannot drift from what actually ran; bonusTotal is the same
+            // read startBonusCount() makes, exposed so a test can assert the payout landed
+            // exactly rather than restating the formula and drifting from it. A wrapper rather
+            // than hanging bonusTotal off `endOfBall` itself - a diagnostic must not add fields
+            // to live gameplay state.
+            window.__endOfBallDebug = { sequence: endOfBall, bonusTotal: pendingBonusTotal };
 
             // Flipper-geometry regression test instrumentation (qa/flipper-geometry.js) - same
             // "?dev=1-only, read-only, zero impact on a real player" convention as
@@ -9728,10 +11092,19 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // satisfy the doc's "no charge-time or physics-state corruption from the pause
             // duration" requirement. Camera effects and the dev-panel status readouts are left
             // running during pause - harmless either way, and simpler than guarding everything.
-            updateSaturnRotation(obstacles.saturnRings, deltaMs);
-            updateSkyboxLayers(skybox, deltaMs);
-
+            //
+            // Saturn's spin and the skybox parallax used to sit HERE, outside the gate, on the
+            // same "harmless either way" reasoning. They are not harmless behind the pause menu:
+            // that scene is the pause screen's background, and a rotating planet and drifting
+            // starfield behind a paused game are the game still animating. Moved inside the gate
+            // as part of the pause-background pass. Both are delta-driven per frame rather than
+            // read off an absolute clock, so skipping frames costs nothing on resume - they carry
+            // on from where they stopped instead of jumping. Attract mode and the title screen are
+            // unaffected: neither is paused.
             if (!isPaused) {
+                updateSaturnRotation(obstacles.saturnRings, deltaMs);
+                updateVisionGateIdle(obstacles, deltaMs, gameplayClockMs);
+                updateSkyboxLayers(skybox, deltaMs);
                 // Timer audit fix - accumulates only while unpaused, see gameplayClockMs' own
                 // declaration comment for why the orbit/combo windows read this instead of
                 // performance.now().
@@ -9740,6 +11113,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 updateFlipperMotor(rightFlipper, deltaMs);
                 updateDropTargetBank(deltaMs);
                 updateBonusCount(deltaMs);
+                // Ticks in the same gate as updateBonusCount() above, and directly after it, on
+                // purpose: the sequence's BONUS beat parks on that count's completion, so a frame
+                // that advanced the sequence without having advanced the count would be a frame
+                // spent waiting on a subsystem that had not yet had its chance to finish.
+                updateEndOfBallSequence(deltaMs);
                 updateSkillShot(deltaMs);
                 updateBallSave(deltaMs);
                 updateHitCooldowns(deltaMs); // timer audit fix - was a real setTimeout per cooldown, see hitCooldowns' own comment

@@ -433,9 +433,9 @@
                  full 12s window). Each badge appears/disappears independently as its own
                  already-existing boolean flips; the whole strip collapses to nothing when none are
                  active - never a static row of empty slots.
-             - Deliberately NOT given a persistent slot: rank (changes rarely, on mission
-               completion only - the existing "RANK UP!" toast plus the backglass/Game-Over Final
-               Rank line already cover it), skill shot (a 2.5s window, too brief for a badge to be
+             - Deliberately NOT given a persistent slot: rank (changes rarely, on vision
+               completion only - the existing "ASCENSION:" toast plus the backglass/Game-Over
+               FINAL STATE line already cover it), skill shot (a 2.5s window, too brief for a badge to be
                worth the screen space over its own existing "LAUNCH! SKILL SHOT READY" toast), the
                end-of-ball bonus multiplier (a payout curious-to-check total, not an in-the-moment
                decision the way ball save/kickback are - stays backglass-only), and combo tier
@@ -464,10 +464,14 @@
                resolves to), so at 200% zoom on a narrow phone width a vw-sized box rendered
                visually TWICE as large collided with the score/lives+pause cluster in the opposite
                corner - confirmed via Playwright at 390px + zoom:2. A small fixed cap keeps this
-               box's max footprint predictable and small regardless of zoom; the longest real
-               mission name (RE-ENTRY CIRCUIT, MISSION_DEFS) still comfortably fits inside it, and
-               #mission-hud-name's own overflow:ellipsis (below) is the real safety net for
-               anything longer, not this number. */
+               box's max footprint predictable and small regardless of zoom. Measured against the
+               real element: the longest mission name (CHAKRA AWAKENING, MISSION_DEFS - 16 chars,
+               the same length as the RE-ENTRY CIRCUIT it replaced) fits at the 12px desktop size
+               (115px of 115), and is ELLIPSISED at the 11px <=480px size (106px wanted, 96px of
+               room) - exactly as the old longest name already was, unchanged by the retheme. That
+               is what #mission-hud-name's overflow:ellipsis (below) is for, and it, not this
+               number, is the real safety net. Widening the cap here would trade back the width
+               this rule's whole comment exists to protect. */
             max-width: 150px;
             display: flex;
             align-items: baseline;
@@ -1442,10 +1446,17 @@
             justify-content: center;
         }
 
+        /* The panel centres when it fits and top-anchors when it does not, via auto block margins
+           on the panel itself rather than justify-content:center on the overlay. That distinction
+           is the whole point: a centred flex item taller than its scroll container has its
+           overflowing top clipped AND unreachable, which is exactly the case this screen hits - a
+           long run's detail block on a short phone. Auto margins absorb free space when there is
+           any and collapse to zero when there is not, so it centres on a desktop and scrolls
+           correctly on a phone. The old fixed padding-top:8vh did neither. */
         #gameover-overlay {
             justify-content: flex-start;
-            padding-top: 8vh;
         }
+        #gameover-overlay .over-panel { margin-block: auto; }
 
         /* Shared "dialog card" (UX pass, user-requested) - menu/pause/controls previously had no
            visual container at all, just text/buttons floating directly over the translucent
@@ -1472,19 +1483,12 @@
             margin: 0 0 8px 0;
         }
 
-        #gameover-overlay h1 { color: #ff0099; text-shadow: 0 0 12px #ff0099; }
         #controls-overlay h1, #menu-overlay .tagline { color: #ffff00; }
 
         .screen-overlay .tagline {
             font-size: clamp(14px, 3.5vw, 18px);
             opacity: 0.9;
             margin: 0 0 24px 0;
-        }
-
-        .screen-overlay .highscore-line {
-            font-size: clamp(18px, 4.5vw, 24px);
-            color: #ffff00;
-            margin-bottom: 32px;
         }
 
         .screen-overlay .pulse-text {
@@ -1548,7 +1552,7 @@
            gameOverOverlay's own equivalent in babylon-game.js, neither of which this touches).
            Slightly smaller max font size than before to comfortably fit inside its own border on
            narrow phone widths without wrapping. */
-        .start-instructions, .restart-instructions {
+        .start-instructions {
             display: inline-block;
             font-size: clamp(15px, 4.2vw, 24px);
             color: #00ff99;
@@ -1588,29 +1592,480 @@
             background: #2a2a5e;
         }
 
-        #pause-newgame-btn { border-color: #00ff00; }
-        #pause-newgame-btn:active, #pause-newgame-btn:hover { color: #00ff00; }
-        #pause-controls-btn { border-color: #ffff00; }
-        #pause-controls-btn:active, #pause-controls-btn:hover { color: #ffff00; }
+        /* ==========================================================================
+           PAUSE PANEL (user-requested redesign)
 
-        /* UX pass (user-requested): Resume is the action most players take most often (every
-           pause is expected to end in a resume, not a new game) - previously it had the exact
-           same visual weight as every other button on the screen, with nothing marking it as the
-           primary/default one. A filled background (instead of the shared flat #1a1a3e) plus a
-           stronger glow is enough to read as "the main button" without changing its size, border
-           color, or position - still the first item in the list, same as before. */
-        #pause-resume-btn {
-            background: linear-gradient(135deg, rgba(0, 255, 255, 0.28), rgba(0, 140, 190, 0.38));
-            box-shadow: 0 0 18px rgba(0, 255, 255, 0.4);
-        }
-        #pause-resume-btn:active, #pause-resume-btn:hover {
-            background: linear-gradient(135deg, rgba(0, 255, 255, 0.4), rgba(0, 140, 190, 0.5));
+           WHAT WAS WRONG. Pause was the surface the title-screen redesign left behind. It still
+           inherited .screen-overlay's `font-family: 'Courier New', monospace` - the same "reads as
+           Courier" problem --title-font's own comment describes fixing for the wordmark - while
+           the title, the HUD and the backglass share a two-font system with deliberate tracking.
+           Its palette was pure 8-bit web colour (#0ff / #0f0 / #ff0 / #888) against a game built
+           on alpha-modulated cyans and violets; its three buttons carried three DIFFERENT border
+           hues, so nothing read as primary; its 3px borders outweighed the 2px card containing
+           them; and a flat rgba(_, 0.93) scrim blacked out the cosmic playfield at the one moment
+           the player has time to look at it.
+
+           WHAT REPLACES IT. Not a restyled card - the same construction #player-hud already uses,
+           so pause reads as another lit surface on the machine: near-black face, 3px dot-matrix
+           grain at ~3% alpha, a 1px bezel, inset recess + top light-catch, and 1px lit text edges
+           instead of neon bloom. Type comes from the existing tokens only - no font is added.
+           Mobile-first: the base rules below are the phone layout and the two min-width queries
+           only scale it up.
+
+           EVERYTHING FUNCTIONAL IS UNTOUCHED. Same ids, same handlers, same display:flex toggling
+           from openPauseMenu()/resumeGame()/backFromControlsScreen(). The Controls and Game Over
+           overlays deliberately keep .overlay-card and their current look - this pass was scoped
+           to pause alone, so every selector here is under #pause-overlay.
+           ========================================================================== */
+        #pause-overlay {
+            justify-content: center;
+            /* The scrim is FOUR background layers in one paint - no extra elements, no second
+               compositing pass. Listed topmost-first, the way CSS stacks them:
+                 1. vignette      transparent through the middle, pulling the corners down. The
+                                  playfield's brightest run is its lower corners (slingshot and
+                                  flipper glow); a flat wash leaves those competing with the panel
+                                  no matter how dark it is, and only a radial can answer that.
+                 2. violet tint   from the upper band, where the backglass sits.
+                 3. cyan tint     from the lower band, where the flippers do. Both are under 10%
+                                  alpha: a colour cast on the frozen scene, not a colour.
+                 4. darkening     the base grade, middle band 0.70 (was a flat-ish 0.58).
+
+               Every number here was CALIBRATED against measured transmission rather than picked,
+               by screenshotting the paused and unpaused frames and comparing mean luminance over
+               three regions of the table. Against the previous scrim:
+
+                                     lower-left  lower-right  mid-left
+                   previous              18%          19%        40%
+                   this scrim            20%          21%        31%
+
+               - the brightest, most distracting part of the table (the lit lower corners) stays
+               as suppressed as it already was, while the middle band - which is most of what the
+               eye actually sees - drops from 40% to 31%. Strongly darker overall, still clearly a
+               pinball table.
+
+               The two tint layers are part of that budget, not decoration on top of it: a
+               low-alpha wash over a near-black area RAISES its luminance. A first pass put the
+               cyan at 0.08 centred at 96%, directly over the lower corners, and measured them at
+               26% - LIGHTER than the scrim it replaced, the opposite of the intent. Weakened to
+               0.035 and lifted to 82%, which is what buys the corner numbers above.
+
+               No transition and no animation anywhere in here: the scrim is painted once when the
+               panel opens and never repaints while paused. */
+            background:
+                radial-gradient(ellipse 120% 100% at 50% 46%,
+                    rgba(2, 0, 10, 0) 0%,
+                    rgba(2, 0, 10, 0) 44%,
+                    rgba(2, 0, 10, 0.34) 78%,
+                    rgba(2, 0, 10, 0.58) 100%),
+                radial-gradient(ellipse 90% 60% at 50% 16%,
+                    rgba(122, 62, 220, 0.07) 0%,
+                    rgba(122, 62, 220, 0) 72%),
+                radial-gradient(ellipse 85% 55% at 50% 82%,
+                    rgba(40, 180, 220, 0.035) 0%,
+                    rgba(40, 180, 220, 0) 72%),
+                linear-gradient(to bottom,
+                    rgba(3, 0, 12, 0.93) 0%,
+                    rgba(3, 0, 12, 0.80) 16%,
+                    rgba(3, 0, 12, 0.70) 42%,
+                    rgba(3, 0, 12, 0.70) 60%,
+                    rgba(3, 0, 12, 0.85) 86%,
+                    rgba(3, 0, 12, 0.95) 100%);
+            padding: max(5vh, 40px) 16px max(5vh, 40px);
         }
 
-        .screen-overlay .hint {
+        /* Full-screen backdrop blur, and the reason it is gated rather than simply applied.
+           A backdrop-filter over the whole viewport is the single most expensive thing this
+           stylesheet could ask for, and it is only cheap here because the scene behind it is
+           genuinely FROZEN (the render loop's Saturn spin and skybox parallax are now inside its
+           pause gate - see babylon-game.js). Measured paused frame cost with it on versus off is
+           recorded in the commit.
+           Gated on a real desktop pointer AND width, not width alone: a wide tablet is still a
+           tablet. Everything below that gets the four-layer gradient scrim on its own, which is
+           the low-cost path and already carries the whole design - the blur is a refinement, not
+           a load-bearing part of it. @supports so a browser without backdrop-filter simply never
+           sees the rule rather than silently painting an unfiltered box. */
+        @media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+            @supports ((-webkit-backdrop-filter: blur(2px)) or (backdrop-filter: blur(2px))) {
+                #pause-overlay {
+                    -webkit-backdrop-filter: blur(2px);
+                    backdrop-filter: blur(2px);
+                }
+                /* The panel's own blur is redundant once the whole backdrop is blurred, and
+                   nesting one backdrop-filter inside another is a known compositing trap - the
+                   inner one has to re-read an already-filtered surface. Dropped here only; the
+                   phone path keeps it, where it is the only blur on screen.
+                   Scoped through #pause-overlay deliberately: a bare `.pause-panel` ties with the
+                   panel's own rule on specificity and loses on source order, since that rule is
+                   declared later in the file. Measured - the first version of this reported
+                   blur(3px) still applied. An id here makes it win regardless of ordering. */
+                #pause-overlay .pause-panel {
+                    -webkit-backdrop-filter: none;
+                    backdrop-filter: none;
+                }
+            }
+        }
+
+        .pause-panel {
+            width: 100%;
+            max-width: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding: 20px 16px 14px;
+            box-sizing: border-box;
+            border-radius: 14px;
+            /* Same face as #player-hud, one step more opaque: this one sits over the brightest
+               part of the table rather than a corner of it. */
+            background-color: rgba(6, 3, 14, 0.86);
+            /* The panel grain, at the HUD's own 3px pitch. Pulled to ~3% (the HUD uses ~4.5%)
+               because this is a much larger surface and the texture should stay felt-not-seen. */
+            background-image: radial-gradient(circle at 50% 50%,
+                rgba(130, 245, 255, 0.03) 0.5px, rgba(130, 245, 255, 0) 0.75px);
+            background-size: 3px 3px;
+            /* The thin structural bezel - 1px at 30% alpha, exactly #player-hud's, replacing the
+               old 2px solid #00ffff that drew a hard box around the whole composition. */
+            border: 1px solid rgba(126, 226, 236, 0.30);
+            box-shadow:
+                inset 0 1px 0 rgba(170, 240, 255, 0.13),   /* light catching the top edge */
+                inset 0 0 46px rgba(138, 43, 226, 0.10),   /* the subtle internal violet glow */
+                0 20px 52px rgba(0, 0, 0, 0.55);           /* the panel sitting off the playfield */
+            /* Progressive: where it is unsupported the panel is simply a solid dark face, which
+               is already legible - nothing depends on the blur. */
+            -webkit-backdrop-filter: blur(3px);
+            backdrop-filter: blur(3px);
+        }
+
+        .pause-plate { text-align: center; }
+
+        /* The maker's plate, not a hero title: on a pause screen the STATE is the message and the
+           game's name is context. Tracked wide and held well back in luminance so it reads as
+           stamped on the bezel. text-indent compensates for the trailing letter-space, which
+           otherwise pushes centred tracked text visibly left. */
+        .pause-wordmark {
+            margin: 0 0 8px;
+            font-family: var(--title-font);
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.44em;
+            text-indent: 0.44em;
+            color: rgba(206, 240, 252, 0.55);
+            text-shadow: none;
+        }
+
+        #pause-overlay h1 {
+            margin: 0;
+            font-family: var(--hud-label-font);
+            font-size: 19px;
+            font-weight: 700;
+            letter-spacing: 0.20em;
+            text-indent: 0.20em;
+            text-transform: uppercase;
+            color: rgba(163, 246, 255, 0.94);
+            /* A 1px lit edge, not a bloom - the same call #player-hud's score makes. The old
+               `0 0 12px #ff00ff, 0 0 24px #00ffff` is what made this read as neon signage. */
+            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.8), 0 0 1px rgba(120, 250, 255, 0.55);
+        }
+
+        .pause-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        /* --- Button tiers -------------------------------------------------------------------
+           Three ACTIONS of three different weights, so they must not be three identical boxes.
+           The previous pass separated them by brightness alone, which left the geometry uniform
+           and the eye with nothing to sort by at a glance. Size, fill and border weight now carry
+           the ranking, and colour only reinforces it:
+
+             RESUME     primary    tallest, largest type, filled and lit, strongest border
+             CONTROLS   secondary  standard height, recessed but unlit, quieter border
+             NEW GAME   tertiary   shortest, smallest type, NO fill and NO border at rest -
+                                   a text action that only draws a box when you reach for it
+
+           The base rule below is deliberately geometry-free apart from what all three share; each
+           tier sets its own size. Hover is gated behind a real pointer, and :active is a separate
+           state from hover rather than sharing its rule, so a press reads as a press. */
+        #pause-overlay .pause-btn {
+            display: block;
+            width: 100%;
+            /* Overrides .screen-overlay button's min-width:min(240px,100%), which left a fixed
+               240px button ragged inside a wider card instead of filling its column. */
+            min-width: 0;
+            margin: 0;                        /* rhythm comes from .pause-actions' gap, not <br> */
+            box-sizing: border-box;
+            font-family: var(--hud-label-font);
+            font-weight: 700;
+            text-transform: uppercase;
+            border-radius: 9px;
+            cursor: pointer;
+            /* Touch response. manipulation drops the double-tap-zoom wait so a tap registers
+               immediately; the tap highlight is turned off because :active below already gives a
+               deliberate pressed state, and the platform's grey flash on top of it reads as a
+               rendering fault rather than feedback. */
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            transition: color 140ms ease, border-color 140ms ease,
+                        background-color 140ms ease, box-shadow 140ms ease,
+                        transform 90ms ease;
+        }
+
+        /* PRIMARY - the action almost every pause ends in. Tallest and largest in the stack, a
+           filled lit lamp rather than a recess: it is the only one that reads as illuminated. */
+        #pause-overlay .pause-btn-primary {
+            min-height: 56px;
+            padding: 17px 14px;
+            font-size: 15px;
+            letter-spacing: 0.2em;
+            text-indent: 0.2em;
+            color: #eafcff;
+            background-color: rgba(0, 30, 44, 0.78);
+            background-image: radial-gradient(circle at 50% 50%,
+                rgba(130, 245, 255, 0.05) 0.5px, rgba(130, 245, 255, 0) 0.75px);
+            background-size: 3px 3px;
+            border: 1px solid rgba(126, 226, 236, 0.62);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.55),
+                inset 0 0 0 1px rgba(120, 250, 255, 0.16),
+                inset 0 -1px 0 rgba(150, 255, 255, 0.16),
+                0 0 22px rgba(0, 200, 230, 0.18);
+            text-shadow:
+                0 -1px 0 rgba(255, 255, 255, 0.22),
+                0 1px 0 rgba(0, 26, 38, 0.9),
+                0 0 1px rgba(120, 250, 255, 0.6);
+        }
+
+        /* SECONDARY - a recess cut into the panel, same construction as the score window, but
+           unlit: no inner ring and no outer glow, which is what keeps it below the primary. */
+        #pause-overlay .pause-btn-secondary {
+            min-height: 46px;                 /* comfortably over the 44px touch-target floor */
+            padding: 13px 14px;
             font-size: 13px;
-            color: #888;
-            margin-top: 20px;
+            letter-spacing: 0.18em;
+            text-indent: 0.18em;
+            color: rgba(206, 240, 250, 0.88);
+            background-color: rgba(0, 2, 6, 0.7);
+            background-image: radial-gradient(circle at 50% 50%,
+                rgba(130, 245, 255, 0.035) 0.5px, rgba(130, 245, 255, 0) 0.75px);
+            background-size: 3px 3px;
+            border: 1px solid rgba(126, 226, 236, 0.22);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.7),
+                inset 0 -1px 0 rgba(150, 255, 255, 0.06);
+            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.85);
+        }
+
+        /* TERTIARY / DESTRUCTIVE - the only control here that discards a run. Given the least
+           visual weight of the three on purpose: no fill, no border and the smallest label, so it
+           never competes for the eye. It is NOT hidden - it keeps a full 44px target, sits in the
+           same column, and grows a real border the moment it is hovered, focused or pressed. The
+           violet is the one hue departure in the panel, and it is spent here rather than on
+           decoration. */
+        #pause-overlay .pause-btn-reset {
+            min-height: 44px;
+            padding: 12px 14px;
+            font-size: 11px;
+            letter-spacing: 0.2em;
+            text-indent: 0.2em;
+            color: rgba(226, 202, 248, 0.72);
+            background-color: transparent;
+            background-image: none;
+            border: 1px solid transparent;
+            box-shadow: none;
+            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.85);
+        }
+        /* Grouping by proximity. RESUME and CONTROLS are both "carry on" actions and stay a
+           tight pair; the one control that throws the run away gets extra air above it, so
+           reaching it is a deliberate move down rather than the next thing under your thumb.
+           Declared HERE, after the base rule: `.pause-btn` sets margin:0 and both selectors have
+           the same specificity, so source order is what decides - stated first, this silently
+           lost and the gap never appeared. */
+        #pause-overlay .pause-btn-reset { margin-top: 8px; }
+
+        /* Hover is gated behind a REAL pointer. Left ungated it sticks after a tap on touch -
+           the button keeps its hover paint until something else is touched, which reads as a
+           stuck control. Touch devices get :active below instead, which is the correct state
+           for them anyway. */
+        @media (hover: hover) and (pointer: fine) {
+            #pause-overlay .pause-btn-primary:hover {
+                color: #f6ffff;
+                border-color: rgba(170, 250, 255, 0.85);
+                background-color: rgba(0, 38, 54, 0.85);
+                box-shadow:
+                    inset 0 1px 2px rgba(0, 0, 0, 0.5),
+                    inset 0 0 0 1px rgba(150, 253, 255, 0.24),
+                    inset 0 -1px 0 rgba(170, 255, 255, 0.2),
+                    0 0 28px rgba(0, 210, 240, 0.28);
+            }
+            #pause-overlay .pause-btn-secondary:hover {
+                color: #eafcff;
+                border-color: rgba(150, 245, 255, 0.5);
+                background-color: rgba(0, 16, 26, 0.8);
+                box-shadow:
+                    inset 0 1px 2px rgba(0, 0, 0, 0.6),
+                    inset 0 0 0 1px rgba(120, 250, 255, 0.12),
+                    inset 0 -1px 0 rgba(150, 255, 255, 0.1);
+            }
+            #pause-overlay .pause-btn-reset:hover {
+                color: #f4e9ff;
+                border-color: rgba(198, 150, 245, 0.55);
+                background-color: rgba(24, 8, 38, 0.6);
+            }
+        }
+
+        /* Pressed. A separate state from hover, and the only one that MOVES: 1px down with the
+           recess deepened and the glow pulled back, so the surface reads as pushed into the panel
+           rather than merely lit. This is what a touch player sees, since they never get hover. */
+        #pause-overlay .pause-btn:active { transform: translateY(1px); }
+        #pause-overlay .pause-btn-primary:active {
+            color: #ffffff;
+            background-color: rgba(0, 22, 34, 0.9);
+            border-color: rgba(170, 250, 255, 0.9);
+            box-shadow:
+                inset 0 2px 5px rgba(0, 0, 0, 0.8),
+                inset 0 0 0 1px rgba(150, 253, 255, 0.2),
+                0 0 10px rgba(0, 200, 230, 0.12);
+        }
+        #pause-overlay .pause-btn-secondary:active {
+            color: #f2ffff;
+            background-color: rgba(0, 8, 14, 0.9);
+            border-color: rgba(150, 245, 255, 0.55);
+            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.85);
+        }
+        #pause-overlay .pause-btn-reset:active {
+            color: #ffffff;
+            background-color: rgba(30, 10, 48, 0.8);
+            border-color: rgba(206, 160, 250, 0.7);
+            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.8);
+        }
+
+        /* Keyboard focus. One ring for all three tiers - a focus indicator is a wayfinding
+           affordance, not a tier badge, and it has to look the same wherever it lands. Doubled:
+           a solid outline for forced-colors and high-contrast users plus a soft halo, because a
+           thin ring alone is easy to lose against a near-black panel over a lit playfield. The
+           3px offset clears the tertiary's own hover border so the two never overlap into a
+           muddy double line. */
+        #pause-overlay .pause-btn:focus-visible {
+            outline: 2px solid #9df3ff;
+            outline-offset: 3px;
+            border-color: rgba(170, 250, 255, 0.8);
+            box-shadow: 0 0 0 5px rgba(90, 220, 250, 0.16), 0 0 22px rgba(0, 200, 230, 0.22);
+        }
+
+        /* Current-run summary. Legend/readout split and tracking straight off #player-hud's
+           .hud-label / .hud-value pair, at the smallest sizes in the panel: labels 9px, values
+           11-12px against RESUME's 15-17px, so it can never compete with the primary action.
+           Rows are label-left / value-right, which is how the backglass reads its own windows. */
+        .pause-summary {
+            margin: 0;
+            padding-top: 12px;
+            border-top: 1px solid rgba(126, 226, 236, 0.12);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .pause-summary-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+            min-width: 0;
+        }
+        /* The hidden attribute has to beat the flex display above it, or an inactive vision row
+           would still lay out. */
+        .pause-summary-row[hidden] { display: none; }
+        .pause-summary-row dt {
+            flex: 0 0 auto;
+            font-family: var(--hud-label-font);
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: rgba(150, 245, 255, 0.55);
+        }
+        .pause-summary-row dd {
+            margin: 0;
+            min-width: 0;
+            font-family: var(--hud-digit-font);
+            font-size: 12px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums lining-nums;
+            letter-spacing: 0.02em;
+            color: rgba(214, 245, 255, 0.9);
+            text-align: right;
+            /* A long value truncates rather than wrapping the row into two lines and breaking the
+               summary's rhythm. */
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pause-summary-state {
+            /* Inline colour is set by syncPauseStatus() from STATE_COLORS, so the summary carries
+               the same spectral progression the backglass and the ASCENSION toast do. The value
+               here is only the pre-script fallback. */
+            color: #7dffe0;
+        }
+        .pause-summary-vision {
+            display: flex;
+            align-items: baseline;
+            justify-content: flex-end;
+            gap: 8px;
+            /* The name is the part allowed to truncate; the progress count never is - it is the
+               shorter and the more perishable of the two. */
+            overflow: visible;
+        }
+        .pause-summary-vision-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 11px;
+            color: rgba(255, 190, 96, 0.92);   /* the backglass VISION window's own amber */
+        }
+        .pause-summary-progress {
+            flex: 0 0 auto;
+            font-size: 11px;
+            color: rgba(255, 210, 122, 0.75);
+        }
+
+        .pause-hint {
+            margin: 10px 0 0;
+            text-align: center;
+        }
+        .pause-hint-copy {
+            font-family: var(--hud-label-font);
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: rgba(160, 210, 235, 0.45);
+        }
+        /* Platform copy, same mechanism as the title screen's hint: a coarse-pointer media query
+           as the pre-script default, then [data-touch-controls] once the game has decided. */
+        #pause-overlay span.pause-hint-copy.hint-touch { display: none; }
+        @media (hover: none) and (pointer: coarse) {
+            #pause-overlay span.pause-hint-copy.hint-desktop { display: none; }
+            #pause-overlay span.pause-hint-copy.hint-touch { display: inline; }
+        }
+        html[data-touch-controls="on"] #pause-overlay span.pause-hint-copy.hint-desktop { display: none; }
+        html[data-touch-controls="on"] #pause-overlay span.pause-hint-copy.hint-touch { display: inline; }
+        html[data-touch-controls="off"] #pause-overlay span.pause-hint-copy.hint-desktop { display: inline; }
+        html[data-touch-controls="off"] #pause-overlay span.pause-hint-copy.hint-touch { display: none; }
+
+        /* Mobile-first scale-up. Nothing below is a layout change - only size. */
+        @media (min-width: 480px) {
+            .pause-panel { max-width: 364px; gap: 22px; padding: 24px 22px 16px; }
+            .pause-wordmark { font-size: 12px; }
+            #pause-overlay h1 { font-size: 22px; }
+            /* Scale-up keeps the RATIO between tiers, rather than growing them uniformly and
+               flattening the hierarchy back out. */
+            #pause-overlay .pause-btn-primary { font-size: 17px; padding: 19px 16px; min-height: 62px; }
+            #pause-overlay .pause-btn-secondary { font-size: 14px; padding: 15px 16px; min-height: 50px; }
+            #pause-overlay .pause-btn-reset { font-size: 12px; padding: 13px 16px; min-height: 46px; }
+        }
+        @media (min-width: 900px) {
+            .pause-panel { max-width: 396px; }
+            #pause-overlay h1 { font-size: 24px; }
         }
 
         #controls-rows { margin: 12px 0 24px 0; }
@@ -1627,14 +2082,264 @@
             margin-top: 4px;
         }
 
-        #gameover-score {
-            font-size: clamp(36px, 10vw, 54px);
-            font-weight: bold;
-            color: #00ffff;
-            margin: 4px 0 20px 0;
+        /* ==========================================================================
+           GAME OVER PANEL (user-requested retheme). Shares the pause panel's surface treatment
+           rather than restating it: .over-panel repeats .pause-panel's face/grain/bezel/shadow
+           because those four properties ARE the machine's panel material, and .pause-plate /
+           .pause-wordmark are reused outright by the markup so the maker's plate is literally the
+           same element, not a copy that can drift.
+
+           Why not just add .pause-panel to this screen: the two panels differ in the one axis
+           that matters, height. Pause has three fixed rows and centres; game over has a hero
+           score, three summary rows, an action, a variable-length detail block and a hint, and
+           still has to stay top-anchored and scrollable on a short phone. A shared class that has
+           to be overridden on width, max-height, gap and padding is not shared.
+           ========================================================================== */
+        .over-panel {
+            width: 100%;
+            max-width: 340px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            padding: 22px 18px 16px;
+            box-sizing: border-box;
+            border-radius: 14px;
+            /* The four properties that make this the same material as .pause-panel and
+               #player-hud: near-black face, 3px dot-matrix grain, 1px bezel, panel shadow. */
+            background-color: rgba(6, 3, 14, 0.86);
+            background-image: radial-gradient(circle at 50% 50%,
+                rgba(130, 245, 255, 0.03) 0.5px, rgba(130, 245, 255, 0) 0.75px);
+            background-size: 3px 3px;
+            border: 1px solid rgba(126, 226, 236, 0.30);
+            box-shadow:
+                inset 0 1px 0 rgba(170, 240, 255, 0.13),
+                inset 0 0 46px rgba(138, 43, 226, 0.10),
+                0 20px 52px rgba(0, 0, 0, 0.55);
         }
 
-        #gameover-stats { font-size: 15px; line-height: 1.8; margin-bottom: 24px; }
+        /* The heading drops the old neon entirely. It was `color:#ff0099` with a 12px magenta
+           bloom - hot pink signage over a dark table, the loudest thing in the whole interface,
+           on the one screen where the score is supposed to be what the player looks at. Same
+           1px-lit-edge treatment the pause heading uses instead. */
+        #gameover-overlay h1 {
+            margin: 0;
+            font-family: var(--hud-label-font);
+            font-size: 19px;
+            font-weight: 700;
+            letter-spacing: 0.20em;
+            text-indent: 0.20em;
+            text-transform: uppercase;
+            color: rgba(163, 246, 255, 0.94);
+            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.8), 0 0 1px rgba(120, 250, 255, 0.55);
+        }
+
+        .over-score { text-align: center; }
+        .over-score-label {
+            margin: 0 0 2px;
+            font-family: var(--hud-label-font);
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: rgba(150, 245, 255, 0.55);
+        }
+        /* The one large readout on the panel, in the HUD's own digit face with tabular figures so
+           a six-digit score does not jitter against a five-digit one. */
+        #gameover-score {
+            margin: 0;
+            font-family: var(--hud-digit-font);
+            font-size: 44px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums lining-nums;
+            letter-spacing: 0.01em;
+            line-height: 1.05;
+            color: rgba(226, 250, 255, 0.96);
+            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.8), 0 0 2px rgba(120, 250, 255, 0.4);
+        }
+
+        /* Summary rows: .pause-summary's legend/readout split at the same sizes, so the two
+           screens read their values the same way. */
+        .over-summary {
+            margin: 0;
+            padding-top: 12px;
+            border-top: 1px solid rgba(126, 226, 236, 0.12);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .over-summary-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+            min-width: 0;
+        }
+        .over-summary-row dt {
+            flex: 0 0 auto;
+            font-family: var(--hud-label-font);
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: rgba(150, 245, 255, 0.55);
+        }
+        .over-summary-row dd {
+            margin: 0;
+            min-width: 0;
+            font-family: var(--hud-digit-font);
+            font-size: 12px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums lining-nums;
+            letter-spacing: 0.02em;
+            color: rgba(214, 245, 255, 0.9);
+            text-align: right;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        /* Inline colour is set by showGameOverScreen() from STATE_COLORS, exactly as the pause
+           summary's own state row does - so the state the player finished in carries the same
+           spectral progression here, on the screen where it is the final word on the run. The
+           value below is only the pre-script fallback. */
+        .over-state { color: #7dffe0; }
+        /* The record line, in the backglass HIGH SCORE window's own amber rather than the cyan
+           the other values use - the same colour separation that window already makes. */
+        .over-highscore { color: rgba(255, 200, 73, 0.92); }
+        /* Set by showGameOverScreen() when this run took the record: the label becomes NEW HIGH
+           SCORE and the row lights. A class rather than an inline style so the pulse and the
+           colour arrive together. */
+        .over-summary-row.is-new-record dt { color: rgba(255, 214, 140, 0.9); }
+        .over-summary-row.is-new-record dd { color: #ffc849; }
+
+        /* The action. Weighted like .pause-btn-primary - filled, lit, tallest type on the panel
+           after the score - because unlike the pause screen this panel has exactly one control
+           and there is no tier for it to sit above. */
+        #gameover-overlay .over-btn {
+            display: block;
+            width: 100%;
+            margin: 0;
+            box-sizing: border-box;
+            font-family: var(--hud-label-font);
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-indent: 0.16em;
+            text-transform: uppercase;
+            padding: 17px 16px;
+            min-height: 56px;
+            border-radius: 10px;
+            cursor: pointer;
+            color: rgba(228, 252, 255, 0.97);
+            background: linear-gradient(180deg, rgba(0, 190, 214, 0.30), rgba(0, 120, 150, 0.20));
+            border: 1px solid rgba(120, 240, 255, 0.55);
+            box-shadow:
+                inset 0 1px 0 rgba(190, 250, 255, 0.22),
+                0 0 18px rgba(0, 220, 255, 0.16);
+            transition: background 120ms ease, box-shadow 120ms ease, transform 60ms ease;
+        }
+        /* Hover gated behind a real pointer, and :active kept a separate state from hover, both
+           matching how the pause buttons handle the same problem on touch. */
+        @media (hover: hover) and (pointer: fine) {
+            #gameover-overlay .over-btn:hover {
+                background: linear-gradient(180deg, rgba(0, 214, 240, 0.40), rgba(0, 140, 172, 0.26));
+                box-shadow:
+                    inset 0 1px 0 rgba(200, 252, 255, 0.28),
+                    0 0 26px rgba(0, 230, 255, 0.26);
+            }
+        }
+        #gameover-overlay .over-btn:active {
+            transform: translateY(1px);
+            box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
+        }
+        #gameover-overlay .over-btn:focus-visible {
+            outline: 2px solid rgba(150, 245, 255, 0.9);
+            outline-offset: 3px;
+        }
+
+        /* Detail readout - the quietest thing on the panel by design. Two columns so a long run's
+           breakdown stays inside one screen instead of pushing the action off it. */
+        .over-detail {
+            padding-top: 12px;
+            border-top: 1px solid rgba(126, 226, 236, 0.12);
+        }
+        .over-detail[hidden] { display: none; }
+        .over-detail-legend {
+            margin: 0 0 8px;
+            font-family: var(--hud-label-font);
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: rgba(150, 245, 255, 0.38);
+        }
+        /* Multi-column, NOT a two-column grid, and the difference is reading order. A grid fills
+           row-major, so a tally list laid out that way reads BUMPERS, COMET / SATURN, TARGETS -
+           the eye has to zig-zag across the gutter for every pair, and scanning down either column
+           gives every other entry. Columns fill top-to-bottom, so the left column is the first
+           half of the list in order and the right column the second, which is how a printed tally
+           reads. It also handles a variable row count for free, where grid-auto-flow:column would
+           need a row count this block cannot know. */
+        #gameover-stats {
+            columns: 2;
+            column-gap: 16px;
+            text-align: left;
+        }
+        #gameover-stats p {
+            /* A row must never be split across the column break. */
+            break-inside: avoid;
+            margin: 0;
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+            min-width: 0;
+            font-family: var(--hud-label-font);
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.10em;
+            text-transform: uppercase;
+            color: rgba(160, 210, 235, 0.5);
+        }
+        #gameover-stats p span {
+            flex: 0 0 auto;
+            font-family: var(--hud-digit-font);
+            font-size: 10px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums lining-nums;
+            letter-spacing: 0;
+            color: rgba(200, 235, 250, 0.72);
+        }
+
+        .over-hint {
+            margin: 6px 0 0;
+            text-align: center;
+        }
+        .over-hint-copy {
+            font-family: var(--hud-label-font);
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: rgba(160, 210, 235, 0.45);
+        }
+
+        /* Mobile-first scale-up, same shape as the pause panel's: size only, no layout change. */
+        @media (min-width: 480px) {
+            .over-panel { max-width: 384px; gap: 20px; padding: 26px 24px 18px; }
+            #gameover-overlay h1 { font-size: 22px; }
+            #gameover-score { font-size: 52px; }
+            #gameover-overlay .over-btn { font-size: 17px; padding: 19px 16px; min-height: 62px; }
+        }
+        @media (min-width: 900px) {
+            .over-panel { max-width: 416px; }
+            #gameover-overlay h1 { font-size: 24px; }
+            #gameover-score { font-size: 58px; }
+        }
+        /* One column for the detail grid where two would make each cell too narrow to hold a
+           label and its value on one line. */
+        @media (max-width: 359px) {
+            #gameover-stats { columns: 1; }
+        }
 
         /* Pause button - visible on both desktop and mobile (matching the 2D game's actual
            behavior - it's a sibling of #mobile-controls there, not nested inside it), unlike the
@@ -1719,9 +2424,46 @@
                 border: 1px solid currentColor;
             }
             #player-hud #hud-lives { text-shadow: none; }
+            /* Same call for the pause panel: forced-colors strips author colours but not
+               background-image or box-shadow, which would leave the grain and the recesses
+               painted over a system-coloured surface. The bezel becomes a real border so the
+               panel and its buttons still have edges. */
+            .pause-panel, #pause-overlay .pause-btn {
+                background-image: none;
+                box-shadow: none;
+                text-shadow: none;
+                border: 1px solid currentColor;
+            }
+            /* The game over panel shares that surface treatment, so it needs the same stripping -
+               and its score, which is the one large readout on the screen, must not be left as a
+               glow over a system-coloured face. */
+            .over-panel, #gameover-overlay .over-btn {
+                background-image: none;
+                box-shadow: none;
+                text-shadow: none;
+                border: 1px solid currentColor;
+            }
+            #gameover-score, #gameover-overlay h1 { text-shadow: none; }
+            /* Author colours are stripped anyway, but these two are set INLINE by
+               showGameOverScreen() (the state's own STATE_COLORS value) - an inline colour beats
+               a stylesheet rule, and forced-colors does not remove it. Reset explicitly so the
+               state row cannot keep painting a spectral colour over a system palette. */
+            #gameover-rank-line { color: CanvasText !important; }
         }
 
         @media (prefers-reduced-motion: reduce) {
+            /* The pause buttons' feedback is colour and brightness only - no transform, nothing
+               that moves - but the cross-fade is still animation, so it becomes an instant change
+               here rather than being removed. The feedback itself must not disappear. */
+            /* The pause buttons' hover/press feedback is colour and depth, which stays - but the
+               cross-fade and the 1px press travel are motion, so the change becomes instant and
+               the button no longer moves. The pressed state itself is untouched. */
+            #pause-overlay .pause-btn { transition: none; }
+            #pause-overlay .pause-btn:active { transform: none; }
+            /* Same call for the game over screen's single action, which borrows the pause
+               primary's cross-fade and 1px press travel. */
+            #gameover-overlay .over-btn { transition: none; }
+            #gameover-overlay .over-btn:active { transform: none; }
             .launch-btn.ready { animation: none; }
             .rotate-icon { animation: none; }
             .screen-overlay .pulse-text, #loading-panel h1 { animation: none; }
@@ -1944,13 +2686,60 @@
         </div>
     </div>
 
+    <!-- Pause panel (user-requested redesign). Deliberately NOT .overlay-card: this is built from
+         #player-hud's own instrumentation grammar - near-black face, 3px dot-matrix grain, a 1px
+         bezel and inset recesses - so it reads as another lit surface on the same machine rather
+         than a dialog over a game. Every id is unchanged, so every handler binds exactly as
+         before; the buttons are only REORDERED (destructive action last) and relabelled. -->
     <div id="pause-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="pause-overlay-heading">
-        <div class="overlay-card">
-            <h1 id="pause-overlay-heading">GAME PAUSED</h1>
-            <button id="pause-resume-btn">▶ RESUME GAME</button><br>
-            <button id="pause-newgame-btn">🔄 NEW GAME</button><br>
-            <button id="pause-controls-btn">ℹ CONTROLS</button>
-            <p class="hint">ESC or TAP RESUME to continue</p>
+        <div class="pause-panel">
+            <div class="pause-plate">
+                <p class="pause-wordmark">SPIRITBALL</p>
+                <h1 id="pause-overlay-heading">VISION PAUSED</h1>
+            </div>
+            <div class="pause-actions">
+                <button id="pause-resume-btn" class="pause-btn pause-btn-primary">RESUME</button>
+                <button id="pause-controls-btn" class="pause-btn pause-btn-secondary">CONTROLS</button>
+                <!-- "NEW GAME", not "NEW VISION", of the two the prompt offered: a vision IS a
+                     mission in this game (MISSION_DEFS), and the HUD says "VISION: CHAKRA
+                     AWAKENING" while one is running - so "NEW VISION" on the one destructive
+                     control here would read as "start another mission", which is a real action
+                     the player can take by hitting a target. The heading keeps VISION PAUSED,
+                     where "vision" means the run and nothing is ambiguous. -->
+                <button id="pause-newgame-btn" class="pause-btn pause-btn-reset">NEW GAME</button>
+            </div>
+            <!-- Current-run summary. THREE rows, deliberately not a second HUD: score and state
+                 because the scrim hides the backglass that carries them, and the active vision
+                 because nothing else on screen names it while paused. Balls is left out on
+                 purpose - #player-hud is a fixed element and stays visible through the pause, so
+                 repeating it would be duplication rather than information. A <dl> because these
+                 are label/value pairs and assistive tech should read them as such.
+                 Every value is READ from state that already exists; syncPauseStatus() in
+                 babylon-game.js fills them, and it is called on every path that shows the panel. -->
+            <dl class="pause-summary">
+                <div class="pause-summary-row">
+                    <dt>SCORE</dt>
+                    <dd id="pause-summary-score">0</dd>
+                </div>
+                <div class="pause-summary-row">
+                    <dt>STATE</dt>
+                    <dd class="pause-summary-state" id="pause-status-state">INITIATE</dd>
+                </div>
+                <!-- Hidden unless a vision is actually running - an empty "VISION -" row is worse
+                     than no row. Toggled with the hidden attribute, the same way #mission-hud
+                     already handles its own idle state. -->
+                <div class="pause-summary-row" id="pause-summary-vision-row" hidden>
+                    <dt>VISION</dt>
+                    <dd class="pause-summary-vision">
+                        <span class="pause-summary-vision-name" id="pause-summary-vision"></span>
+                        <span class="pause-summary-progress" id="pause-summary-progress"></span>
+                    </dd>
+                </div>
+            </dl>
+            <p class="pause-hint">
+                <span class="pause-hint-copy hint-desktop">ESC TO RESUME</span>
+                <span class="pause-hint-copy hint-touch">TAP RESUME TO CONTINUE</span>
+            </p>
         </div>
     </div>
 
@@ -1967,16 +2756,80 @@
         </div>
     </div>
 
+    <!-- Game Over presentation (user-requested retheme). Deliberately built from the PAUSE
+         panel's grammar - .over-panel mirrors .pause-panel's face, grain, bezel and plate - rather
+         than .overlay-card, for the same reason the pause screen was: this is another lit surface
+         on the same machine, and the two screens a player sees most often should not be two
+         different visual languages. What it replaces was the older floating-neon treatment (a
+         #ff0099 GAME OVER over unstyled <p> leaves and a 19-line stat dump).
+
+         Every id is unchanged and the container is unchanged, so the overlay's own
+         click-anywhere restart handler, the Space path, and the high-score logic all bind exactly
+         as before. The PLAY AGAIN button deliberately carries NO click handler of its own - the
+         overlay's existing listener catches the bubbled event, the same arrangement the title
+         screen's start button uses, so pressing the button and clicking the backdrop stay
+         literally one code path. -->
     <div id="gameover-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="gameover-overlay-heading">
-        <h1 id="gameover-overlay-heading">GAME OVER</h1>
-        <p>FINAL SCORE</p>
-        <p id="gameover-score">0</p>
-        <p class="highscore-line" id="gameover-highscore-line"></p>
-        <!-- Final rank (improvement-prompts/05-*.md) - real progression state now backs this,
-             see babylon-game.js's showGameOverScreen(). -->
-        <p class="highscore-line" id="gameover-rank-line"></p>
-        <div id="gameover-stats"></div>
-        <p class="restart-instructions pulse-text" id="gameover-restart-instructions">PRESS SPACE TO PLAY AGAIN</p>
+        <div class="over-panel">
+            <div class="pause-plate">
+                <p class="pause-wordmark">SPIRITBALL</p>
+                <!-- "VISION ENDED", not "GAME OVER". A vision is what this game calls a run, and
+                     the pause screen already says VISION PAUSED - the pair now reads as one
+                     machine's vocabulary instead of one themed screen and one arcade default. -->
+                <h1 id="gameover-overlay-heading">VISION ENDED</h1>
+            </div>
+
+            <!-- The score is the hero and gets its own block above the readout rows, per the
+                 requested hierarchy. #gameover-score keeps its id because babylon-game.js writes
+                 it with textContent. -->
+            <div class="over-score">
+                <p class="over-score-label">FINAL SCORE</p>
+                <p id="gameover-score">0</p>
+            </div>
+
+            <!-- Label/value rows, straight off .pause-summary's legend/readout split. A <dl>
+                 because these are label/value pairs and assistive tech should read them as such -
+                 the old screen had them as free-floating sentences ("FINAL STATE: WITNESS") that
+                 read as prose. The ids move onto the VALUE elements; the labels are markup now,
+                 which is what lets them be laid out as a readout instead of concatenated. -->
+            <dl class="over-summary">
+                <div class="over-summary-row">
+                    <dt>FINAL STATE</dt>
+                    <dd class="over-state" id="gameover-rank-line">INITIATE</dd>
+                </div>
+                <div class="over-summary-row">
+                    <dt>VISIONS COMPLETED</dt>
+                    <dd id="gameover-visions">0</dd>
+                </div>
+                <!-- Two states, one row, chosen by showGameOverScreen(): the record itself, or a
+                     lit NEW HIGH SCORE when this run set it. Never both, and never a row that
+                     says "HIGH SCORE" next to a number the player just beat. -->
+                <div class="over-summary-row" id="gameover-highscore-row">
+                    <dt id="gameover-highscore-label">HIGH SCORE</dt>
+                    <dd class="over-highscore" id="gameover-highscore-line">0</dd>
+                </div>
+            </dl>
+
+            <!-- PLAY AGAIN, not "ENTER THE VISION AGAIN", of the two the request offered: the
+                 same request asks for concise over mystical, and this is the one control on the
+                 screen - an action label has to say what the button does. The themed register is
+                 carried by the heading and the state row, where it costs the player nothing. -->
+            <button type="button" class="over-btn" id="gameover-play-again-btn">PLAY AGAIN</button>
+
+            <!-- Detail readout. Kept, but demoted: the requested hierarchy promotes exactly one
+                 of these (Visions Completed) into the summary above, and the rest are a run
+                 breakdown worth showing without being what the screen is about. Suppressed
+                 entirely when a run scored none of them, so a very short game gets a short
+                 screen. Filled by showGameOverScreen(). -->
+            <div class="over-detail" id="gameover-detail" hidden>
+                <p class="over-detail-legend">RUN DETAIL</p>
+                <div id="gameover-stats"></div>
+            </div>
+
+            <p class="over-hint">
+                <span class="over-hint-copy pulse-text" id="gameover-restart-instructions">PRESS SPACE TO PLAY AGAIN</span>
+            </p>
+        </div>
     </div>
 
     <div id="rotate-overlay" class="rotate-overlay">

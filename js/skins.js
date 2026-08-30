@@ -45,6 +45,16 @@ export const SKIN_ASSET_BASE = 'assets/skins/';
 // surfaces read like a backlit insert glowing on their own, independent of scene light -
 // matching which of those two treatments each slot's *current* procedural material already
 // uses (see each call site in babylon-game.js).
+//
+// albedoScale (optional, 'albedo' slots only, default 1): a flat 0..1 multiplier written into
+// albedoColor when the artwork loads, instead of the plain white this otherwise resets to. It
+// exists because a skin slot is a hole in this project's visual hierarchy: the loaded artwork's
+// own exposure is whatever the artist happened to author, and on some surfaces that is not a
+// free choice. Declaring the ceiling HERE, as data next to the path it applies to, is what makes
+// the hierarchy a property of the slot rather than an instruction an artist has to remember and
+// re-apply on every revision of the file. Only set it where a surface has a real reason to stay
+// subordinate to something else on the board (cabinetRails is the current case - see its own
+// comment); leaving it unset keeps the plain full-brightness reset every other slot wants.
 export const SKIN_MANIFEST = {
     // Playfield background/art - the ball-rolling surface itself (playfieldMat in buildTable()).
     // Populated (user-supplied artwork, visual-integration pass) - a portrait 887x1774 cosmic/
@@ -56,33 +66,171 @@ export const SKIN_MANIFEST = {
 
     // Cabinet/table artwork - the perimeter wall/rail material (wallMat in buildTable()), shared
     // by every structural boundary wall on the board (top/left/right/slants/guides).
+    //
+    // ARTWORK SHAPE IS CONSTRAINED HERE, and not in the way an artist would guess. wallMat is a
+    // SINGLE material instance on 7 CreateBox walls, every face of every one of them carrying the
+    // default full u[0,1]/v[0,1] square, and applySkinTexture() clamps (never repeats). So one
+    // image is STRETCHED to fit 42 faces of wildly different shapes rather than tiled across them:
+    // measured, the visible long faces alone span 2.01:1 (rightSlant) to 22.67:1 (leftWall), an
+    // 11.3x spread, and on the top faces u/v swap axes outright (topWall's top is 18.02:1, the
+    // side walls' tops are 0.03:1 - the same image laid down rotated 90 degrees relative to each
+    // other). Any detail that varies along u is therefore stretched by a different factor on every
+    // wall and cannot be made to line up.
+    //
+    // What DOES map cleanly on all 42 faces is detail that varies only along v - a vertical rail
+    // PROFILE (crown highlight, body falloff, shadowed base band), constant across u. That is
+    // exactly what createCabinetRailTexture() draws today and exactly what real artwork here must
+    // be: a narrow portrait strip, 64x512, read top-to-bottom as the wall's own cross-section.
+    // See SKINS.md's cabinetRails section for the full spec and the per-face measurements.
+    //
+    // albedoScale is set (and is the only slot that sets it) because the rails are already the
+    // brightest large surfaces in frame - HEX_WALL is 0x00ccff, and the right inner wall measures
+    // mean luminance 159.6/255 with 15.4% of its pixels clipped to pure white against a playfield
+    // at 31.4. They are the table's structural boundary, not a gameplay element, so artwork here
+    // has to come in UNDER the bumpers/inserts/flippers it frames rather than out-shouting them.
+    // Measured, 0.55 lands the textured rails at 103.0 against the procedural profile's 113.7,
+    // and the ceiling is doing real work rather than being decorative: the dimmest lamp-lit
+    // gameplay element on the board (bumper0) sits at 119.5, so the fallback clears it by only
+    // 5.8 luminance and the ceiling widens that to 16.5. qa/skin-integration.js re-measures all
+    // three numbers from real pixels on every run, so a future revision of this value is checked
+    // rather than assumed.
     // Future path: 'cabinet/cabinet-rails.png'
-    cabinetRails: { path: null, kind: 'albedo' },
+    cabinetRails: { path: null, kind: 'albedo', albedoScale: 0.55 },
 
     // Bumper caps - one shared texture. bumperCapMat (buildObstacles()) is already a single
     // material instance shared by all 4 bumpers' caps (see its own comment: real machines mold
     // every pop-bumper cap from the same plastic regardless of that bumper's own body color), so
     // one shared skin slot matches the existing architecture rather than adding per-bumper
     // variants gameplay never asked for.
+    //
+    // THIS IS AN EQUIRECTANGULAR SPHERE MAP, NOT A TOP-DOWN DISC, and that is the single thing
+    // most likely to be got wrong here because a real bumper cap decal IS a top-down disc. The
+    // cap is a CreateSphere flattened to scaling.y 0.58, so Babylon's sphere UV applies: v is
+    // latitude, and a row of the image is a line of latitude wrapped all the way around. Measured
+    // from the mesh's own vertex data, v=0 is the TOP pole and v=0.5 the equator; measured again
+    // by rendering eight labelled bands onto the real caps in the real scene, invertY puts the
+    // dome's apex at the image's BOTTOM edge. So:
+    //
+    //   image bottom edge   -> the cap's apex (a single point, stretched across the full width)
+    //   moving UP the image -> moving outward and down the dome
+    //   image vertical mid  -> the cap's rim/equator
+    //   top 25% of image    -> NEVER RENDERED (the buried underside; measured 0% on all 4 caps)
+    //
+    // The face a player actually reads - the upper 45% of the cap's silhouette from the gameplay
+    // camera - comes 97-99% from the BOTTOM 37.5% of the image, with the last eighth alone (the
+    // apex) accounting for 17-20% and the image's vertical middle contributing 1-3%. Design
+    // accordingly: content near the image's bottom edge lands dead centre on the cap and must be
+    // drawn pre-distorted (wide and short, since it is pinched to a point at the pole), content in
+    // the middle of the image lands on the rim, and the top quarter is wasted.
+    //
+    // Also worth knowing before authoring detail: the whole cap is 28x24 to 36x30 screen pixels
+    // at 1280x800. Two or three tonal zones read; fine pattern does not.
+    //
+    // albedoScale exists here to PRESERVE AN EXISTING DECISION, not to add a new one. The cap
+    // albedo was deliberately walked down 0.88 -> 0.66 -> the current 0.54/0.58 by the lighting-
+    // hierarchy pass, whose comment records the measurement: the caps were the single brightest
+    // surface in the frame after the ball, clipping to 255 across their whole visible face.
+    // applySkinTexture() resets albedoColor to white on a successful load, which would throw that
+    // tuning away and render artwork ~1.85x brighter than the fallback it replaced - re-creating
+    // the exact clipping that pass fixed. 0.55 keeps a skinned cap in the same band the tuned
+    // procedural cap already occupies. qa/skin-bumper-cap.js measures that rather than trusting it.
+    //
+    // A skin here CANNOT affect which bumper is the boss. All three boss cues live outside this
+    // material: the 1.5x radius, the boss-only gold trim torus, and the star glyph on its own
+    // label plane. One shared texture lands identically on all four caps, so it can only ever
+    // change them together - qa/skin-bumper-cap.js re-measures all three cues under artwork chosen
+    // specifically to be as hostile to them as possible (flat pure white at full brightness).
     // Future path: 'bumpers/bumper-cap.png'
-    bumperCap: { path: null, kind: 'albedo' },
+    bumperCap: { path: null, kind: 'albedo', albedoScale: 0.55 },
 
-    // Mission target faces - per-target-index (MISSION_TARGET_BANK has 3 entries; targetMats[i]
-    // is already a distinct material per index). Index order matches MISSION_TARGET_BANK's own
-    // array order. Future paths: 'targets/mission-target-0.png' / '-1.png' / '-2.png'
+    // Mission/vision target faces - per-target-index (MISSION_TARGET_BANK has 3 entries;
+    // targetMats[i] is already a distinct material per index, verified by qa/skin-mission-
+    // targets.js rather than assumed - a shared instance here would cross-wire two targets' art).
+    // Index order matches MISSION_TARGET_BANK's own array order, and each index is tied to the
+    // vision that target selects (see MISSION_DEFS in js/config.js):
+    //
+    //   [0] CHAKRA AWAKENING  - symbolic chakra / lotus / energy motif
+    //   [1] ASTRAL PURSUIT    - comet / astral eye / star motif
+    //   [2] RETURN TO BODY    - spiral / portal / grounding / re-entry motif
+    //
+    // GEOMETRY. The flag is a CreateBox 0.028m wide x 0.030m tall x 0.008m deep, unrotated, and
+    // the camera-facing face is the full 0.028 x 0.030 one. That is an aspect of exactly 14:15
+    // (0.9333) - very slightly TALLER than square. Author at 448x480, which is 14:15 exactly.
+    // (This document previously said 2:3 portrait / 256x384, which is 0.667 - a 29% error that
+    // would have squashed any artwork drawn to it. The procedural fallback's own 128x136 is
+    // 0.9412, so the fallback was right and only the spec was wrong.)
+    //
+    // UV ORIENTATION IS ALREADY CORRECT, and unusually for this manifest there is nothing to work
+    // around. Measured by painting a quadrant map (image TL red / TR green / BL blue / BR yellow)
+    // onto the real plates in the real scene: image top-left lands screen top-left on all three
+    // targets, with no vertical flip and no horizontal mirroring. Artwork drops in the way it was
+    // drawn. All 6 box faces carry the default full u[0,1]/v[0,1] square, so the same image also
+    // paints the 0.008m edge slivers - they are a few pixels and effectively never read.
+    //
+    // THE TINT ARTWORK INHERITS is the one thing that will surprise an artist, and it is
+    // deliberate. applySkinTexture() only ever replaces albedoTexture, so each plate keeps its
+    // flat chakra-coloured emissiveColor (COLOR_CHAKRA[i].scale(0.30)) - that is what supplies the
+    // "lamp behind lit plastic" glow, and createTargetFaceTexture()'s comment explains why the
+    // procedural face deliberately carries no emissive texture of its own so a skin inherits it
+    // cleanly. Concretely, artwork on each index is washed by:
+    //
+    //   [0] violet     #9400d3 x 0.30
+    //   [1] deep pink  #ff1493 x 0.30
+    //   [2] yellow     #ffff00 x 0.30
+    //
+    // Worth designing around rather than fighting: a cyan comet motif on [1] will read magenta,
+    // since HEX_COMET is #66e0ff but this plate's own identity colour is pink. The plate is also
+    // alpha 0.85, so roughly 15% of the lit slot behind it shows through the artwork.
+    //
+    // NO albedoScale HERE, unlike cabinetRails and bumperCap, and that is a decision rather than
+    // an omission: these materials already set albedoColor to white (the chakra colour is baked
+    // into the texture, not tinted through albedoColor), so applySkinTexture()'s white reset is a
+    // no-op and there is no existing tuning for a ceiling to protect. Adding one for symmetry
+    // would darken artwork for nothing.
+    //
+    // The plate renders 24x24 screen pixels at 1280x800. Bold, high-contrast, centred symbols
+    // read; fine linework does not.
+    //
+    // The drop animation cannot be affected from here: updateDropTargetBank() lerps only the flag
+    // mesh's position.y between TARGET_RAISED_Y_M and TARGET_DROPPED_Y_M, never touching the
+    // material, and the trigger volume deliberately stays put while the flag sinks.
+    // Future paths: 'targets/mission-target-0.png' / '-1.png' / '-2.png'
     missionTargetFace: [
-        { path: null, kind: 'albedo' },
-        { path: null, kind: 'albedo' },
-        { path: null, kind: 'albedo' }
+        { path: null, kind: 'albedo' }, // CHAKRA AWAKENING - chakra / lotus / energy
+        { path: null, kind: 'albedo' }, // ASTRAL PURSUIT   - comet / astral eye / star
+        { path: null, kind: 'albedo' }  // RETURN TO BODY   - spiral / portal / re-entry
     ],
 
-    // Lane inserts - the small backlit discs set into the inlane/outlane/orbit rollovers
-    // (buildObstacles()' lampMat instances). Emissive, not albedo - these read as a lit insert,
-    // not painted artwork, matching the lamp system's existing emissive-only on/off convention.
-    // Future paths: 'lanes/lane-insert-inlane.png' / '-outlane.png' / '-orbit.png'
+    // Lane inserts - one slot per lane FAMILY, each shared by both mirrored sides. Emissive, not
+    // albedo: these read as a lit insert, not painted artwork, and more importantly emissive is
+    // the channel the lamp system already owns, so a loaded texture is multiplied by whatever
+    // state that lamp is in and can restyle the symbol WITHOUT ever overriding lit/unlit.
+    //
+    // Each family carries its own symbol, and the reason is measured: an insert is only 20-40px
+    // across at the gameplay camera, so families have to differ by SILHOUETTE rather than by
+    // detail or by colour alone. Before the insert-legibility pass, inlane and outlane drew the
+    // same down-arrow (opposite meanings, identical mark) and orbit drew the same up-arrow as the
+    // skill shot. The four now are:
+    //
+    //   laneInsertInlane   double chevron down-table  - return / flow
+    //   laneInsertOutlane  bold X                     - danger / void
+    //   laneInsertOrbit    ring with an arrowhead     - cycle / infinity
+    //   laneInsertReentry  earth mark, stacked bars    - return-to-body / grounding
+    //
+    // Artwork replacing any of these should keep a single bold high-contrast mark on a dark
+    // ground, centred, with no text - greyscale is safest, since the texture MULTIPLIES the lamp's
+    // own identity colour and a coloured file would tint that twice. 128x128 is what the
+    // procedural lenses use and is ample; the lens is a circle inscribed in the square for the
+    // three rollover inserts, and a near-square top face for the re-entry lanes.
+    //
+    // laneInsertReentry is new. The re-entry lanes previously had no insert slot and no symbol at
+    // all - three untextured boxes marking a whole vision's objective - so this is the fourth
+    // family taking the same shape as its three siblings rather than a special case.
+    // Future paths: 'lanes/lane-insert-inlane.png' / '-outlane.png' / '-orbit.png' / '-reentry.png'
     laneInsertInlane: { path: null, kind: 'emissive' },
     laneInsertOutlane: { path: null, kind: 'emissive' },
     laneInsertOrbit: { path: null, kind: 'emissive' },
+    laneInsertReentry: { path: null, kind: 'emissive' },
 
     // Obstacle decals - small decorative accents on the board's named feature obstacles.
     // Future paths: 'obstacles/obstacle-decal-saturn.png' / '-comet.png' / '-slingshot.png'

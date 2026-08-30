@@ -910,6 +910,14 @@ export const SCORE_VISION_GATE = 4000;
 // Total capture->eject duration. Short enough to stay "a beat," not a cutscene - about 3x a
 // mission-complete's own camera beat (500ms), the biggest existing moment on the board, since
 // this is meant to read as bigger still without genuinely interrupting pinball flow.
+// Vision Gate idle presentation (gate-polish pass, user-requested - "subtle rotating/spectral
+// energy if cheap", "visually special while idle but dramatically brighter only during capture").
+// Slower than SATURN_SPIN_RATE_RAD_MS: the halo sits inches from the boss bumper's own glare and a
+// brisk spin there reads as a flicker rather than as calm energy. One full turn takes ~7s.
+export const VISION_GATE_HALO_SPIN_RAD_MS = 0.0009;
+// Radians per ms fed to a sine for the halo's spectral drift - one full breath every ~8.4s.
+// Deliberately far below any flicker threshold; this is meant to be noticed only if watched for.
+export const VISION_GATE_HALO_DRIFT_RATE = 0.00075;
 export const VISION_GATE_SEQUENCE_MS = 1800;
 // Debounces the entry trigger itself, on top of the visionGate.active state guard (see
 // main()) - two independent layers, not one. Deliberately set LONGER than VISION_GATE_
@@ -1180,9 +1188,52 @@ export const BONUS_MAJOR_SHOT_AMOUNT = 500;
 // predictable and brisk no matter how big the bonus got.
 export const BONUS_COUNT_TICKS = 16;
 export const BONUS_COUNT_TICK_MS = 45; // ~720ms for the full sequence at BONUS_COUNT_TICKS ticks - brisk per the request
+// How long the completed total holds on screen after the final tick, before the end-of-ball
+// sequence moves on. Was a hardcoded 500 inside updateBonusCount(), and it held the words
+// 'BONUS AWARDED' rather than the number: the count-up spent 15 ticks climbing toward a total
+// the player then never actually saw, because the tick that landed it replaced the digits with
+// a label. The final tick now holds the total itself, so this is genuinely "read the number"
+// time and can be shorter than the label version needed.
+export const BONUS_COUNT_HOLD_MS = 420;
 // Reduced motion: skip the tick sequence entirely and award the whole bonus in one step -
 // this is just how long the single resulting message stays legible before continuing.
-export const BONUS_COUNT_REDUCED_MOTION_MS = 150;
+// 150 -> 600. Reduced motion means less MOTION, not less information, and 150ms is under a
+// third of the ~500ms it takes to read a five-digit number off the panel - the one beat the
+// animated path spends a full second on was the one this path made unreadable. Still well
+// under the animated path's own ~1.1s, so the sequence stays shorter here, as intended.
+export const BONUS_COUNT_REDUCED_MOTION_MS = 600;
+
+// ===================================
+// End-of-ball sequence (user-requested). A drain used to communicate one thing - 'DRAINED!' -
+// and then, after a silent delay, either paid a bonus or did not, and put the ball back with no
+// announcement at all. Four beats now carry the four things a player actually needs at a ball
+// change: the ball is gone, here is what the bonus paid, here is where the run stands, here is
+// the next ball.
+//
+// Every duration below is spent by a render-loop-driven step machine (endOfBall in
+// babylon-game.js), NOT by setTimeout, so the whole sequence freezes with a pause the way the
+// bonus count it wraps already did - and so mobile and desktop spend the same beats, since
+// nothing here is tied to input method, pointer type, or frame rate.
+//
+// The budget is deliberately tighter than what it replaces. Time from drain to a launchable
+// ball: 800 + ~1140 (bonus) + 820 = ~2760ms with a bonus to pay, ~2000ms without, against the
+// old path's fixed 2720ms - so the flow gained two beats of real information without costing
+// the player a slower ball change. NEXT BALL is a message rather than a step, and the ball is
+// already back at the plunger while it shows, so it holds nothing up.
+// ===================================
+export const END_OF_BALL_LOST_MS = 800;
+// Only reached when this ball earned no bonus at all. Short on purpose - "you scored nothing
+// here" is worth stating once so the beat is never silently missing, but it is not worth a
+// full beat of the player's time.
+export const END_OF_BALL_NO_BONUS_MS = 380;
+// STATE + vision progress. The longest beat after the bonus: it is the only one carrying two
+// facts, and it is the only place either of them is legible during a ball change - a backglass
+// message covers the panel's own STATE row and VISION window outright (see redraw()'s early
+// return), so these readouts are hidden for the whole sequence unless a beat states them.
+export const END_OF_BALL_STATE_MS = 820;
+// NEXT BALL. Not a step in the machine - the sequence ends as this is posted, with the ball
+// already returned, so the player can launch straight through it.
+export const END_OF_BALL_NEXT_BALL_MS = 900;
 
 // ===================================
 // Lightweight combo scoring (user-requested) - short chains of already-scored "major shot"
@@ -1222,14 +1273,102 @@ export const COMBO_DEFS = [
     { name: 'BANK RUSH', steps: ['laneBankComplete', COMBO_ORBIT_TYPES], stepWindowMs: COMBO_STEP_WINDOW_MS }
 ];
 
-// Rank names ported from the classic "3D Pinball for Windows - Space Cadet" progression this
-// table's own layout is explicitly modeled on (see buildObstacles()'s "authentic
-// Space-Cadet-inspired" comment) - the same rank ladder archive/KNOWN_ISSUES.md item 3
-// references ("LT Commander -> Fleet Admiral", ranks 4-8 there matching indices 4-8 here).
+// Rank ladder (user-requested retheme). Was the naval ladder ported from "3D Pinball for
+// Windows - Space Cadet" ('Cadet' ... 'Fleet Admiral'), which this table's layout is still
+// modeled on (see buildObstacles()'s "authentic Space-Cadet-inspired" comment) - the ranks
+// themselves now follow the game's own DMT-vision-quest theme instead. archive/KNOWN_ISSUES.md
+// item 3's "LT Commander -> Fleet Admiral" refers to the old naval names at indices 4-8.
+//
+// PURELY THE DISPLAYED STRINGS. Index order, length (10), and therefore every consumer of it is
+// unchanged: missionRequiredCount(rank) still scales 3+rank, completeMission()'s
+// Math.min(rank + 1, RANK_NAMES.length - 1) still caps at index 9, and nothing persists a rank
+// (localStorage holds only spiritball-highscore and spiritball-muted), so no saved state can
+// carry an old name forward.
+//
+// Length matters here, not just wording: the backglass draws the rank with a shrink-to-fit loop
+// that bottoms out at 45px (see the rank row in babylon-game.js), and a name still too wide at
+// that floor runs under the multiplier/bonus badges. Measured by replaying that row's own layout
+// maths against a 1024px canvas with the same font stack, in the monospace fallback (the widest
+// case - a machine with Bahnschrift/DIN Condensed renders narrower):
+//
+// RE-MEASURED after the terminology pass renamed that row's legend from RANK to STATE. That is
+// not cosmetic for this table: drawLegend() returns where it stopped and the value starts 22px
+// after it, so the wider legend moved the value's left edge 196 -> 221 and took 25px off every
+// figure in the right-hand column below.
+//
+//   badges showing   old ladder + RANK     this ladder + RANK    this ladder + STATE (shipping)
+//   none             all fit (610/760)     all fit (517/760)     all fit (517/735)
+//   multiplier only  all fit (564/577)     all fit (517/552)     all fit (517/552)
+//   BOTH badges      4/10 over, max 100px  4/10 over, max 46px   6/10 over, max 70px
+//                    ('Lieutenant JG',     ('DREAMWALKER',       (adds 'VISIONARY' and
+//                    'Lt. Commander',      'COSMIC SELF' 46px,   'ASCENDANT' at 16px each;
+//                    'Fleet Admiral')      'PSYCHONAUT',         'DREAMWALKER'/'COSMIC SELF'
+//                                          'GATEKEEPER' 18px)    70px, the other two 43px)
+//
+// So: the both-badges overflow is a PRE-EXISTING limit of that row's 45px floor - the old naval
+// ladder overflowed further than anything here does - but the STATE legend genuinely made it
+// worse, 4 of 10 to 6 of 10. It only shows while the 2X score power-up and a bonus multiplier
+// above 1X are BOTH lit, which is an uncommon state, and it is a layout problem rather than a
+// content one, so it is recorded rather than worked around by picking shorter words. The lever,
+// if it is ever worth pulling, is that 45px floor (or letting the value wrap) in the rank row
+// itself - not these strings and not the legend.
 export const RANK_NAMES = [
-    'Cadet', 'Ensign', 'Lieutenant JG', 'Lieutenant', 'Lt. Commander',
-    'Commander', 'Captain', 'Commodore', 'Admiral', 'Fleet Admiral'
+    'INITIATE', 'SEEKER', 'DREAMER', 'WITNESS', 'DREAMWALKER',
+    'VISIONARY', 'PSYCHONAUT', 'GATEKEEPER', 'ASCENDANT', 'COSMIC SELF'
 ];
+
+// One colour per state index, parallel to RANK_NAMES above - the single source of truth for
+// "what colour is this state", so a future edit cannot leave two lists disagreeing. Indexed the
+// same way (STATE_COLORS[mission.rank]); the length is asserted against RANK_NAMES below rather
+// than trusted.
+//
+// The arc the user asked for: cool cyan -> violet (early), violet -> magenta -> amber (middle),
+// gold -> near-white -> spectral (late). Index 0 is deliberately the exact colour the state row
+// used before this existed (#7dffe0), so a fresh game looks untouched and the progression is
+// something the player discovers by earning it rather than a restyle they notice on load.
+//
+// Designed on SATURATION and HUE, not brightness. The obvious way to write "ascending" is to
+// make later states brighter, and that is the version that would have turned a quiet panel into
+// a beacon by COSMIC SELF; the late states desaturate toward white instead, so the ladder reads
+// as "cooling into light" rather than "getting louder".
+//
+// Brightness is NOT flat across the ladder, and an earlier draft of this comment wrongly claimed
+// it was. Measured WCAG relative luminance runs 0.813 at INITIATE down to 0.470 around
+// DREAMWALKER/VISIONARY and back up to 0.791 at COSMIC SELF - a 1.73x spread. That dip is a
+// property of the hues themselves: a saturated violet simply cannot reach the luminance of a
+// saturated cyan-mint, and forcing it to would mean desaturating it until it stopped being
+// violet. What IS held, and what qa/state-palette.js pins, is the part that actually protects the
+// panel:
+//   - nothing exceeds index 0's brightness, so no state is ever louder than this row already was
+//     before the palette existed (ASCENDANT and COSMIC SELF were pulled down from #ffe7b4 and
+//     #eff6ff, which both broke that ceiling, to the values below);
+//   - no adjacent pair jumps more than ~0.12 of luminance, which is what keeps the progression
+//     GRADUAL rather than a set of unrelated colours;
+//   - all ten clear 7:1 contrast against the panel's own face, sampled from the real texture
+//     (measured range 10.1:1 to 18.7:1).
+//
+// Used in exactly two places, both on the backglass: the STATE row's value, and the ASCENSION
+// message that announces a new state. Nothing on the playfield, nothing near the ball, and the
+// backglass mesh is already excluded from the GlowLayer (see its addExcludedMesh call), so none
+// of these can bloom into the scene or compete with the ball no matter how pale they get.
+export const STATE_COLORS = [
+    '#7dffe0', // 0 INITIATE     cyan-mint - the pre-existing state colour, unchanged
+    '#7be9ff', // 1 SEEKER       cool cyan
+    '#97ceff', // 2 DREAMER      cyan drifting blue
+    '#b7b4ff', // 3 WITNESS      blue-violet
+    '#cfa4ff', // 4 DREAMWALKER  violet
+    '#f09bea', // 5 VISIONARY    violet-magenta
+    '#ffae93', // 6 PSYCHONAUT   magenta warming toward amber
+    '#ffc96b', // 7 GATEKEEPER   gold
+    '#ffdc9e', // 8 ASCENDANT    near-white gold
+    '#d5e8ff'  // 9 COSMIC SELF  spectral - desaturated back to a cool white, past colour
+];
+// A mismatch here would silently hand STATE_COLORS[rank] === undefined to a canvas fillStyle,
+// which paints BLACK on a black panel rather than throwing - i.e. an invisible state row, found
+// only by looking. Cheap to assert at module load instead.
+if (STATE_COLORS.length !== RANK_NAMES.length) {
+    throw new Error('STATE_COLORS must have one entry per RANK_NAMES entry');
+}
 
 // One mission slot per mission-target index (0-2, see MISSION_TARGET_BANK), each tied to a
 // distinct scoring category so progress can only come from deliberate play toward the
@@ -1238,10 +1377,67 @@ export const RANK_NAMES = [
 // separate launch-ramp "start" step, which has no equivalent object in this 3D build (a
 // mission-target hit selects AND starts in one action here - a deliberate simplification,
 // not an oversight).
+//
+// Mission NAMES rethemed (user-requested) to match the game's own vision-quest register, the
+// same pass that rethemed RANK_NAMES above. `type` is the mechanic and is UNTOUCHED: it is what
+// progressMission() matches against ('bumper'/'comet'/'lane', see its own comment), what the
+// bumper/comet/re-entry-lane hit handlers pass in, and the array ORDER is what binds each entry
+// to its mission target, since startMission() is called with the struck target's own index. Only
+// the display strings below moved:
+//   bumper -> was 'BUMPER RUN'        (and 'satellite'/'SATELLITE SWEEP' before the comet reskin)
+//   comet  -> was 'COMET CHASE'
+//   lane   -> was 'RE-ENTRY CIRCUIT'
+//
+// Both surfaces that show a mission name were measured against the new strings rather than
+// assumed - see the fit note at RANK_NAMES for why that matters here:
+//   - backglass MISSION window: shrink-to-fit from 84px, floor 52px, 920px of room. All three
+//     names fit at the full 84px with no shrinking, same as the old ones (widest 809px, in the
+//     monospace fallback, which is the widest the stack can render).
+//   - #mission-hud (index.html): a 150px cap with text-overflow:ellipsis. 'CHAKRA AWAKENING'
+//     fits at the 12px desktop size and is ellipsised at the 11px <=480px size - which is
+//     exactly what 'RE-ENTRY CIRCUIT' (also 16 chars) already did, so phone behaviour is
+//     unchanged. See that rule's own comment for the numbers.
+//
+// `objective` (user-requested) is a SHORT player-facing "what do I actually shoot" line. Pure
+// display data - nothing reads it but the activation message in startMission(). It is not a
+// second mechanic: progress still comes from `type` alone.
+//
+// It is shown at ONE surface, and that was decided by measuring the three places a vision name
+// reaches the player rather than by taste:
+//
+//   activation message plate   ~294px tall, wraps to two lines, shrinks 150 -> 48px.  SHOWN
+//                              'VISION: <name>: <objective>' lands at 58/62/54px with the wrap
+//                              breaking exactly between name and objective for all three. No
+//                              overflow, comfortably above the 48px floor.
+//   steady VISION window       NOT SHOWN. There is no room at all: the 84px name ends at y=412
+//                              and the progress bar starts at y=414 - a 2px gap - inside a
+//                              window whose bottom edge is y=466.
+//   #mission-hud (index.html)  NOT SHOWN. Two of the three objectives already ellipsise at the
+//                              DESKTOP width ('HIT THE POP BUMPERS' 137px into 123px,
+//                              'COMPLETE THE RE-ENTRY LANES' 194px into 123px), before the
+//                              narrower <=480px size is even reached.
+//
+// Cost worth knowing about, since it is the reason this is a judgement call and not a free win:
+// carrying the objective drops the activation flash from 106px to 54-62px, i.e. roughly 26 to
+// 17 CSS px on screen. drawMessage()'s own comment sets this plate's bar at "about 34 CSS px on
+// screen, against the 18 the old treatment managed" - so the combined line sits at the bottom of
+// that range. Showing the objective ALONE would hold ~106px (the name is still carried by the
+// VISION window and #mission-hud the moment the flash clears); that is a one-line change here if
+// the bigger flash is worth more than naming the vision twice.
+//
+// Keep these short. The plate is the constraint: 27 characters ('COMPLETE THE RE-ENTRY LANES')
+// is what pins the size to 54px, and anything longer will shrink it further.
+// Vision-selection feedback (user-requested). How long the objective's own playfield elements
+// stay lit after a vision is selected, and how long the name+objective message dwells. The cue is
+// deliberately shorter than the message: the text is what the player reads, the cue is what makes
+// them look at the table, and a cue still burning after the message has gone reads as a state
+// change rather than as an answer to it.
+export const MISSION_CUE_MS = 620;
+export const MISSION_SELECT_MESSAGE_MS = 1400;
 export const MISSION_DEFS = [
-    { type: 'bumper', name: 'BUMPER RUN' },
-    { type: 'comet', name: 'COMET CHASE' }, // was 'satellite'/'SATELLITE SWEEP' - renamed alongside the board redesign's satellite->comet reskin
-    { type: 'lane', name: 'RE-ENTRY CIRCUIT' }
+    { type: 'bumper', name: 'CHAKRA AWAKENING', objective: 'HIT THE POP BUMPERS' },
+    { type: 'comet', name: 'ASTRAL PURSUIT', objective: 'STRIKE THE COMET' },
+    { type: 'lane', name: 'RETURN TO BODY', objective: 'COMPLETE THE RE-ENTRY LANES' }
 ];
 export function missionRequiredCount(rank) {
     return 3 + rank; // scales with rank so later missions take deliberately more effort
@@ -1290,6 +1486,15 @@ export const STARTING_LIVES = 3; // ported from CONFIG.startingLives
 // project's whole load-failure error-handling effort before it even registers (see
 // 04-*.md's implementation note for how this was learned the hard way).
 // ===================================
+// '#rrggbb' -> [r, g, b] bytes. Distinct from hexToColor3() below, which takes a NUMERIC hex
+// and returns a BABYLON.Color3: STATE_COLORS are CSS strings (canvas fillStyle takes those
+// directly), and two consumers now need to take them apart - the backglass message halo and the
+// ASCENSION screen flash. One parser rather than one per call site.
+export function hexStringToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
 export function hexToColor3(hex) {
     return new BABYLON.Color3(
         ((hex >> 16) & 0xff) / 255,
