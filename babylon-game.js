@@ -6028,14 +6028,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             addRailBevel(scene, 'orbitRail' + orbitDef.side + 'Cap', railCapMat, railLength, 0.015, railCenterX, 0.022, railCenterZ, railRotationY);
 
             // Lane floor tint (visual-polish pass, user-requested) - see addLaneFloorTint()'s own
-            // comment. Offset a little toward the playfield center from the rail's own centerline
-            // (the ball's actual travel lane sits inboard of the rail, which marks only the
-            // corridor's outer/wall-side edge) rather than directly under the rail itself. The
-            // rail is only a few degrees off vertical here (dx is tiny next to dz - see ORBITS'
-            // own ~5cm-wide corridor sizing), so a fixed inward X offset reads correctly without
-            // needing the rail's exact perpendicular.
-            const orbitFloorInward = orbitDef.side === 'left' ? 1 : -1;
-            addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side, orbitFloorMat, 0.03, railLength - 0.05, railCenterX + orbitFloorInward * 0.018, railCenterZ, railRotationY);
+            // comment. SHOT-CORRIDOR REFACTOR: this offset used to point INBOARD, because the rail
+            // used to mark the outer edge of an inboard lane. The rails now hug the side walls and
+            // the ball's travel lane is the channel OUTBOARD of them, so the tint has to follow the
+            // ball, not the rail - pointing it the old way would have painted the corridor marking
+            // onto the target bank / comet side of the rail, i.e. on the wrong side of the wall it
+            // is describing. Offset is half the lane's own width so the tint sits centred in the
+            // 49.2mm channel (see ORBITS' block comment). The rails are exactly vertical now
+            // (railBottomX == railTopX), so a fixed X offset is exactly perpendicular.
+            const orbitFloorOutward = orbitDef.side === 'left' ? -1 : 1;
+            addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side, orbitFloorMat, 0.03, railLength - 0.05, railCenterX + orbitFloorOutward * 0.032, railCenterZ, railRotationY);
 
             // Only the TOP end gets a capping post, not the bottom - verified via Playwright that
             // a post at the rail's bottom tip sits close enough to a realistic entry trajectory to
@@ -6270,10 +6272,23 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // near-miss clips one and bounces away instead of sailing through untouched. Feedback
         // reuses the existing generic 'wall' handling, same as every other guide rail/post added
         // in earlier features.
+        //
+        // Trap fix, measured (qa/ball-trap-audit.js): the far post used to sit at exactly one
+        // collar radius up-table, putting it 28.3mm from each side post. A ball cannot pass
+        // through a 28.3mm centre-to-centre gap between two 9mm posts (19.3mm of daylight), so it
+        // came to rest OUTSIDE the horseshoe, touching both and held there by the tilt - the board
+        // caught 8 of 262 seeded balls in that single V, and the pre-refactor board had the same
+        // pocket at its own gate (2 balls, its worst cluster). The threshold is geometric, not a
+        // tuning value: a ball rests stably in the outside V of two posts whenever their centres
+        // are closer than 2 x (ball radius + post radius) = 36mm. Pushing the far post to 1.75
+        // radii opens that pair to 40.3mm, past the threshold with margin, so a ball rolls between
+        // them instead of parking on them. The side posts and the capture trigger are untouched,
+        // and 1.75 (not more) is what keeps the far post clear of the bumper row above it.
+        const GATE_FAR_POST_RADII = 1.75;
         [
             { x: VISION_GATE_POS.x - VISION_GATE_COLLAR_RADIUS_M, z: VISION_GATE_POS.z },
             { x: VISION_GATE_POS.x + VISION_GATE_COLLAR_RADIUS_M, z: VISION_GATE_POS.z },
-            { x: VISION_GATE_POS.x, z: VISION_GATE_POS.z + VISION_GATE_COLLAR_RADIUS_M }
+            { x: VISION_GATE_POS.x, z: VISION_GATE_POS.z + VISION_GATE_COLLAR_RADIUS_M * GATE_FAR_POST_RADII }
         ].forEach((postPos, i) => {
             const post = BABYLON.MeshBuilder.CreateCylinder('visionGatePost' + i, {
                 diameter: 0.009,
@@ -6514,12 +6529,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // each shot's own lamp/trigger geometry so nothing visually overlaps.
         // Table-composition pass (user-requested - "immediate readability... inserts/lights
         // communicating important areas"): this label's original position (SKILL_SHOT_Z_M+0.05 =
-        // z=0.07, at the lane's own x=0.08) sits almost exactly on top of BUMPER_CLUSTER[2]
-        // (x=0.08, z=0.06) - confirmed via screenshot the bumper's own raised cap (added in a
-        // later visual-upgrade pass, after this label was first placed) now visually occludes
-        // half the text from this game's fixed low camera angle. Pulled forward (away from the
-        // bumper cluster, toward the camera) and lifted slightly - same "read against open space,
-        // not crowded geometry" fix as visionGateBeacon's own comment below.
+        // z=0.07, at the lane's own x=0.08) sat almost exactly on top of what was then
+        // BUMPER_CLUSTER[2] at (0.08, 0.06) - confirmed via screenshot, the bumper's raised cap
+        // occluded half the text from this game's fixed low camera angle. Pulled forward (toward
+        // the camera) and lifted slightly - same "read against open space, not crowded geometry"
+        // fix as visionGateBeacon's own comment below.
+        //
+        // The shot-corridor refactor has since moved that whole cluster to a row at z=0.325, so
+        // the bumper this dodged is no longer there. The position is KEPT anyway: pulled forward
+        // it now sits at the mouth of the right corridor, ahead of the power-up orb's new spot at
+        // (0.075, 0.080), which is exactly where a "SKILL SHOT" callout wants to be read from.
         const skillShotLabel = createLabelPlane(scene, 'SKILL SHOT', SKILL_SHOT_LANES[1].x, SKILL_SHOT_Z_M - 0.06, '#ff3366');
         skillShotLabel.position.y = 0.05;
         createLabelPlane(scene, 'KICKBACK', kickbackMirror * OUTLANE_TRIGGER_X_M, LANE_Z_BOTTOM_M - 0.03, '#ff5500');
@@ -6556,7 +6575,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Saturn and the bumper cluster sit near the table's own centerline (x~=0); pushing the
         // label sideways (+X, away from centerline) instead of fore/aft clears both without
         // reopening the original bumper-cap problem this same line already solved once.
-        const visionGateLabel = createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x + 0.05, VISION_GATE_POS.z, '#cc66ff');
+        // SHOT-CORRIDOR REFACTOR: both obstacles this offset was dodging have moved - the bumper
+        // cluster is now a row up at z=0.325 and Saturn dropped to z=0.205 - and the gate itself
+        // moved to the left corridor. Re-solved against the new positions rather than kept: a
+        // sideways offset from the gate now lands either inside Saturn's ring radius (0.079m) or
+        // on the mission target bank that shares the gate's approach, so the label moves DOWN the
+        // gate's own lane instead, into open mid-table where nothing overlaps it and it reads as a
+        // callout for the shot rather than a tag on the hole. Down-table, not up: the gate ended up
+        // on the centre line at z=0.060 and an up-table offset put the text behind the collar's own
+        // raised beacon.
+        const visionGateLabel = createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x, VISION_GATE_POS.z - 0.075, '#cc66ff');
         visionGateLabel.position.y = 0.045;
 
         // 8. Physical backing around the backglass - a frame border plus a receding cabinet
@@ -6665,7 +6693,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const pathCount = 8;
             for (let i = 0; i < pathCount; i++) {
                 const t = i / (pathCount - 1);
-                const z = -0.03 + t * (-0.24); // -0.03 (just under the bumper cluster) down to -0.27 (just above the lower zone threshold)
+                const z = -0.03 + t * (-0.24); // -0.03 down to -0.27 (just above the lower zone threshold). Was described as "just under the bumper cluster"; since the shot-corridor refactor moved the cluster up to z=0.325 these dots mark the open centre corridor's approach instead - the same run of floor, now genuinely a travel lane rather than the apron under an obstacle.
                 const x = (Math.random() - 0.5) * 0.05;
                 const dot = addConstellationDot('centerPathDot' + i, x, z, 0.005 + Math.random() * 0.005);
                 dot.material = pathMat;
@@ -6678,8 +6706,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // L ORBIT/R ORBIT/SKILL SHOT above, placed just outside the bank's own nearest (lowest)
         // target so it doesn't overlap the header rail or any flag.
         {
+            // SHOT-CORRIDOR REFACTOR: the old -0.055 X offset pushed the label outboard of the
+            // bank, which is now where the left orbit rail runs. Moved to just BELOW the bank's
+            // nearest target instead - same "outside the bank, clear of the header rail and flags"
+            // intent, on the axis that still has room in the left corridor.
             const nearestTarget = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
-            createLabelPlane(scene, 'TARGETS', nearestTarget.x - 0.055, nearestTarget.z - 0.03, '#ff66cc');
+            createLabelPlane(scene, 'TARGETS', nearestTarget.x + 0.005, nearestTarget.z - 0.05, '#ff66cc');
         }
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
@@ -9013,14 +9045,40 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         //
         // The shared cap material is deliberately excluded - flashing that one instance would
         // light up all four caps at once. Same reason the cap was already excluded before.
+        // Re-entrancy guard, same shape and same reason as liftEmissive()'s liftPending above -
+        // which documents this exact hazard for the mission cue and was the reason that cue was
+        // moved off these materials in the first place. This function had the unguarded version:
+        // it snapshotted whatever emissive it found, so a second pulse landing inside the first
+        // one's 90ms window captured the ALREADY-LIFTED value as its rest, and the later restore
+        // wrote the lifted value back permanently - the bumper stayed bright until something else
+        // happened to overwrite it.
+        //
+        // It survived because the cluster's old diamond geometry made a re-pulse inside 90ms
+        // essentially unreachable: isOnCooldown() gates this call at COOLDOWN_BUMPER_MS = 300ms per
+        // MESH, and the nearest other bumper was 160mm away. The shot-corridor refactor puts the
+        // four bumpers in a row 40mm apart edge to edge, which is what a pop-bumper nest is for -
+        // and a ball in a nest produces exactly the overlapping-contact pattern this could not
+        // survive. Caught by qa/skin-bumper-cap.js's revert check.
+        //
+        // Two details that matter: the lift is taken from REST (rest.scale(2.1)), never from the
+        // current value, so a re-pulse is 2.1x rather than 4.4x; and a re-pulse re-arms the timer
+        // rather than adding a second one, so there is always exactly one pending restore holding
+        // the one true rest value.
+        const bumperPulsePending = new Map(); // material -> { rest: Color3, timer }
         function pulseBumperLamp(meta) {
             const targets = [meta.bodyMat, meta.lampMat].filter((m) => m && m.emissiveColor);
             if (!targets.length) return;
-            const saved = targets.map((m) => m.emissiveColor.clone());
-            targets.forEach((m) => { m.emissiveColor = m.emissiveColor.scale(2.1); });
-            setTimeout(() => {
-                targets.forEach((m, k) => { if (m.emissiveColor) m.emissiveColor.copyFrom(saved[k]); });
-            }, 90);
+            targets.forEach((m) => {
+                const existing = bumperPulsePending.get(m);
+                const rest = existing ? existing.rest : m.emissiveColor.clone();
+                if (existing) clearTimeout(existing.timer);
+                m.emissiveColor = rest.scale(2.1);
+                const timer = setTimeout(() => {
+                    bumperPulsePending.delete(m);
+                    if (m.emissiveColor) m.emissiveColor.copyFrom(rest);
+                }, 90);
+                bumperPulsePending.set(m, { rest, timer });
+            });
         }
 
         // Physical hits: comet/slingshots already bounce the ball via restitution (set in

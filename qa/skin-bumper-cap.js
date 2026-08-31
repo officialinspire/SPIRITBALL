@@ -155,11 +155,44 @@ async function boot(browser, { skinned, artwork }) {
     const snap = (m) => (m && m.emissiveColor ? m.emissiveColor.asArray().map((v) => +v.toFixed(4)) : null);
     const lum = (a) => (a ? a[0] + a[1] + a[2] : 0);
 
+    // cueMissionObjective()'s absolute lift colour for the 'bumper' objective, in babylon-game.js.
+    const MISSION_CUE_EMISSIVE = [0.38, 0.38, 0.45];
     const before = { score: readScore(), body: snap(meta.bodyMat), lamp: snap(meta.lampMat), cap: snap(capMat) };
     const inPlayBefore = dbg.isBallInPlay();
     // Approach from below along +Z toward the bumper centre, at the bumper's own height.
+    // Staging distance is 0.045, not the 0.075 this used originally: the shot-corridor refactor
+    // moved the bumper row up-table, and 0.075 below bumper1 now lands inside the Vision Gate's
+    // far guard post AND inside the gate's capture trigger, so the ball was scooped by the gate
+    // before it ever reached the bumper (every emissive assertion below then read "unchanged",
+    // which looks like a broken lamp and is really a probe parked in a different feature). 0.045
+    // clears the gate collar by 2mm and leaves 11.5mm of travel to the bumper's surface - closer
+    // to the "staged in contact, resolves on the first physics step" this block already assumes.
+    // AWARD, measured with the ball HELD on the bumper. A headless frame here is 150-300ms and the
+    // ball crosses most of the board in one, so the free-flight pass below cannot attribute a score
+    // delta to this bumper: traced, by the first sample after the hit the ball was already 129mm
+    // away and by the second it had rolled through the mission target bank, making the "award" 1250
+    // (500 bumper + 750 target) on one build and 500 on the other - a difference in where the ball
+    // went, reported as a difference between artwork and no artwork. Holding it in contact bounds
+    // the measurement to this feature, which is the only way the question is answerable at this
+    // frame rate.
+    const heldFrom = bumper.absolutePosition.clone();
+    heldFrom.y = ball.mesh.absolutePosition.y;
+    const heldBefore = readScore();
+    let heldAward = 0;
+    for (let f = 0; f < 8 && !heldAward; f++) {
+      ball.mesh.setAbsolutePosition(heldFrom);
+      body.setLinearVelocity(new BABYLON.Vector3(0, 0, 0));
+      body.setAngularVelocity(new BABYLON.Vector3(0, 0, 0));
+      await new Promise((r) => requestAnimationFrame(r));
+      heldAward = readScore() - heldBefore;
+    }
+    // Clear of the bumper row and its cooldown before the kick pass below.
+    ball.mesh.position.set(0, ball.mesh.absolutePosition.y, -0.10);
+    body.setLinearVelocity(new BABYLON.Vector3(0, 0, 0));
+    await sleep(400);
+
     const from = bumper.absolutePosition.clone();
-    from.z -= 0.075;
+    from.z -= 0.045;
     from.y = ball.mesh.absolutePosition.y;
     ball.mesh.setAbsolutePosition(from);
     body.setLinearVelocity(new BABYLON.Vector3(0, 0, 1.15));
@@ -172,25 +205,66 @@ async function boot(browser, { skinned, artwork }) {
     // Only the FIRST award is compared between builds: the ball goes on bouncing through the
     // cluster and a bonus ramp keeps ticking, so a score delta over any wide window is a story
     // about where the ball ended up (measured 0 -> 2400 across one second, from several events).
+    // The cap-exclusion and flash-revert questions are about THIS BUMPER'S OWN HIT, so they are
+    // scoped to the window that contains it (HIT_WINDOW samples, 48ms) rather than the whole
+    // 320ms roll. Traced frame by frame after the shot-corridor refactor: the hit and its flash
+    // land at t=8ms and revert by t=16ms, then the ball rolls on down the left corridor, is
+    // captured by the Vision Gate at t=56ms, and the gate's own board-wide cue lifts the shared
+    // bumperCapMat at t=88ms. That cue is existing, correct behaviour - it is a mission cue, not
+    // "one bumper's hit lighting all four caps", which is the bug this check exists for - but a
+    // 320ms window cannot tell the two apart, and before the refactor it never had to because the
+    // nearest feature down-table of a bumper was 200mm away instead of 100mm.
+    const HIT_WINDOW = 6;
+    // Speed is only meaningful while the ball is still ON the table. Past the drain it is in free
+    // fall, unclamped (updateBallPhysics() only governs a ball in play) and accelerating without
+    // limit - measured 4.1 and 4.7 m/s on two runs of the same shot, purely a function of which
+    // 8ms sample caught it falling. That noise is larger than the 12% tolerance this feeds.
+    const ON_TABLE_Z = -0.44;
     let firstAward = 0, peakSpeed = 0, minVz = Infinity;
-    let peakBody = 0, peakLamp = 0, capChanged = false;
+    let peakBody = 0, peakLamp = 0, capChanged = false, restored = false;
     for (let i = 0; i < 40; i++) {
       const v = body.getLinearVelocity();
-      peakSpeed = Math.max(peakSpeed, Math.hypot(v.x, v.y, v.z));
-      minVz = Math.min(minVz, v.z);
+      if (ball.mesh.position.z > ON_TABLE_Z) {
+        peakSpeed = Math.max(peakSpeed, Math.hypot(v.x, v.y, v.z));
+        minVz = Math.min(minVz, v.z);
+      }
       if (!firstAward && readScore() > before.score) firstAward = readScore() - before.score;
       peakBody = Math.max(peakBody, lum(snap(meta.bodyMat)));
       peakLamp = Math.max(peakLamp, lum(snap(meta.lampMat)));
-      if (JSON.stringify(snap(capMat)) !== JSON.stringify(before.cap)) capChanged = true;
+      // Distinguish the two things that can write this material. The BUG this check exists for is
+      // pulseBumperLamp() flashing the shared cap, which would write a SCALED version of the cap's
+      // own rest value (2.1x [0.06,0.06,0.08] = [0.126,0.126,0.168]). The mission cue writes the
+      // absolute [0.38,0.38,0.45] that liftEmissive() is given for the 'bumper' objective, and
+      // that is correct behaviour - it means "hit the pop bumpers, all of them". They were
+      // indistinguishable while the probe's path never crossed a mission target; after the
+      // shot-corridor refactor the ball rolls straight through the target bank on its way down,
+      // selects a vision, and the cue fires inside the hit window. Traced frame by frame before
+      // changing anything: cap goes to exactly the cue colour on sample 1, the mission row goes
+      // from 'none' to 'CHAKRA AWAKENING (0/3)' on sample 2, and it is back at rest by sample 3.
+      const capNow = snap(capMat);
+      const isMissionCue = JSON.stringify(capNow) === JSON.stringify(MISSION_CUE_EMISSIVE);
+      if (i < HIT_WINDOW && !isMissionCue && JSON.stringify(capNow) !== JSON.stringify(before.cap)) capChanged = true;
       await sleep(8);
     }
+    // Ask whether the flash reverts with the ball OUT of the picture. pulseBumperLamp()'s restore
+    // is a 90ms setTimeout, so 300ms of quiet is decisive - but only if nothing re-lights the lamp
+    // in the meantime, and after the shot-corridor refactor the bumpers are a row 40mm apart, so a
+    // ball left in it rattles and re-hits the same bumper about every 300ms (its scoring cooldown).
+    // Sampling the material while that is going on measures continued play, not the revert: it
+    // read "still lifted" across 2.4s of frames, which looks exactly like a stuck lamp and is not
+    // one. Parking the ball on open playfield first makes the question answerable.
+    ball.mesh.position.set(0, ball.mesh.absolutePosition.y, -0.10);
+    body.setLinearVelocity(new BABYLON.Vector3(0, 0, 0));
+    body.setAngularVelocity(new BABYLON.Vector3(0, 0, 0));
+    await sleep(300);
+    restored = JSON.stringify(snap(meta.bodyMat)) === JSON.stringify(before.body);
     return {
-      inPlayBefore, scoreBefore: before.score, firstAward, scoreAfter: readScore(),
+      inPlayBefore, scoreBefore: before.score, firstAward, heldAward, scoreAfter: readScore(),
       peakSpeed: +peakSpeed.toFixed(4), minVz: +minVz.toFixed(4),
       bodyLift: +(peakBody / lum(before.body)).toFixed(2),
       lampLift: +(peakLamp / lum(before.lamp)).toFixed(2),
       capChanged,
-      restored: JSON.stringify(snap(meta.bodyMat)) === JSON.stringify(before.body),
+      restored,
       capAfter: snap(capMat), bodyBefore: before.body, bodyAfter: snap(meta.bodyMat)
     };
   }, 'bumper1');
@@ -302,9 +376,12 @@ async function boot(browser, { skinned, artwork }) {
     base.hit.scoreAfter > base.hit.scoreBefore, base.hit);
   check('the staged hit still scores with artwork loaded',
     art.hit.scoreAfter > art.hit.scoreBefore, art.hit);
+  // heldAward, not firstAward - see the held pass in hit() for why the free-flight number cannot
+  // be attributed to this bumper at this frame rate.
   check('the score awarded for the hit is the same with and without artwork',
-    art.hit.firstAward === base.hit.firstAward && base.hit.firstAward > 0,
-    { fallback: base.hit.firstAward, artwork: art.hit.firstAward });
+    art.hit.heldAward === base.hit.heldAward && base.hit.heldAward > 0,
+    { fallback: base.hit.heldAward, artwork: art.hit.heldAward,
+      freeFlightForContext: { fallback: base.hit.firstAward, artwork: art.hit.firstAward } });
   // "Kicked" means sent BACK the way it came. The ball is staged moving +Z into the bumper, so a
   // negative z velocity is the bumper actively throwing it away rather than the ball dribbling
   // past. Traced, the approach speed itself is never observable - the ball is staged in contact
@@ -337,7 +414,10 @@ async function boot(browser, { skinned, artwork }) {
   check('the hit never touches the shared cap material (artwork)', art.hit.capChanged === false, art.hit.capAfter);
   check('the body emissive returns to its resting value after the flash',
     base.hit.restored === true && art.hit.restored === true,
-    { before: base.hit.bodyBefore, after: base.hit.bodyAfter });
+    // Both runs' flags, not just the fallback's: this asserts on base AND art, and printing only
+    // base's values sent the diagnosis down the wrong path once already.
+    { fallback: { restored: base.hit.restored, before: base.hit.bodyBefore, after: base.hit.bodyAfter },
+      artwork: { restored: art.hit.restored, before: art.hit.bodyBefore, after: art.hit.bodyAfter } });
 
   console.log('\n=== BOSS AND NORMAL BUMPERS STAY DISTINGUISHABLE ===');
   const report = (label, c) => {

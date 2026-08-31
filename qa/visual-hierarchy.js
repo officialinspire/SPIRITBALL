@@ -76,8 +76,13 @@ const stat = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) =
     if (body) { body.setMotionType(BABYLON.PhysicsMotionType.ANIMATED); body.setLinearVelocity(BABYLON.Vector3.Zero()); }
   });
 
-  // (a) The ball at eight representative positions across the reachable playfield.
-  const spots = [[0,-0.20],[0,-0.05],[0,0.10],[0,0.25],[-0.12,0.00],[0.12,0.00],[-0.12,0.20],[0.12,0.20]];
+  // (a) The ball at eight representative positions across the reachable playfield. Re-picked for
+  // the shot-corridor layout, and checked against the live collider map rather than eyeballed:
+  // (0, 0.25) is now inside Saturn (z 0.160-0.250) and (0.12, 0.20) overlaps the comet, so those
+  // two spots returned zero visible ball pixels and the "measurable at most positions" guard
+  // tripped on a probe parked inside a feature. Every spot below clears the nearest collider by
+  // at least 8mm with the ball's own 13.5mm radius counted.
+  const spots = [[0,-0.20],[0,-0.05],[0,0.125],[0,0.285],[-0.12,0.00],[0.12,0.00],[-0.075,0.20],[0.13,0.24]];
   const ballReads = [];
   for (const [x, z] of spots) {
     const pt = await page.evaluate(({ x, z }) => {
