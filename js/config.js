@@ -543,35 +543,53 @@ export const BUMPER_RADIUS_M = 0.02;
 // taking their separation from 120mm to 155mm, which clears the whole row above Saturn's
 // silhouette. 0.345 is the ceiling: any higher and the boss's fixture reaches the re-entry lane
 // inserts at z=0.400.
-// UPPER-TABLE CIRCULATION: the row is STAGGERED, not flat. Four bumpers on one Z line is a wall
-// across the board - a ball arriving from anywhere meets the same barrier at the same height and
-// is thrown back the way it came. Alternating the depth turns the same four bodies into a nest with
-// diagonal passages through it: the gaps between adjacent bumpers are now 55mm, 51mm and 56mm of
-// open lane running at an angle, so momentum carries through rather than reflecting off a face.
+// CLUSTER LAYOUT: a hub with channels onto it, not a row and not a blob.
 //
-// The boss sits deepest (z=0.300), where it is the first thing a centre shot meets and the last
-// thing a ball falling out of the top corridor meets on its way back down.
+// Two failure modes bracket this. Four bumpers on one Z line is a wall - every approach meets the
+// same face at the same height and is thrown back the way it came. Four bumpers packed tight is one
+// blob - the ball cannot get between them, so it strikes the outside and leaves. What makes the
+// cluster a section of playfield rather than an obstacle is CHANNELS: gaps wide enough to weave
+// through but narrow enough that a bumper's kick lands the ball on a neighbour.
 //
-// Depth is capped by the top corridor: the highest bumper's own top edge is z=0.365 and a ball
-// crossing the corridor at z~0.40 passes 21mm above it. That margin is deliberately small - a slow
-// crossing sags into the nest, a fast one clears it.
-// Depths alternate 0.320 / 0.345 / 0.310 / 0.345 across the four X positions, so no two neighbours
-// present the same face at the same height.
+// The geometry here is severely constrained and the layout was solved against it rather than
+// sketched. Every position has to clear Saturn by 40mm, the comet by 40mm, both orbit top arcs by
+// 40mm, and the orbit rails by either 18mm or 42mm (a gap between those two figures is where a ball
+// jams); its top edge has to stay under the top-crossing corridor; and no two bumpers may sit
+// closer than 40mm, because two round bodies nearer than that form a V the ball settles into - the
+// single worst trap this board's audit has found. Saturn's 40mm exclusion circle alone rules out a
+// two-deep centre column: the usable band above it is 55mm tall and a bumper is 40-60mm across.
 //
-// The BOSS is the outermost one, not a middle one, and that is a readability constraint rather
-// than a layout preference. Two things occlude from this game's fixed low camera and the boss has
-// to clear both: Saturn's ring silhouette (x +/-0.079), and the mission target bank's raised plates
-// on the left. Measured by the boss-only gold trim's visible pixel count, which qa/skin-bumper-cap.js
-// requires to be at least 80: centre-left and deep put it behind Saturn (67 px); outer-left put it
-// 30mm behind the bank's top plate (77 px); outer-RIGHT clears both, and is also where the right
-// orbit's exit and the comet's rebound deliver, which is where the board's biggest target wants to
-// be anyway.
+// The result is a hub-and-spoke, not a chain:
+//   BOSS      (-0.045, 0.345)  the apex, upper, with THREE channels feeding it (47.1mm to the far
+//                              left pop, 68.6mm to the low one, 69.5mm to the right one). It is
+//                              the hardest of the four to reach directly - Saturn shields it from
+//                              straight below - and everything that ricochets tends toward it
+//   pop L-low (-0.102, 0.241)  hangs BELOW the arch, leaving a 49mm channel between it and Saturn
+//                              that a ball coming up the centre-left threads
+//   pop R     (+0.073, 0.326)  upper right, in the right orbit's exit path
+//   pop L-far (-0.142, 0.341)  upper left, in the left orbit's exit path
+//
+// Four of the six pairs sit in the 40-70mm chaining band (47.1, 67.7, 68.6, 69.5) and two are
+// deliberately far apart (154mm and 176mm) - those are the through-routes ACROSS the cluster rather
+// than channels through it. Nothing is mirror-symmetric: the left carries two pops at different
+// depths, the right one, and the boss sits 45mm off the centre line, so a ball arriving at the same
+// angle from either side takes a different path.
+//
+// INDEX 0 IS THE BOSS (buildObstacles() uses `isBoss = i === 0`, radius BUMPER_RADIUS_M*1.5 = 0.03,
+// not 0.02) - it keeps index 0 so nothing about its scoring, message, pitch or kick tier changes.
+// Its POSITION is also a readability constraint, not a free choice. Measured by its boss-only gold
+// trim's visible pixel count, which qa/skin-bumper-cap.js requires to be at least 80: Saturn
+// occludes anything close behind it from this game's fixed low camera, and the occlusion depends on
+// x at least as much as z - (-0.045, 0.300) read 67 px, (-0.130, 0.320) read 77, and (-0.021, 0.338)
+// read 42 despite being HIGHER than the last, because it sits almost directly behind Saturn's
+// centre. (-0.045, 0.345) reads clean. That is why the boss is upper-and-left-of-centre rather than
+// on the centre line.
 export const BUMPER_CLUSTER = [
-    { x: 0.130, z: 0.320 }, // BOSS (index 0 - see note above)
-    { x: -0.135, z: 0.345 },
-    { x: -0.045, z: 0.310 },
-    { x: 0.035, z: 0.345 }
-]; // 4 bumpers in an upper-board row, matching CONFIG.attackBumperCount in ../index.js
+    { x: -0.045, z: 0.345 }, // BOSS (index 0 - see note above)
+    { x: -0.102, z: 0.241 },
+    { x: 0.073, z: 0.326 },
+    { x: -0.142, z: 0.341 }
+]; // 4 bumpers, matching CONFIG.attackBumperCount in ../index.js
 
 // Active pop-bumper kick: bumpers previously only ever bounced the ball via Havok's own
 // restitution (set in buildObstacles()) - a real pop bumper actively fires the ball away on
