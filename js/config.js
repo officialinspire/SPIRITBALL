@@ -543,11 +543,34 @@ export const BUMPER_RADIUS_M = 0.02;
 // taking their separation from 120mm to 155mm, which clears the whole row above Saturn's
 // silhouette. 0.345 is the ceiling: any higher and the boss's fixture reaches the re-entry lane
 // inserts at z=0.400.
+// UPPER-TABLE CIRCULATION: the row is STAGGERED, not flat. Four bumpers on one Z line is a wall
+// across the board - a ball arriving from anywhere meets the same barrier at the same height and
+// is thrown back the way it came. Alternating the depth turns the same four bodies into a nest with
+// diagonal passages through it: the gaps between adjacent bumpers are now 55mm, 51mm and 56mm of
+// open lane running at an angle, so momentum carries through rather than reflecting off a face.
+//
+// The boss sits deepest (z=0.300), where it is the first thing a centre shot meets and the last
+// thing a ball falling out of the top corridor meets on its way back down.
+//
+// Depth is capped by the top corridor: the highest bumper's own top edge is z=0.365 and a ball
+// crossing the corridor at z~0.40 passes 21mm above it. That margin is deliberately small - a slow
+// crossing sags into the nest, a fast one clears it.
+// Depths alternate 0.320 / 0.345 / 0.310 / 0.345 across the four X positions, so no two neighbours
+// present the same face at the same height.
+//
+// The BOSS is the outermost one, not a middle one, and that is a readability constraint rather
+// than a layout preference. Two things occlude from this game's fixed low camera and the boss has
+// to clear both: Saturn's ring silhouette (x +/-0.079), and the mission target bank's raised plates
+// on the left. Measured by the boss-only gold trim's visible pixel count, which qa/skin-bumper-cap.js
+// requires to be at least 80: centre-left and deep put it behind Saturn (67 px); outer-left put it
+// 30mm behind the bank's top plate (77 px); outer-RIGHT clears both, and is also where the right
+// orbit's exit and the comet's rebound deliver, which is where the board's biggest target wants to
+// be anyway.
 export const BUMPER_CLUSTER = [
-    { x: -0.045, z: 0.345 }, // BOSS (index 0 - see note above)
+    { x: 0.130, z: 0.320 }, // BOSS (index 0 - see note above)
     { x: -0.135, z: 0.345 },
-    { x: 0.045, z: 0.345 },
-    { x: 0.135, z: 0.345 }
+    { x: -0.045, z: 0.310 },
+    { x: 0.035, z: 0.345 }
 ]; // 4 bumpers in an upper-board row, matching CONFIG.attackBumperCount in ../index.js
 
 // Active pop-bumper kick: bumpers previously only ever bounced the ball via Havok's own
@@ -687,7 +710,14 @@ export const COMET_RADIUS_M = 0.022;
 // so its crease is the one that holds. At 253 seeded starts it catches 2, recovered by the shipped
 // anti-stuck in 0.58s. Giving the comet a kick would fix it outright and is a physics change, so
 // it is left alone and recorded here instead.
-export const COMET_POS = { x: 0.090, z: 0.266 };
+// UPPER-TABLE CIRCULATION: down-table from 0.266 to 0.215. At 0.266 the comet sat inside the
+// staggered nest's footprint (36mm from the nearest pop, inside the 40mm any two round bodies need
+// between them) and, more to the point, it was BEHIND the nest from every approach - a ball coming
+// down the right side met a bumper first every time. At 0.215 it sits in the open right field just
+// below the nest, on the path a ball takes coming down from the top corridor or out of the right
+// orbit, which is what "approach the comet" needs to mean. Clearances: Saturn 45.8mm, nearest pop
+// 67.8mm, right orbit rail 46.7mm.
+export const COMET_POS = { x: 0.110, z: 0.215 };
 
 // Score-multiplier power-up orb (board redesign) - appears periodically in the open lane
 // between the bumper cluster and Saturn (naturally in the ball's travel path when it rolls
@@ -769,10 +799,17 @@ export const REENTRY_LANE_RADIUS_M = 0.016;
 // bumper row's outer pops and the orbit lanes' top exits rather than directly in line with the
 // rails. Z is unchanged (0.40); these are triggers with decorative flanking rails, so nothing here
 // is a collider and their mission-tied scoring is untouched.
+// UPPER-TABLE CIRCULATION: the three rollovers are no longer on one Z line. A ball released by an
+// orbit's top arc at z=0.409 crosses the board sideways and SAGS as it goes - 0.717 m/s^2 of
+// downhill gravity over a 0.2-0.4s crossing - so a flat row at 0.40 was only ever crossed at its
+// near end. Traced on a completed loop: the ball was at z=0.406 leaving the arc and z=0.305 by the
+// time it reached x=+0.044. Dropping the middle rollover 14mm into a shallow V follows that sag
+// from either direction, which is the only symmetric shape that can (the sag is monotonic in the
+// direction of travel, so it mirrors when the loop runs the other way).
 export const REENTRY_LANES = [
-    { x: -0.115, z: 0.40 },
-    { x: 0, z: 0.40 },
-    { x: 0.115, z: 0.40 }
+    { x: -0.115, z: 0.398 },
+    { x: 0, z: 0.384 },
+    { x: 0.115, z: 0.398 }
 ]; // 3 lanes near the top wall, matching CONFIG.reentryLaneCount
 
 // ===================================
@@ -999,7 +1036,39 @@ export const ORBIT_OUTER_GAP_TO_RAD = 33 * Math.PI / 180;
 // the left flipper at the same angles - taken at a slightly higher price.
 export const ORBIT_OUTER_FLANK_SIDES = ['left'];
 export const ORBIT_ARC_SEGMENTS = 6; // straight boxes per arc; the chord-to-arc error at 38/6 degrees is 0.3mm
-export const ORBIT_RAIL_TOP_Z_M = 0.30; // the vertical section's top - the lane opens into the upper board here
+export const ORBIT_RAIL_TOP_Z_M = 0.30; // the vertical section's top - where the top arc takes over
+
+// UPPER-TABLE CIRCULATION: the orbit's TOP ARC, and the piece that turns the upper board from a
+// dead end into a loop.
+//
+// Before this, each lane ended at ORBIT_RAIL_TOP_Z_M and the ball ran on up the wall into topWall,
+// bounced, and came back down the lane it arrived in. Measured on the 174-shot fan, the re-entry
+// lanes - three scoring rollovers - were crossed 3 times, because nothing ever travelled across the
+// top of the board.
+//
+// The arc is TANGENT TO THE SIDE WALL where the vertical section ends, so a ball riding the lane
+// meets it at zero incidence, and it sweeps inboard through ORBIT_TOP_ARC_SWEEP_RAD - turning the
+// ball from straight up-table to mostly sideways and releasing it across the top at z~0.41. From
+// there its own momentum decides what happens, which is the point:
+//   * fast    - it crosses the whole top, over all three re-entry rollovers, meets the OPPOSITE
+//               arc's inboard face and is turned down the opposite lane. A completed loop.
+//   * medium  - it drops as it crosses (0.717 m/s^2 downhill; a 0.35s crossing falls 44mm) and
+//               lands in the bumper nest below.
+//   * slow    - it never clears the nest at all and rattles there.
+// One shot, three outcomes, chosen by how hard it was hit rather than by a branch in the geometry.
+//
+// This is an OUTER guide only - there is deliberately no inner rail on the turn. An inner rail
+// would make the arc a closed channel, which would both force the single "cross the top" outcome
+// and collide with the bumper nest (checked: at the radius that turns the ball usefully, an inner
+// rail passes within 5mm of two of the pops). Leaving the inboard side open is what lets a ball
+// leave the turn early into the nest.
+//
+// The void between the arc and the side wall is bounded by the arc, the wall and topWall, and its
+// only opening is the 15.7mm between the arc's upper end and topWall's inner face - under the
+// ball's 27mm diameter, so it is sealed and nothing can get in.
+export const ORBIT_TOP_ARC_RADIUS_M = 0.115;
+export const ORBIT_TOP_ARC_SWEEP_RAD = 72 * Math.PI / 180;
+export const ORBIT_TOP_ARC_SEGMENTS = 8; // 9 degrees per segment - 0.35mm of chord error
 // SHOT-FAN REVISION: the entrance rollover moved DOWN to z=0.06, into the wall channel below the
 // rail's bottom tip, because 0.17 sat above where a real shot can reach in that lane. Traced: a
 // 35deg shot enters the channel and peaks at (-0.205, +0.125) before rolling back - it was
@@ -1070,6 +1139,16 @@ export function orbitArcPoint(mirror, radius, sweepRad) {
     return {
         x: centerX + mirror * radius * Math.cos(sweepRad),
         z: ORBIT_ARC_TANGENT_Z_M - radius * Math.sin(sweepRad)
+    };
+}
+
+// The same construction for the TOP arc: sweep=0 is the tangency point on the side wall at the
+// vertical section's top, and sweep grows inboard and UP-table (the entry arc's grows downward).
+export function orbitTopArcPoint(mirror, radius, sweepRad) {
+    const centerX = mirror * (ORBIT_WALL_FACE_X_M - ORBIT_TOP_ARC_RADIUS_M);
+    return {
+        x: centerX + mirror * radius * Math.cos(sweepRad),
+        z: ORBIT_RAIL_TOP_Z_M + radius * Math.sin(sweepRad)
     };
 }
 

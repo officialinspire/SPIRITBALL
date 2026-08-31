@@ -84,6 +84,7 @@ import {
     ORBIT_RAIL_TOP_Z_M, ORBIT_COMPLETION_Z_M, ORBIT_TRIGGER_WIDTH_M,
     ORBIT_ARC_RADIUS_M, ORBIT_LANE_WIDTH_M, ORBIT_ARC_SWEEP_RAD, ORBIT_INNER_SWEEP_RAD,
     ORBIT_ENTRANCE_SWEEP_RAD, ORBIT_ARC_SEGMENTS, orbitArcPoint, ORBIT_WALL_FACE_X_M,
+    ORBIT_TOP_ARC_RADIUS_M, ORBIT_TOP_ARC_SWEEP_RAD, ORBIT_TOP_ARC_SEGMENTS, orbitTopArcPoint,
     ORBIT_OUTER_GAP_FROM_RAD, ORBIT_OUTER_GAP_TO_RAD, ORBIT_OUTER_FLANK_SIDES,
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
     MISSION_CUE_MS, MISSION_SELECT_MESSAGE_MS,
@@ -6107,21 +6108,32 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side + 'Upper', orbitFloorMat,
                 0.03, ORBIT_RAIL_TOP_Z_M - laneTop.z, laneTop.x, (laneTop.z + ORBIT_RAIL_TOP_Z_M) / 2, Math.PI / 2);
 
-            // Only the TOP end gets a capping post, not the mouth - verified via Playwright that a
-            // post at the lane's entrance sits close enough to a realistic entry trajectory to
-            // actually block shots into the lane rather than just marking it (an early build had
-            // one there; a ball aimed at the entrance clipped it and was knocked back inboard
-            // before ever reaching the entrance trigger). The flared mouth and its lamp insert are
-            // the entrance's real cue.
-            {
-                const post = BABYLON.MeshBuilder.CreateCylinder('orbitRail' + orbitDef.side + 'Post0', {
-                    diameter: 0.016,
-                    height: 0.03
-                }, scene);
-                post.position.set(innerTop.x, 0.015, ORBIT_RAIL_TOP_Z_M);
-                post.material = housingMat;
-                post.metadata = { kind: 'wall' };
-                new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            // TOP ARC - see ORBIT_TOP_ARC_RADIUS_M for what it is for. Tangent to the side wall where
+            // the vertical section ends, sweeping inboard and up, and OUTER-ONLY: the inboard side
+            // of the turn is deliberately left open so a ball can leave it early into the bumper
+            // nest instead of being committed to crossing the top.
+            //
+            // Same chain-of-boxes construction as the entry arc, at 9 degrees per segment. The rail
+            // body sits OUTBOARD of its face (a larger radius is further from the construction
+            // centre), so near the tangency point it overlaps the side wall - which is what leaves
+            // no seam there for a ball riding the wall to catch on.
+            for (let i = 0; i < ORBIT_TOP_ARC_SEGMENTS; i++) {
+                const a = (ORBIT_TOP_ARC_SWEEP_RAD * i) / ORBIT_TOP_ARC_SEGMENTS;
+                const b = (ORBIT_TOP_ARC_SWEEP_RAD * (i + 1)) / ORBIT_TOP_ARC_SEGMENTS;
+                railBox('orbitTopArc' + orbitDef.side + i,
+                    orbitTopArcPoint(mirror, ORBIT_TOP_ARC_RADIUS_M + ORBIT_RAIL_HALF_DEPTH_M, a),
+                    orbitTopArcPoint(mirror, ORBIT_TOP_ARC_RADIUS_M + ORBIT_RAIL_HALF_DEPTH_M, b), true);
+            }
+            // Floor tint along the turn, on the ball's own side of the arc rather than under it, so
+            // the corridor reads as a route across the top the way the lanes below it do.
+            for (let i = 0; i < ORBIT_TOP_ARC_SEGMENTS; i++) {
+                const a = (ORBIT_TOP_ARC_SWEEP_RAD * i) / ORBIT_TOP_ARC_SEGMENTS;
+                const b = (ORBIT_TOP_ARC_SWEEP_RAD * (i + 1)) / ORBIT_TOP_ARC_SEGMENTS;
+                const pa = orbitTopArcPoint(mirror, ORBIT_TOP_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M / 2, a);
+                const pb = orbitTopArcPoint(mirror, ORBIT_TOP_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M / 2, b);
+                const dx = pb.x - pa.x, dz = pb.z - pa.z, len = Math.hypot(dx, dz);
+                addLaneFloorTint(scene, 'orbitTopTint' + orbitDef.side + i, orbitFloorMat,
+                    0.03, len * 1.04, (pa.x + pb.x) / 2, (pa.z + pb.z) / 2, Math.atan2(-dz, dx));
             }
 
             // Entrance/completion rollover triggers, each with its own indicator lamp insert -

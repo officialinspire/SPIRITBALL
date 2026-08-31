@@ -104,6 +104,15 @@ function check(name, ok, detail) {
       // Hold the ball ON the feature for the whole window rather than lobbing it and hoping.
       // A held ball cannot drain, cannot wander into a second feature, and gives the solver a
       // real, repeated contact - which is what both collider hits and trigger enters need.
+      // Stepped by hand at 1/240s, not one render frame at a time. A headless frame here is
+      // 150-300ms of physics, and the upper-table circulation pass put the features close enough
+      // together that a ball kicked off one reaches another inside a single frame - the boss
+      // bumper is 119mm from Saturn now, so "the boss awards 1200" measured 4200 (1200 + Saturn's
+      // 3000) and the re-entry lane measured 2500. That is one frame's worth of real play being
+      // read as one feature's award. Fine steps let the check see the FIRST award on its own,
+      // which is what it claims to assert. The scoring path is the ball's collision observable and
+      // the trigger overlaps, both of which fire inside _step(), so nothing about this bypasses
+      // the code under test - only the render loop's own throttling.
       async hit(target, opts) {
         opts = opts || {};
         const before = window.__gp.score();
@@ -111,16 +120,27 @@ function check(name, ok, detail) {
         if (typeof target === 'string' && !m) return { error: 'no mesh ' + target };
         const p = m ? m.getAbsolutePosition().clone() : new V(target.x, target.y, target.z);
         const frames = opts.frames || 14;
+        const eng = s.getPhysicsEngine();
+        const wasEnabled = s.physicsEnabled;
+        s.physicsEnabled = false; // we drive the steps; the render loop must not also step
         d.mainBall.aggregate.body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
-        for (let f = 0; f < frames; f++) {
-          d.mainBall.mesh.position.set(p.x, opts.y !== undefined ? opts.y : 0.0135, p.z);
-          d.mainBall.aggregate.body.setLinearVelocity(new V(0, 0, 0));
-          d.mainBall.aggregate.body.setAngularVelocity(new V(0, 0, 0));
-          await frame();
-          const delta = window.__gp.score() - before;
-          if (delta > 0) return { delta, award: window.__gp.lastAward(), trigger: window.__gp.lastTrigger(), frames: f };
+        try {
+          for (let f = 0; f < frames; f++) {
+            d.mainBall.mesh.position.set(p.x, opts.y !== undefined ? opts.y : 0.0135, p.z);
+            d.mainBall.aggregate.body.setLinearVelocity(new V(0, 0, 0));
+            d.mainBall.aggregate.body.setAngularVelocity(new V(0, 0, 0));
+            for (let i = 0; i < 8; i++) {
+              eng._step(1 / 240);
+              if (window.__gp.score() - before > 0) break;
+            }
+            await frame();
+            const delta = window.__gp.score() - before;
+            if (delta > 0) return { delta, award: window.__gp.lastAward(), trigger: window.__gp.lastTrigger(), frames: f };
+          }
+          return { delta: window.__gp.score() - before, award: window.__gp.lastAward(), trigger: window.__gp.lastTrigger(), frames };
+        } finally {
+          s.physicsEnabled = wasEnabled;
         }
-        return { delta: window.__gp.score() - before, award: window.__gp.lastAward(), trigger: window.__gp.lastTrigger(), frames };
       }
     };
   });

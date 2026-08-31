@@ -212,10 +212,17 @@ const stat = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) =
     { markers: markers.map((m) => m.name + '=' + m.p90), brightestCallout });
 
   // Tier 8 is last, by a wide margin, and must stay there.
+  // p50, not p90. The skybox is sampled on a 6x6x6 grid of its bounding box and only 8 of those
+  // points survive the frontmost-pick test, so its "p90" is the near-MAX of 8 samples - and what
+  // that maximum actually measures is GlowLayer bloom spilling past the board's silhouette onto the
+  // sky right behind it, not the starfield's own brightness. Measured across four runs of an
+  // unchanged build it read 13.1, 30.5, 75.6 and 124.6 while the median sat at 10.3-10.8, so the
+  // check was a coin flip on where 8 points happened to land. The median answers the question the
+  // check is asking - is the starfield the dimmest tier - and is stable. p90 is still reported.
   const sky = by.skybox;
   check('the starfield stays the dimmest thing on screen',
-    !!sky && sky.p90 < ballMedian * 0.5 && sky.p90 < flipperP90 * 0.5,
-    { skybox: sky && sky.p90, ballMedian, flipperP90 });
+    !!sky && sky.p50 < ballMedian * 0.5 && sky.p50 < flipperP90 * 0.5,
+    { skyboxMedian: sky && sky.p50, skyboxP90bloomTail: sky && sky.p90, ballMedian, flipperP90 });
 
   console.log(`\n=== SUMMARY ===\nTOTAL: ${pass} passed, ${fail} failed`);
   fs.writeFileSync(`${OUT}/visual-hierarchy.json`, JSON.stringify({ ballReads, rows }, null, 1));
