@@ -917,26 +917,102 @@ export const SIDE_LANES = [
 // inner edge) - both comfortably wider than the ball. Each orbit runs through its side's
 // corridor, alongside (not through) the existing target bank/comet/Saturn/bumper cluster -
 // nothing about this feature moves or removes any of that existing geometry.
-// SHOT-CORRIDOR REFACTOR. Z span re-cut for the rails' new wall-hugging position: the bottom tip
-// moved UP (0.12 -> 0.145) so it meets leftGuide/rightGuide's upper end instead of floating in
-// mid-table, and the top moved DOWN (0.37 -> 0.345) so the lane opens into the upper board above
-// the bumper row rather than dead-ending under the re-entry lanes.
-export const ORBIT_RAIL_BOTTOM_Z_M = 0.128; // butts against leftGuide/rightGuide's upper tip - see ORBITS
-export const ORBIT_RAIL_TOP_Z_M = 0.345; // lane exits into the open upper board above the bumper row
+// ORBIT GEOMETRY, rebuilt as a real arc (user-requested: "recognizable repeatable shots rather
+// than generic side paths"). Everything below describes ONE side; the other is an exact mirror
+// through x=0, so left flipper -> right orbit and right flipper -> left orbit are the same shot.
+//
+// WHY AN ARC. The straight-rail version was measured, not guessed: 174 flipper shots produced 6
+// lane entries and 2 completions, and tracing single shots showed the ball entering the channel
+// and dying at z=+0.125. The cause is the entry angle. A shot that reaches the far wall arrives
+// at 33-40 degrees to it; a straight wall turns that into one hard impact (restitution 0.3 on the
+// perpendicular component) and then a second off the inner rail, and the ball ping-pongs its speed
+// away before it has climbed 200mm. Nothing about rail POSITION fixes that - only rail SHAPE does.
+//
+// THE SHAPE. The lane's outer guide is a circular arc TANGENT TO THE SIDE WALL at
+// ORBIT_ARC_TANGENT_Z_M, curving down and inboard from there through ORBIT_ARC_SWEEP_RAD. Tangency
+// is the whole point: at the top the guide IS the wall (no seam, no step for a ball riding it),
+// and at its lower end its surface runs at ORBIT_ARC_SWEEP_RAD from vertical - which is the angle
+// the incoming shot arrives at. A 38-degree shot meets a 38-degree surface at roughly zero
+// incidence and keeps its speed instead of spending it. The inner guide is CONCENTRIC with the
+// outer one, so the lane is a constant ORBIT_LANE_WIDTH_M wide the whole way round - it cannot
+// pinch, and there is no point along it where the ball is squeezed.
+//
+// THE MOUTH. The inner guide stops short of the outer one (ORBIT_INNER_SWEEP_RAD vs
+// ORBIT_ARC_SWEEP_RAD), so the lane opens out into a flare at the bottom rather than presenting a
+// slot the ball has to thread. Geometrically the entry window is the span of flipper angles that
+// clear the inner guide's lower tip but still meet the outer arc above its own lower end: about
+// 32-45 degrees, i.e. ~13 degrees wide. The straight-rail version's window was under 3.
+//
+// THE WEDGE BEHIND THE OUTER GUIDE narrows as it rises (76mm at the guide's lower tip, zero at the
+// tangency point). That orientation is deliberate and is the difference between a safe pocket and
+// a trap: gravity pulls a ball in this wedge DOWN, into the widening part, and out. The traps this
+// board's audit has caught were all the other way up - gaps that narrow downward, where gravity
+// holds the ball in.
+export const ORBIT_WALL_FACE_X_M = 0.2267; // leftWall/rightWall inner face, read off the live scene
+export const ORBIT_ARC_RADIUS_M = 0.36; // outer guide's face radius - see the block comment above
+export const ORBIT_LANE_WIDTH_M = 0.048; // 1.78 ball diameters, constant all the way round
+export const ORBIT_ARC_TANGENT_Z_M = 0.06; // where the outer guide meets the side wall, tangentially
+export const ORBIT_ARC_SWEEP_RAD = 38 * Math.PI / 180; // outer guide's sweep below tangency
+// Inner guide's sweep, measured rather than picked. At 30 degrees its lower tip reached
+// (-0.137, -0.096) - far enough inboard and low enough to stand in the middle of the board - and
+// the 174-shot fan showed the cost immediately: Saturn's hits fell 32 -> 13, the target bank's
+// 26 -> 20 and the median shot apex dropped from z=-0.036 to -0.149, because the guide was
+// intercepting centre-corridor shots on their way up. At 20 degrees the tip sits at
+// (-0.160, -0.047), out of that traffic. It also WIDENS the entry window rather than narrowing it:
+// the shot has 49mm more table to get outboard in before it has to clear the tip, so the minimum
+// entry angle drops from 32 to 31 degrees.
+export const ORBIT_INNER_SWEEP_RAD = 20 * Math.PI / 180; // inner guide stops here, leaving a flared mouth
+export const ORBIT_ENTRANCE_SWEEP_RAD = 34 * Math.PI / 180; // entrance rollover, on the lane's centre line
+// A GAP in the outer guide, sized and positioned from the shooter lane's own exit path.
+//
+// The shooter lane exits into the RIGHT-hand wall channel - the ball rests at x=0.1955 and rides
+// the wall up - and that channel is the same space the outer guide's wedge occupies. Measured, a
+// launch drove into the closing part of that wedge and stalled at z=-0.122 against z=+0.041 before
+// this pass, and the launch's region coverage fell from 6 of 9 to 2.
+//
+// A deflector across the wedge was tried first and was worse (z=-0.156): it turns the ball inboard
+// correctly, straight into the corner where it meets the guide, which is a V the ball then rattles
+// around in. The geometry does not admit a deflector - anything that closes the channel stops the
+// ball and anything that does not, pinches it.
+//
+// What does work is letting the ball THROUGH. The launched ball's centre crosses the outer guide's
+// face at sweep 24 degrees (cos = (0.1955 + 0.1333)/0.36), so the guide is built in two pieces with
+// a gap straddling that crossing. 8 degrees of arc is 50mm - comfortably more than the ball's 27mm
+// - and it costs the flipper shot nothing: the catching flank below the gap still does the initial
+// turn from 38 to 28 degrees, and the ball re-meets the guide above the gap at 8 degrees of
+// incidence, which is gentler than anything it met before this pass.
+export const ORBIT_OUTER_GAP_FROM_RAD = 17 * Math.PI / 180;
+export const ORBIT_OUTER_GAP_TO_RAD = 33 * Math.PI / 180;
+// ...and on the RIGHT the catching flank below that gap is omitted entirely, which is the one
+// asymmetry on this board and is forced by hardware, not chosen. The flank lives between z=-0.140
+// and -0.166 - exactly where the shooter lane's inner wall ends and where a launched ball is still
+// riding the side wall - and everything else was tried first, measured, and was worse:
+//   * flank present, no gap:      launch stalls at z=-0.106 (baseline reaches -0.036)
+//   * a deflector across the wedge: z=-0.156, worse - it turns the ball correctly and then into
+//                                   the corner where the deflector meets the guide
+//   * gap only (17-33 degrees):    z=-0.081, and 3 of 4 suite launches never clear the lane
+//   * gap plus a 30mm longer shooter lane: no better, and it spends the launch's own clearance
+//                                   margin (see LANE_WALL_Z_TOP_PX)
+// The right orbit keeps the arc, the constant-width lane, the flared mouth, the vertical section
+// and both rollovers; what it loses is the tangent flank, so its entry is a wall contact like the
+// pre-arc geometry rather than a glancing one. It is the same SHOT - the same lane, entered from
+// the left flipper at the same angles - taken at a slightly higher price.
+export const ORBIT_OUTER_FLANK_SIDES = ['left'];
+export const ORBIT_ARC_SEGMENTS = 6; // straight boxes per arc; the chord-to-arc error at 38/6 degrees is 0.3mm
+export const ORBIT_RAIL_TOP_Z_M = 0.30; // the vertical section's top - the lane opens into the upper board here
 // SHOT-FAN REVISION: the entrance rollover moved DOWN to z=0.06, into the wall channel below the
 // rail's bottom tip, because 0.17 sat above where a real shot can reach in that lane. Traced: a
 // 35deg shot enters the channel and peaks at (-0.205, +0.125) before rolling back - it was
 // genuinely IN the lane and still never crossed a trigger at 0.17. Entering an orbit should be the
 // easy half and completing it the skill; putting the entrance at the lane's mouth and leaving the
 // completion at 0.33 is what makes that split real rather than nominal.
-export const ORBIT_ENTRANCE_Z_M = 0.06; // the lane's mouth, in the wall channel below the rail
-// SHOT-FAN REVISION: 0.33 was the rail's top end, and measured, no flipper shot gets there inside
-// the lane. Across 174 shots, 50 got outboard of |x|=0.16 at all; of those the 90th-percentile
-// high-water mark was z=+0.102 and the single best was +0.275. A ball crossing into the wall
-// channel at ~35 degrees loses most of its speed to that first wall bounce (restitution 0.3), and
-// no amount of flipper energy changes the angle it arrives at. 0.24 is set from that distribution
-// rather than from where the rail happens to end.
-export const ORBIT_COMPLETION_Z_M = 0.24; // set from the measured lane high-water mark, not the rail's end
+// Entrance/completion Z are derived from the arc rather than declared, so they cannot drift out of
+// the lane when the arc is retuned. See orbitArcPoint().
+// Completion sits in the vertical section, on the lane's centre line. It was pulled down to 0.24
+// while the straight rails were in place, because measured, no shot reached higher than z=+0.275
+// inside that lane and half of them died by +0.102 - the entry impact had already taken the speed.
+// With the arc entry preserving it instead, this goes back up to a real loop length.
+export const ORBIT_COMPLETION_Z_M = 0.26; // in the vertical section, below the rail's top at 0.30
 export const ORBIT_TRIGGER_WIDTH_M = 0.03;
 export const ORBIT_TRIGGER_DEPTH_M = 0.025;
 // How long a completion trigger has to fire after its matching entrance before the shot is
@@ -960,75 +1036,42 @@ export const ORBIT_COMPLETION_WINDOW_MS = 4000;
 // Side effect, checked and wanted: this also makes the four upper-table corridors symmetric -
 // Saturn's shoulders become 39.5mm/39.4mm (was 58.4/39.4), the boss-bumper lanes 43mm/43.3mm
 // (was 59.0/43.3), and the comet channel widens from 45.4mm to ~64mm.
-// SHOT-CORRIDOR REFACTOR - the single biggest change on the board.
+// SUPERSEDED, kept as the record of why the shape changed twice. The block above was written when
+// the target bank reached x=-0.214 and the comet x=0.192, and concluded a wall-hugging orbit did
+// not fit AT THOSE POSITIONS; both moved inboard in the shot-corridor pass, which freed the wall
+// channel. That pass then ran both rails straight and vertical at |x|=0.170 and measured 6 lane
+// entries and 2 completions across 174 flipper shots - better placed than the 75-94mm inboard
+// "orbits" it replaced, but still not a shot. The orbit-geometry pass above replaced the straight
+// rails with the tangent arc, which is what finally made them repeatable: 38 entries and 7
+// completions on the identical fan.
 //
-// The block comment above was written when the mission target bank reached x=-0.214 and the comet
-// x=0.192, and it correctly concluded that a wall-hugging orbit did not fit AT THOSE POSITIONS.
-// Both of those features have now moved inboard (see MISSION_TARGET_BANK and COMET_POS), so the
-// wall channel is free and the conclusion no longer holds. What the old inboard rails actually
-// produced, measured on the live scene: the "orbits" ran 75-94mm from the centre line - closer to
-// the spine than to the wall - and over 174 flipper shots the two lanes together took 7 entries
-// and yielded 5 completions.
+// Per-side identity only. Every coordinate is derived from the arc constants above via
+// orbitArcPoint(), mirrored by `mirror`, so the two orbits are guaranteed to be exact mirrors of
+// each other - which is what makes "left flipper -> right orbit, right flipper -> left orbit" the
+// same shot twice rather than two shots that happen to look alike.
 //
-// Both rails now sit at |x| = 0.170, vertical (railBottomX == railTopX, so no taper for a ball to
-// wedge against), turning the wall channel that leftGuide/rightGuide's lower tips already open at
-// z~-0.02 into a real guided lane:
-//   rail outer face 0.1775  ->  side wall inner face 0.2267  =  49.2mm  =  1.82 ball diameters
-// That is the corridor. It is entered two ways: from below through the 40.2mm pinch at the
-// guide's lower tip (the existing mid-table entrance, unchanged), and inboard through the 43.1mm
-// mouth between the guide's upper tip and the rail's bottom tip.
-//
-// Inboard of each rail is that side's FIELD corridor, and the rail's inner face is its outer wall:
-//   left  - rail inner face -0.1625, mission target bank fixture edge -0.158  (4.5mm, sealed)
-//   right - rail inner face  0.1625, comet edge 0.120                        (42.5mm, a lane)
-//   both  - outer pop bumper edge |0.155|                                     (7.5mm, sealed)
-// "Sealed" means under the ball's 27mm diameter: nothing can get in, so nothing can rest there.
-//
-// entranceX/completionX moved OUT with the rails, to the lane's centre line (0.202, mid-way
-// between the rail's outer face and the wall) - they are scoring triggers and have to sit in the
-// lane the ball actually travels, which is now outboard of the rail rather than inboard of it.
-//
-// KNOWN SIDE EFFECT, called out rather than hidden: the shooter lane feeds this same right-hand
-// channel (the ball rests at x=0.1955 and rides the wall up), so a strong launch now runs the
-// right orbit lane end to end and can score a right orbit off the plunger. Nothing about the
-// orbit's scoring rule changed - the geometry simply put the plunger's exit path into the lane.
-// The skill-shot lanes are untouched: they sit at z=0.02, well below the rail's bottom at 0.145.
-// SHOT-FAN REVISION - the rails are TAPERED, and the taper is the whole shot.
-//
-// The first version of this refactor ran both rails vertically at |x|=0.170 and assumed the wall
-// channel that leftGuide/rightGuide's lower tips open would carry a ball up into them. Measured
-// (90-shot tip fan, both trees, same harness): orbit entries went from 8 to ZERO. Tracing single
-// shots showed why, and it is the guides' own geometry, not the rails': leftGuide runs from
-// (-0.180, -0.022) up to (-0.126, +0.116), i.e. it angles INBOARD as it rises, so a ball riding
-// its outboard face is steered away from the wall the whole way up. Traced positions on a 35deg
-// shot: the ball reaches x=-0.170 at z=+0.065 and is at x=-0.119 by z=+0.209 - it crosses the
-// rail's line well inboard of the rail and lands in the left field. The 45mm "inboard mouth" the
-// vertical rails left between the guide's top tip and the rail's bottom tip was not an entrance;
-// it was the exit the ball was already taking.
-//
-// So the rail now BUTTS ONTO the guide's upper tip and carries the turn outward:
-//   guide  (-0.180, -0.022) -> (-0.126, +0.116)   inboard-rising, existing, unchanged
-//   rail   (-0.135, +0.128) -> (-0.174, +0.345)   outboard-rising, continuing the same wall
-// The junction is flush (12.5mm centre-to-centre against 15.2mm of combined rail half-depth, so
-// the two overlap slightly - a continuous polyline with no gap for a ball to slip through), and a
-// ball riding the guide's outer face arrives at the junction centred near x=-0.147, which is
-// OUTBOARD of the rail's bottom tip at -0.135. That is what puts it in the lane instead of past
-// it. The lane funnels 76mm at the entrance down to 49mm at the top - wide to enter, guided to
-// finish, which is the shape a real orbit entrance has.
-//
-// entranceX/completionX sit on the lane's own centre line at their respective Z, which is not one
-// number now that the rail tapers: -0.191 at the mouth (z=0.06, between the guide's outer face and
-// the wall), -0.195 at z=0.24.
-//
-// KNOWN SIDE EFFECT, called out rather than hidden: the shooter lane feeds this same right-hand
-// channel (the ball rests at x=0.1955 and rides the wall up), so a strong launch can now run the
-// right orbit lane and score a right orbit off the plunger. Nothing about the orbit's scoring rule
+// KNOWN SIDE EFFECT, called out rather than hidden: the shooter lane exits into the right-hand
+// channel (the ball rests at x=0.1955 and rides the wall up), so a strong launch can run the right
+// orbit lane and score a right orbit off the plunger. Nothing about the orbit's scoring rule
 // changed - the geometry put the plunger's exit path into the lane. The skill-shot lanes are
-// untouched: they sit at z=0.02, far below the rail's bottom at 0.128.
+// untouched at z=0.02, well below the outer guide's lower tip.
 export const ORBITS = [
-    { side: 'left', railBottomX: -0.135, railTopX: -0.174, entranceX: -0.191, completionX: -0.195 },
-    { side: 'right', railBottomX: 0.135, railTopX: 0.174, entranceX: 0.191, completionX: 0.195 }
+    { side: 'left', mirror: -1 },
+    { side: 'right', mirror: 1 }
 ];
+
+// A point on one orbit's arc, for a given face/centre radius and sweep angle. sweep=0 is the
+// tangency point on the side wall; sweep grows downward and inboard. Larger radius = further
+// OUTBOARD (toward the wall), because the construction centre sits inboard of the whole arc - so
+// the outer guide's radius is the largest, the lane's centre line is one half-width inside it, and
+// the inner guide is a full lane-width inside it.
+export function orbitArcPoint(mirror, radius, sweepRad) {
+    const centerX = mirror * (ORBIT_WALL_FACE_X_M - ORBIT_ARC_RADIUS_M);
+    return {
+        x: centerX + mirror * radius * Math.cos(sweepRad),
+        z: ORBIT_ARC_TANGENT_Z_M - radius * Math.sin(sweepRad)
+    };
+}
 
 // ===================================
 // VISION GATE - SPIRITBALL's signature capture/portal target. A difficult mid/upper-
@@ -1183,7 +1226,9 @@ export const HEX_VISION_GATE = 0xaa00ff; // vivid violet - "third eye" adjacent 
 // straight into rightGuide's lower end cap and thrown back), while the identical launch from the
 // lane's centre reaches z=+0.30 to +0.41. 477 puts the rod on the lane's centre line, so a launch
 // goes UP the lane instead of into its inner wall. LANE_INNER_WALL_X_PX still tracks it, keeping
-// the same 30px ball-clearance invariant that constant's own comment describes.
+// the same 30px ball-clearance invariant that constant's own comment describes. (rightGuide, named
+// above, was removed by the orbit-geometry pass - see ORBIT_ARC_RADIUS_M - but the reasoning holds
+// and this value is now what keeps the launch inboard of the right orbit's upper guide section.)
 export const BALL_REST_X_PX = 477; // was 470, ported from resetBall()'s (CONFIG.width-70, CONFIG.height-220)
 export const BALL_REST_Z_PX = 740;
 // The ball's actual rest position in world space - used directly for its spawn/reset
@@ -1253,12 +1298,18 @@ export const PLUNGER_MAX_POWER_MS = 1600 * PX_TO_M; // ~1.51 m/s - comfortably u
 // but with that fixed the launch still never gave the player a ball to hit, and this is why.
 //
 // The cause is geometric, not a matter of force. rightGuide's lower end (a rotated bar; its two
-// lower vertices measure to ~(0.186, -0.020) and ~(0.173, -0.025)) sits directly above the
-// shooter lane's exit, and the ball leaves that lane at x=0.196 with a 0.0135 radius. At the old
+// lower vertices measure to ~(0.186, -0.020) and ~(0.173, -0.025)) sat directly above the shooter
+// lane's exit, and the ball leaves that lane at x=0.196 with a 0.0135 radius. At the old
 // -(0.1417 + power*0.08) the ball drifted inboard just far enough to clip that end, rode its
 // inboard face back OUTBOARD, and then ran the wall-hugging channel between the guide and
-// rightWall - the same channel ORBIT_RAIL_BOTTOM_Z_M's comment already rejects as "not a
-// reliable guided channel" - up to about z=0.10 and straight back down into the right outlane.
+// rightWall up to about z=0.10 and straight back down into the right outlane.
+//
+// rightGuide itself no longer exists - the orbit-geometry pass replaced both mid-table guides with
+// the orbit lanes' own inner guides (see ORBIT_ARC_RADIUS_M) - and the same pass deliberately omits
+// the right lane's outer catching flank precisely because this exit path runs through it. The
+// horizontal values below are still the measured ones and still matter: they are what puts the
+// launched ball inboard of the orbit's upper guide section rather than into the wedge behind it,
+// and the launch now runs the right lane to z=+0.297 instead of dying at z=-0.036.
 //
 // Measured on the real build, real Space hold-and-release, flipper reach taken from the bats'
 // own meshes at runtime (x +-0.150, z -0.433..-0.334), n=5-6 per cell. "reach" is the only

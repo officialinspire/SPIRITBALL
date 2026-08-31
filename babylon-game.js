@@ -80,8 +80,11 @@ import {
     SLINGSHOT_KICK_SPEED_MS, SLINGSHOT_KICK_UPTABLE_BIAS_MS, SLINGSHOT_RESTITUTION, REENTRY_LANE_RADIUS_M, REENTRY_LANES,
     LANE_Z_TOP_M, LANE_Z_BOTTOM_M, LANE_DIVIDER_X_M, LANE_TRIGGER_Z_M, INLANE_GUIDE_BOTTOM_Z_M,
     INLANE_TRIGGER_X_M, OUTLANE_TRIGGER_X_M, LANE_TRIGGER_WIDTH_M, LANE_TRIGGER_DEPTH_M,
-    INLANE_GUIDE_TOP_X_M, INLANE_GUIDE_BOTTOM_X_M, SIDE_LANES, ORBIT_RAIL_BOTTOM_Z_M,
-    ORBIT_RAIL_TOP_Z_M, ORBIT_ENTRANCE_Z_M, ORBIT_COMPLETION_Z_M, ORBIT_TRIGGER_WIDTH_M,
+    INLANE_GUIDE_TOP_X_M, INLANE_GUIDE_BOTTOM_X_M, SIDE_LANES,
+    ORBIT_RAIL_TOP_Z_M, ORBIT_COMPLETION_Z_M, ORBIT_TRIGGER_WIDTH_M,
+    ORBIT_ARC_RADIUS_M, ORBIT_LANE_WIDTH_M, ORBIT_ARC_SWEEP_RAD, ORBIT_INNER_SWEEP_RAD,
+    ORBIT_ENTRANCE_SWEEP_RAD, ORBIT_ARC_SEGMENTS, orbitArcPoint, ORBIT_WALL_FACE_X_M,
+    ORBIT_OUTER_GAP_FROM_RAD, ORBIT_OUTER_GAP_TO_RAD, ORBIT_OUTER_FLANK_SIDES,
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
     MISSION_CUE_MS, MISSION_SELECT_MESSAGE_MS,
     VISION_GATE_RADIUS_M, VISION_GATE_COLLAR_RADIUS_M, SCORE_VISION_GATE, VISION_GATE_SEQUENCE_MS,
@@ -1066,8 +1069,22 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // diameters) while leaving that upper gap untouched. The guides keep their full
             // inward-redirect job for everything approaching between the tips - only their dead
             // bottom 43px, whose sole measured effect was rejecting up-table shots, is gone.
-            { name: 'leftGuide', x: 108, y: 430, w: 157, h: 15, rot: 1.2 },
-            { name: 'rightGuide', x: 432, y: 430, w: 157, h: 15, rot: -1.2 }
+            //
+            // ORBIT GEOMETRY PASS: leftGuide/rightGuide are GONE, replaced by the orbit lanes' own
+            // inner guides. They cannot coexist - measured against the live scene, leftGuide's
+            // lower tip reached x=-0.1865 at z=-0.024, which is 20mm INSIDE the new lane (its inner
+            // face is at -0.1668 there and the outer guide at -0.2169). Trimming the guide back to
+            // clear the lane leaves an 88mm stub running 19mm inboard of, and parallel to, the
+            // orbit's inner arc - a redundant second wall in a corridor that already has one.
+            //
+            // Their job was redirecting mid-table balls inward, and the arc inherits it with a
+            // longer reach: leftGuide's inboard face spanned z -0.024..+0.116, the orbit's inner
+            // guide plus its vertical section spans -0.096..+0.300. What genuinely changes is the
+            // X at which that deflection happens - the arc's inboard face sits ~29mm further
+            // outboard than the guide did at the same height - so balls in that 29mm band now fall
+            // to the outlane instead of being turned toward the flipper. That is a real trade and
+            // it is why the drain rate and the circulation suite were re-measured after this pass
+            // rather than assumed.
         ];
 
         const walls = wallDefs.map((def) => {
@@ -5996,74 +6013,128 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             skillShotLaneMeshes.push(trigger);
         });
 
-        // Upper-table LEFT ORBIT / RIGHT ORBIT skill shots - see ORBITS' block comment (near its
-        // declaration) for the full layout reasoning. Each side gets one visible guide rail
-        // (capped by end posts, same visual language as the inlane/outlane divider above) running
-        // alongside the existing mission-target-bank/comet, plus an entrance and a completion
-        // rollover trigger with their own lamp inserts.
+        // Upper-table LEFT ORBIT / RIGHT ORBIT shots - see ORBITS' block comment (near its
+        // declaration) for the full geometry and the measurements behind it. Each side is a curved
+        // channel: an outer guide that is TANGENT to the side wall at its top and sweeps down and
+        // inboard from there, a concentric inner guide a constant lane-width inside it, and a
+        // straight vertical section carrying the lane up the wall to the upper board.
+        //
+        // Both guides are built as a chain of short boxes along the arc rather than as one curved
+        // mesh, because Havok's static shapes here are boxes and a real curve would need a mesh
+        // collider. At ORBIT_ARC_SEGMENTS segments over ORBIT_ARC_SWEEP_RAD the chord-to-arc error
+        // is 0.3mm against a 27mm ball - two orders of magnitude under the thing it is guiding, so
+        // the ball reads it as a curve. Each box is stretched 4% past its chord so consecutive
+        // segments overlap: butted boxes would leave a hairline seam at every joint, and a seam is
+        // exactly the kind of edge that catches a rolling ball.
+        const ORBIT_RAIL_DEPTH_M = 0.015;
+        const ORBIT_RAIL_HALF_DEPTH_M = ORBIT_RAIL_DEPTH_M / 2;
         const orbitLampMeshes = [];
         ORBITS.forEach((orbitDef) => {
-            // Same empirically-derived rotation formula as the inlane guide above (see its own
-            // comment for how rotationY = atan2(-dz, dx) was verified against this exact Babylon
-            // build via mesh.getDirection(Axis.X), not assumed from documented convention).
-            const dx = orbitDef.railTopX - orbitDef.railBottomX;
-            const dz = ORBIT_RAIL_TOP_Z_M - ORBIT_RAIL_BOTTOM_Z_M;
-            const railLength = Math.sqrt(dx * dx + dz * dz);
-            const railRotationY = Math.atan2(-dz, dx);
-            const railCenterX = (orbitDef.railBottomX + orbitDef.railTopX) / 2;
-            const railCenterZ = (ORBIT_RAIL_BOTTOM_Z_M + ORBIT_RAIL_TOP_Z_M) / 2;
+            const mirror = orbitDef.mirror;
 
-            const rail = BABYLON.MeshBuilder.CreateBox('orbitRail' + orbitDef.side, {
-                width: railLength,
-                height: 0.022,
-                depth: 0.015
-            }, scene);
-            rail.position.set(railCenterX, 0.011, railCenterZ);
-            rail.rotation.y = railRotationY;
-            rail.material = housingMat;
-            rail.metadata = { kind: 'wall' }; // reuses the existing generic wall camera-shake/sound feedback, same as the inlane/outlane rails
-            new BABYLON.PhysicsAggregate(rail, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
-            // Already built with the "long axis along local X, then rotationY" convention
-            // addRailBevel() assumes, so railRotationY passes straight through unchanged.
-            addRailBevel(scene, 'orbitRail' + orbitDef.side + 'Cap', railCapMat, railLength, 0.015, railCenterX, 0.022, railCenterZ, railRotationY);
+            // One box spanning two points, using the same empirically-derived rotation convention
+            // as every other angled rail in this file (rotationY = atan2(-dz, dx), verified against
+            // this Babylon build via mesh.getDirection(Axis.X) rather than assumed).
+            const railBox = (name, pa, pb, solid) => {
+                const dx = pb.x - pa.x, dz = pb.z - pa.z;
+                const len = Math.hypot(dx, dz);
+                if (len < 1e-6) return;
+                const rotY = Math.atan2(-dz, dx);
+                const cx = (pa.x + pb.x) / 2, cz = (pa.z + pb.z) / 2;
+                const box = BABYLON.MeshBuilder.CreateBox(name, {
+                    width: len * (solid ? 1.04 : 1),
+                    height: 0.022,
+                    depth: ORBIT_RAIL_DEPTH_M
+                }, scene);
+                box.position.set(cx, 0.011, cz);
+                box.rotation.y = rotY;
+                box.material = housingMat;
+                box.metadata = { kind: 'wall' }; // reuses the existing generic wall camera-shake/sound feedback, same as the inlane/outlane rails
+                new BABYLON.PhysicsAggregate(box, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+                addRailBevel(scene, name + 'Cap', railCapMat, len * 1.04, ORBIT_RAIL_DEPTH_M, cx, 0.022, cz, rotY);
+            };
+
+            // Walks one arc from `fromSweep` to `toSweep` at a fixed radius, emitting one box per
+            // segment. `radius` is the RAIL'S CENTRE line, not its face - the caller offsets by
+            // half the rail's depth so the face lands on the lane boundary it is meant to be.
+            const railArc = (name, radius, fromSweep, toSweep) => {
+                for (let i = 0; i < ORBIT_ARC_SEGMENTS; i++) {
+                    const a = fromSweep + (toSweep - fromSweep) * (i / ORBIT_ARC_SEGMENTS);
+                    const b = fromSweep + (toSweep - fromSweep) * ((i + 1) / ORBIT_ARC_SEGMENTS);
+                    railBox(name + i, orbitArcPoint(mirror, radius, a), orbitArcPoint(mirror, radius, b), true);
+                }
+            };
+
+            // OUTER guide. Its body sits OUTBOARD of its face (a larger radius is further from the
+            // construction centre, which is inboard of the whole arc), so at the tangency point the
+            // box overlaps the side wall it is tangent to - deliberately, so there is no seam there
+            // for a ball riding the wall to catch on. Overlapping static colliders are already the
+            // norm on this board (leftSlant/leftWall, every divider and its posts).
+            // Built in two pieces with a gap across the shooter lane's exit path - see
+            // ORBIT_OUTER_GAP_FROM_RAD for the measurement that put it there and the deflector that
+            // was tried and discarded first.
+            const outerRailRadius = ORBIT_ARC_RADIUS_M + ORBIT_RAIL_HALF_DEPTH_M;
+            railArc('orbitRail' + orbitDef.side + 'OuterUpper', outerRailRadius, 0, ORBIT_OUTER_GAP_FROM_RAD);
+            if (ORBIT_OUTER_FLANK_SIDES.includes(orbitDef.side)) {
+                railArc('orbitRail' + orbitDef.side + 'OuterLower', outerRailRadius, ORBIT_OUTER_GAP_TO_RAD, ORBIT_ARC_SWEEP_RAD);
+            }
+
+            // INNER guide, concentric, stopping short of the outer one so the lane's mouth flares.
+            const innerFaceRadius = ORBIT_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M;
+            const innerRailRadius = innerFaceRadius - ORBIT_RAIL_HALF_DEPTH_M;
+            railArc('orbitRail' + orbitDef.side + 'Inner',
+                innerRailRadius, 0, ORBIT_INNER_SWEEP_RAD);
+
+            // Straight vertical section, carrying the lane up the wall. It starts exactly where the
+            // inner arc's tangency point is, so guide and section are one continuous surface.
+            const innerTop = orbitArcPoint(mirror, innerRailRadius, 0);
+            railBox('orbitRail' + orbitDef.side + 'Upper',
+                { x: innerTop.x, z: innerTop.z }, { x: innerTop.x, z: ORBIT_RAIL_TOP_Z_M }, false);
 
             // Lane floor tint (visual-polish pass, user-requested) - see addLaneFloorTint()'s own
-            // comment. SHOT-CORRIDOR REFACTOR: this offset used to point INBOARD, because the rail
-            // used to mark the outer edge of an inboard lane. The rails now hug the side walls and
-            // the ball's travel lane is the channel OUTBOARD of them, so the tint has to follow the
-            // ball, not the rail - pointing it the old way would have painted the corridor marking
-            // onto the target bank / comet side of the rail, i.e. on the wrong side of the wall it
-            // is describing. Offset is half the lane's own width so the tint sits centred in the
-            // 49.2mm channel (see ORBITS' block comment). The rails are exactly vertical now
-            // (railBottomX == railTopX), so a fixed X offset is exactly perpendicular.
-            const orbitFloorOutward = orbitDef.side === 'left' ? -1 : 1;
-            addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side, orbitFloorMat, 0.03, railLength - 0.05, railCenterX + orbitFloorOutward * 0.032, railCenterZ, railRotationY);
+            // comment. Painted on the lane's own CENTRE line so it follows the ball's path rather
+            // than either rail, which is what makes the corridor read as a route at a glance.
+            const laneRadius = ORBIT_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M / 2;
+            for (let i = 0; i < ORBIT_ARC_SEGMENTS; i++) {
+                const a = (ORBIT_ARC_SWEEP_RAD * i) / ORBIT_ARC_SEGMENTS;
+                const b = (ORBIT_ARC_SWEEP_RAD * (i + 1)) / ORBIT_ARC_SEGMENTS;
+                const pa = orbitArcPoint(mirror, laneRadius, a), pb = orbitArcPoint(mirror, laneRadius, b);
+                const dx = pb.x - pa.x, dz = pb.z - pa.z, len = Math.hypot(dx, dz);
+                addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side + i, orbitFloorMat,
+                    0.03, len * 1.04, (pa.x + pb.x) / 2, (pa.z + pb.z) / 2, Math.atan2(-dz, dx));
+            }
+            const laneTop = orbitArcPoint(mirror, laneRadius, 0);
+            addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side + 'Upper', orbitFloorMat,
+                0.03, ORBIT_RAIL_TOP_Z_M - laneTop.z, laneTop.x, (laneTop.z + ORBIT_RAIL_TOP_Z_M) / 2, Math.PI / 2);
 
-            // Only the TOP end gets a capping post, not the bottom - verified via Playwright that
-            // a post at the rail's bottom tip sits close enough to a realistic entry trajectory to
+            // Only the TOP end gets a capping post, not the mouth - verified via Playwright that a
+            // post at the lane's entrance sits close enough to a realistic entry trajectory to
             // actually block shots into the lane rather than just marking it (an early build had
-            // one there; a ball aimed at the entrance clipped it and got knocked back inboard
-            // before ever reaching the entrance trigger). The rail's own open bottom tip is the
-            // entrance's real visual cue, alongside the entrance trigger's lamp insert below.
-            [
-                { x: orbitDef.railTopX, z: ORBIT_RAIL_TOP_Z_M }
-            ].forEach((endPos, i) => {
-                const post = BABYLON.MeshBuilder.CreateCylinder('orbitRail' + orbitDef.side + 'Post' + i, {
+            // one there; a ball aimed at the entrance clipped it and was knocked back inboard
+            // before ever reaching the entrance trigger). The flared mouth and its lamp insert are
+            // the entrance's real cue.
+            {
+                const post = BABYLON.MeshBuilder.CreateCylinder('orbitRail' + orbitDef.side + 'Post0', {
                     diameter: 0.016,
                     height: 0.03
                 }, scene);
-                post.position.set(endPos.x, 0.015, endPos.z);
+                post.position.set(innerTop.x, 0.015, ORBIT_RAIL_TOP_Z_M);
                 post.material = housingMat;
                 post.metadata = { kind: 'wall' };
                 new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
-            });
+            }
 
             // Entrance/completion rollover triggers, each with its own indicator lamp insert -
             // same invisible-trigger/always-visible-lamp split as the inlane/outlane rollovers,
             // colored with the orbits' own distinct HEX_ORBIT_LAMP identity (see its comment).
+            // Both rollovers sit on the lane's own centre line, derived from the same arc the rails
+            // are built from - so they cannot drift out of the lane when the arc is retuned, which
+            // is exactly how the previous straight-rail version ended up with a completion trigger
+            // above anything a real shot could reach.
+            const entrancePos = orbitArcPoint(mirror, laneRadius, ORBIT_ENTRANCE_SWEEP_RAD);
             [
-                { kind: 'orbitEntrance', x: orbitDef.entranceX, z: ORBIT_ENTRANCE_Z_M, debugColor: new BABYLON.Color3(0.3, 0.8, 1) },
-                { kind: 'orbitCompletion', x: orbitDef.completionX, z: ORBIT_COMPLETION_Z_M, debugColor: new BABYLON.Color3(1, 0.9, 0.2) }
+                { kind: 'orbitEntrance', x: entrancePos.x, z: entrancePos.z, debugColor: new BABYLON.Color3(0.3, 0.8, 1) },
+                { kind: 'orbitCompletion', x: laneTop.x, z: ORBIT_COMPLETION_Z_M, debugColor: new BABYLON.Color3(1, 0.9, 0.2) }
             ].forEach((triggerDef) => {
                 const lampMat = new BABYLON.PBRMaterial(triggerDef.kind + 'LampMat' + orbitDef.side, scene);
                 // Up-table arrow on both orbit inserts: an orbit is a shot you drive UP the lane,
@@ -6559,7 +6630,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // Side-specific text (not a shared 'ORBIT' label for both) - doubles as telling the
             // two orbits apart at a glance and keeps each label's mesh/texture name unique.
             const orbitLabel = orbitDef.side === 'left' ? 'L ORBIT' : 'R ORBIT';
-            createLabelPlane(scene, orbitLabel, orbitDef.entranceX, ORBIT_ENTRANCE_Z_M - 0.04, '#33ccff');
+            // Placed IN the lane rather than below its mouth. At the mouth (z=-0.17) the label sits
+            // close to this game's fixed low camera and renders large and bright - measured at p90
+            // 170 against the flippers' 128, which breaks the board's own hierarchy rule that
+            // signage must never outshine the hardware (qa/visual-hierarchy.js). Moving it 190mm
+            // further up-table costs nothing in legibility and puts it back under that bar, and it
+            // reads better anyway: the name sits on the route, not in front of it.
+            const labelAt = orbitArcPoint(orbitDef.mirror, ORBIT_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M / 2, 8 * Math.PI / 180);
+            createLabelPlane(scene, orbitLabel, labelAt.x, labelAt.z, '#33ccff');
         });
         // Table-composition pass (user-requested) - the original placement (pulled TOWARD the
         // bumper cluster, z = gate_z - 0.045) sat only ~0.03m from the boss bumper's own center,
