@@ -1053,6 +1053,40 @@ export const ORBIT_OUTER_GAP_TO_RAD = 33 * Math.PI / 180;
 // pre-arc geometry rather than a glancing one. It is the same SHOT - the same lane, entered from
 // the left flipper at the same angles - taken at a slightly higher price.
 export const ORBIT_OUTER_FLANK_SIDES = ['left'];
+
+// Inner lip on the LOWER half of each orbit's top turn.
+//
+// Measured with a cluster-exit probe: 144 seeded exits (4 bumpers x 12 incoming directions x 3
+// speeds), each classified by the first scoring feature the ball reached afterwards. 24 of them
+// left the cluster sideways into the TOP of an orbit lane and rode it back down the outside of the
+// board - the one exit direction that reaches nothing on the way, because the lane is sealed from
+// the playfield along its whole length. The cause is structural: the top turn has an outer wall
+// (the top arc) but no inner one, so beside the cluster it is a 125mm-wide open mouth pointing
+// straight down the lane.
+//
+// The lip gives that mouth an inner edge for its lower half only. Above `toZ` the turn stays open
+// exactly as before, which is what preserves the "leave the turn early into the bumper nest"
+// behaviour the top arc was built outer-only for; this closes the part of the opening that faces
+// the cluster, not the part that faces the upper table.
+//
+// `inboard` leans the lip toward the middle of the board, turning the mouth into a lane instead of
+// just a wall. Only the right side can take that lean - on the left, bumper3 sits IN the turn at
+// z 0.321-0.361 (x -0.162..-0.122) and already walls it from there up, so the left lip only has to
+// close the 22mm slot between the vertical rail's top and the bumper's lower surface. A leaning
+// left lip would run through the bumper.
+//
+// Clearances, both against the ball's 27mm diameter and the 18/42mm gap rule (a gap to a flat face
+// is safe below 18mm or above 42mm; in between the ball half-enters and jams):
+//   right lip at z 0.360: face x 0.1575, top arc's inner face x ~0.207  -> 49mm of lane
+//   right lip at z 0.298: face x 0.1787, top arc's inner face x  0.2252 -> 47mm of lane
+//   right lip to bumper2 (0.073, 0.326, r 0.020):                          57mm  (>42, safe)
+//   left  lip top (-0.1712, 0.324) to bumper3's surface:                   14mm  (<18, safe)
+// Both lips start 2mm below ORBIT_RAIL_TOP_Z_M so they overlap the vertical section rather than
+// butting against it - a butt joint there would leave the same catchable seam the arcs avoid.
+export const ORBIT_TOP_LIPS = [
+    { side: 'left', toZ: 0.324, inboard: 0 },
+    { side: 'right', toZ: 0.360, inboard: 0.021 }
+];
 export const ORBIT_ARC_SEGMENTS = 6; // straight boxes per arc; the chord-to-arc error at 38/6 degrees is 0.3mm
 export const ORBIT_RAIL_TOP_Z_M = 0.30; // the vertical section's top - where the top arc takes over
 

@@ -85,6 +85,7 @@ import {
     ORBIT_ARC_RADIUS_M, ORBIT_LANE_WIDTH_M, ORBIT_ARC_SWEEP_RAD, ORBIT_INNER_SWEEP_RAD,
     ORBIT_ENTRANCE_SWEEP_RAD, ORBIT_ARC_SEGMENTS, orbitArcPoint, ORBIT_WALL_FACE_X_M,
     ORBIT_TOP_ARC_RADIUS_M, ORBIT_TOP_ARC_SWEEP_RAD, ORBIT_TOP_ARC_SEGMENTS, orbitTopArcPoint,
+    ORBIT_TOP_LIPS,
     ORBIT_OUTER_GAP_FROM_RAD, ORBIT_OUTER_GAP_TO_RAD, ORBIT_OUTER_FLANK_SIDES,
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
     MISSION_CUE_MS, MISSION_SELECT_MESSAGE_MS,
@@ -6091,6 +6092,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const innerTop = orbitArcPoint(mirror, innerRailRadius, 0);
             railBox('orbitRail' + orbitDef.side + 'Upper',
                 { x: innerTop.x, z: innerTop.z }, { x: innerTop.x, z: ORBIT_RAIL_TOP_Z_M }, false);
+
+            // Inner lip on the lower half of the top turn - see ORBIT_TOP_LIPS for the exit probe
+            // that put it here and every clearance it was checked against. Starts 2mm inside the
+            // vertical section so the two are one continuous face with no seam at the joint.
+            const topLip = ORBIT_TOP_LIPS.find((l) => l.side === orbitDef.side);
+            if (topLip) {
+                railBox('orbitTopLip' + orbitDef.side,
+                    { x: innerTop.x, z: ORBIT_RAIL_TOP_Z_M - 0.002 },
+                    { x: innerTop.x - mirror * topLip.inboard, z: topLip.toZ }, false);
+            }
 
             // Lane floor tint (visual-polish pass, user-requested) - see addLaneFloorTint()'s own
             // comment. Painted on the lane's own CENTRE line so it follows the ball's path rather
