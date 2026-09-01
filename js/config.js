@@ -1490,7 +1490,45 @@ export function orbitTopArcPoint(mirror, radius, sweepRad) {
 // and a fast one threads past the 15mm throat and carries on to Saturn. It is also the most
 // reachable spot on the board, which the old (0.027, 0.235) position emphatically was not.
 export const VISION_GATE_POS = { x: 0, z: 0.060 };
-export const VISION_GATE_RADIUS_M = 0.015; // the actual capture trigger
+// SCOOP PASS. 0.015 -> 0.011. This is the capture trigger's own radius; the ball adds its 13.5mm
+// to it, so the zone that actually captures was 28.5mm - LARGER than the 20mm collar the three
+// guard posts stand on. A ball passing BESIDE the mouth at (+/-0.020, 0.040) is 28.3mm from the
+// trigger's centre and was captured without ever entering the scoop, which is why a 210-shot
+// angle/speed sweep found captures with the ball crossing the mouth at 0.16 m/s - a dribble paid
+// the same 4000 as a struck shot. At 0.011 the catch zone is 24.5mm, inside the collar, so the
+// ball has to be in the mouth rather than near it.
+//
+// Shrunk rather than moved: the gate's position has been through five trap-audit revisions (see
+// VISION_GATE_POS above) and is not worth disturbing. Not shrunk further, either - a small trigger
+// and a fast ball is how tunnelling starts, and qa/regression-suite.js's capture check plus the
+// board's own CCD test are what bound this.
+export const VISION_GATE_RADIUS_M = 0.011; // the actual capture trigger
+
+// NO PHYSICAL COLLAR CHEEKS, and this is a measured decision rather than an omission. Three
+// placements of a pair of flanking rails were built and swept:
+//
+//   below the mouth, flaring down/out   near misses reaching an inlane 14/34 -> 5/30
+//   above the mouth, short              whole-sweep drains 64% -> 70%
+//   above the mouth, long               captures 27 -> 29 (full-power row 7 -> 10), drains 76%
+//
+// None of them rejected a miss and one of them made the shot easier. The reason is structural:
+// this gate sits on the board's centre spine directly above the drain gap, so a miss returns down
+// the SAME line the shot went up. Any rail that channels one channels the other, and a channelled
+// return goes straight down the middle where a ball scattered off the bare round guard posts
+// sometimes reaches an inlane instead. The classic fix for a centre shot that drains - a post in
+// the flipper gap - is a change to how every shot on the board drains, not to this approach.
+//
+// What the gate keeps instead is its three round guard posts, which scatter rather than channel,
+// and the trigger change above, which is what makes a weak shot stop paying.
+
+// The approach itself, painted. The gate's own hardware (collar, throat, halo, beacon, callout)
+// all sits AT the mouth and says "there is a thing here"; nothing said where to shoot it from.
+// This is the lane, on the centre spine, running up to the mouth - the same floor-tint idiom the
+// orbits, the target bank, Saturn and the comet all use, so the board's five aimable shots are
+// marked the same way. Narrow on purpose: 38mm keeps it clear of skillShotLane0's insert at
+// x 0.020, and a wide bright strip on the centre line would read as an invitation to a shot whose
+// capture band is 4-8 degrees. Decorative only, height 0.001 at y 0.0012.
+export const VISION_GATE_APPROACH_TINT = { x: 0, z: 0.019, width: 0.038, length: 0.047 };
 export const VISION_GATE_COLLAR_RADIUS_M = 0.02; // ring radius the 3 guard posts sit on
 // Awarded once per successful capture - deliberately the single biggest configurable bonus on
 // the board (bigger than Saturn's 3000, just under a mission completion's 5000), matching a

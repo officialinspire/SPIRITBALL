@@ -87,7 +87,7 @@ import {
     ORBIT_TOP_ARC_RADIUS_M, ORBIT_TOP_ARC_SWEEP_RAD, ORBIT_TOP_ARC_SEGMENTS, orbitTopArcPoint,
     ORBIT_TOP_LIPS,
     SATURN_CANOPY, SATURN_JAW, SATURN_APPROACH_TINT,
-    COMET_RETURN_RAIL, COMET_APPROACH_TINT,
+    COMET_RETURN_RAIL, COMET_APPROACH_TINT, VISION_GATE_APPROACH_TINT,
     ORBIT_OUTER_GAP_FROM_RAD, ORBIT_OUTER_GAP_TO_RAD, ORBIT_OUTER_FLANK_SIDES,
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
     MISSION_CUE_MS, MISSION_SELECT_MESSAGE_MS,
@@ -4732,6 +4732,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // The comet's lane, in the comet's own icy cyan so the two centre corridors read as
         // belonging to different shots rather than as one wide bright area.
         const cometApproachMat = makeLaneFloorMat('cometApproachMat', COLOR_COMET, 0.14);
+        const visionGateApproachMat = makeLaneFloorMat('visionGateApproachMat', COLOR_VISION_GATE, 0.14);
 
         // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
         // identity, not one shared color - each bumper is its own emissive-glass PBR material so
@@ -5457,11 +5458,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // kick, cooldown or score - it changes which ways a ball can REACH it, not what happens
         // when it does.
         //
+        // Shared by Saturn's framing, the comet's lane wall and the Vision Gate's scoop cheeks.
         // Same rail convention as every other angled guide on this board: long axis along local X,
         // then rotationY = atan2(-dz, dx). Each segment is stretched 4% past its chord so
         // consecutive ones overlap rather than butting, for the same reason the orbit arcs are -
         // a butt joint leaves a hairline seam and a seam catches a rolling ball.
-        const saturnRail = (name, pa, pb) => {
+        const guideRail = (name, pa, pb) => {
             const dx = pb.x - pa.x, dz = pb.z - pa.z;
             const len = Math.hypot(dx, dz);
             if (len < 1e-6) return;
@@ -5478,9 +5480,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             addRailBevel(scene, name + 'Cap', railCapMat, len * 1.04, 0.015, cx, 0.022, cz, rotY);
         };
         for (let i = 0; i < SATURN_CANOPY.length - 1; i++) {
-            saturnRail('saturnCanopy' + i, SATURN_CANOPY[i], SATURN_CANOPY[i + 1]);
+            guideRail('saturnCanopy' + i, SATURN_CANOPY[i], SATURN_CANOPY[i + 1]);
         }
-        saturnRail('saturnJaw', SATURN_JAW.from, SATURN_JAW.to);
+        guideRail('saturnJaw', SATURN_JAW.from, SATURN_JAW.to);
         // Approach tint - the corridor the shot runs up, painted so the mouth reads as a route
         // rather than a gap between two obstacles. Decorative, height 0.001 at y 0.0012.
         addLaneFloorTint(scene, 'saturnApproachTint', saturnApproachMat,
@@ -5491,7 +5493,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // See COMET_RETURN_RAIL for the left-flipper band this lane was measured out of and every
         // clearance the rail is checked against. Built with the same helper as Saturn's own
         // framing directly above, so the two centre corridors are made of the same hardware.
-        saturnRail('cometReturnRail', COMET_RETURN_RAIL.from, COMET_RETURN_RAIL.to);
+        guideRail('cometReturnRail', COMET_RETURN_RAIL.from, COMET_RETURN_RAIL.to);
         // Laid along the 16-degree shot line rather than the board's axis. addLaneFloorTint's
         // `depth` runs along the strip's local Z, and rotationY = the lane's own angle puts that
         // local Z on the shot line - so the tint is drawn where the ball actually travels.
@@ -6504,6 +6506,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             post.metadata = { kind: 'wall' };
             new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.5, friction: 0.4 }, scene);
         });
+
+        // The lane the shot runs up - see VISION_GATE_APPROACH_TINT. Uses the gate's own violet so
+        // the corridor and the collar at the end of it read as one shot.
+        addLaneFloorTint(scene, 'visionGateApproachTint', visionGateApproachMat,
+            VISION_GATE_APPROACH_TINT.width, VISION_GATE_APPROACH_TINT.length,
+            VISION_GATE_APPROACH_TINT.x, VISION_GATE_APPROACH_TINT.z, 0);
 
         // The actual capture trigger - centered at the ball's own resting height (not the well's
         // sunken visual depth) so its overlap volume genuinely intersects the ball's collision
