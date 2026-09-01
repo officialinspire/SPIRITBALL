@@ -86,6 +86,7 @@ import {
     ORBIT_ENTRANCE_SWEEP_RAD, ORBIT_ARC_SEGMENTS, orbitArcPoint, ORBIT_WALL_FACE_X_M,
     ORBIT_TOP_ARC_RADIUS_M, ORBIT_TOP_ARC_SWEEP_RAD, ORBIT_TOP_ARC_SEGMENTS, orbitTopArcPoint,
     ORBIT_TOP_LIPS,
+    SATURN_CANOPY, SATURN_JAW, SATURN_APPROACH_TINT,
     ORBIT_OUTER_GAP_FROM_RAD, ORBIT_OUTER_GAP_TO_RAD, ORBIT_OUTER_FLANK_SIDES,
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
     MISSION_CUE_MS, MISSION_SELECT_MESSAGE_MS,
@@ -4724,6 +4725,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // COLOR_CHAKRA[1] is the bank's own callout colour (see the TARGETS label), which makes the
         // strip read as the bank's lane rather than any single plate's.
         const targetFloorMat = makeLaneFloorMat('targetFloorMat', COLOR_CHAKRA[1], 0.14);
+        // Saturn's approach lane, in Saturn's own gold rather than a lane colour, so the corridor
+        // reads as belonging to the planet at the end of it.
+        const saturnApproachMat = makeLaneFloorMat('saturnApproachMat', COLOR_SATURN, 0.14);
 
         // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
         // identity, not one shared color - each bumper is its own emissive-glass PBR material so
@@ -5441,6 +5445,43 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // doesn't visually compete with them.
         const saturnFloorMat = makeLaneFloorMat('saturnFloorMat', COLOR_SATURN_RING, 0.22);
         addFeatureFloorGlow(scene, 'saturnFloorGlow', saturnFloorMat, SATURN_RADIUS_M * 2.4, SATURN_POS.x, SATURN_POS.z);
+
+        // --- Saturn's framing hardware -------------------------------------------------------
+        // The canopy over the crown and the mouth's right jaw. See SATURN_CANOPY for the two
+        // measured populations this separates and every clearance below is checked against, and
+        // SATURN_JAW for why only one cheek is built. Nothing here touches Saturn's own collider,
+        // kick, cooldown or score - it changes which ways a ball can REACH it, not what happens
+        // when it does.
+        //
+        // Same rail convention as every other angled guide on this board: long axis along local X,
+        // then rotationY = atan2(-dz, dx). Each segment is stretched 4% past its chord so
+        // consecutive ones overlap rather than butting, for the same reason the orbit arcs are -
+        // a butt joint leaves a hairline seam and a seam catches a rolling ball.
+        const saturnRail = (name, pa, pb) => {
+            const dx = pb.x - pa.x, dz = pb.z - pa.z;
+            const len = Math.hypot(dx, dz);
+            if (len < 1e-6) return;
+            const rotY = Math.atan2(-dz, dx);
+            const cx = (pa.x + pb.x) / 2, cz = (pa.z + pb.z) / 2;
+            const box = BABYLON.MeshBuilder.CreateBox(name, {
+                width: len * 1.04, height: 0.022, depth: 0.015
+            }, scene);
+            box.position.set(cx, 0.011, cz);
+            box.rotation.y = rotY;
+            box.material = housingMat;
+            box.metadata = { kind: 'wall' }; // reuses the generic wall shake/sound, same as the orbit rails
+            new BABYLON.PhysicsAggregate(box, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            addRailBevel(scene, name + 'Cap', railCapMat, len * 1.04, 0.015, cx, 0.022, cz, rotY);
+        };
+        for (let i = 0; i < SATURN_CANOPY.length - 1; i++) {
+            saturnRail('saturnCanopy' + i, SATURN_CANOPY[i], SATURN_CANOPY[i + 1]);
+        }
+        saturnRail('saturnJaw', SATURN_JAW.from, SATURN_JAW.to);
+        // Approach tint - the corridor the shot runs up, painted so the mouth reads as a route
+        // rather than a gap between two obstacles. Decorative, height 0.001 at y 0.0012.
+        addLaneFloorTint(scene, 'saturnApproachTint', saturnApproachMat,
+            SATURN_APPROACH_TINT.width, SATURN_APPROACH_TINT.length,
+            SATURN_APPROACH_TINT.x, SATURN_APPROACH_TINT.z, 0);
 
         // ===================================
         // Comet (board redesign) - the old "satellite" object, re-themed now that Saturn is a
@@ -6878,6 +6919,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // approach tint and well left of the Vision Gate.
             const bankOuter = MISSION_TARGET_BANK[0];
             createLabelPlane(scene, 'TARGETS', bankX(bankOuter, 0, -0.070), bankZ(bankOuter, 0, -0.070), '#ff66cc');
+        }
+
+        // Saturn callout. The board's biggest scoring object was the only major feature with no
+        // signage at all - L ORBIT, R ORBIT, SKILL SHOT, VISION GATE and TARGETS all name
+        // themselves and Saturn did not, which is half of what "obvious" means for a premium shot.
+        // Placed beside the mouth's right jaw rather than below it: the corridor under Saturn is
+        // only ~65mm of clear playfield between the Vision Gate's upper post and Saturn's
+        // underside, and a label in it would sit on the approach tint and under the VISION GATE
+        // callout already there. Out to the right it has open board to itself.
+        {
+            createLabelPlane(scene, 'SATURN', SATURN_JAW.to.x + 0.030, SATURN_JAW.to.z + 0.020, '#ffb347');
         }
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate

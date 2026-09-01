@@ -757,6 +757,75 @@ export const SATURN_RADIUS_M = 0.045;
 // 53.2mm and the Vision Gate beside it by 25.0mm (sealed - see VISION_GATE_POS).
 export const SATURN_POS = { x: 0, z: 0.190 };
 
+// SATURN AS A PREMIUM SHOT. Saturn's position is unchanged and deliberately so: a grid scan of the
+// centre/upper board for the spot giving a 45mm-radius disc the most surface-to-surface clearance
+// from every other collider puts (0, 0.190) FIRST, at 43mm - nowhere else on the board is better,
+// and the runners-up are all within 5mm of it. Saturn was never in the wrong place. It was
+// unframed, and the numbers said so:
+//
+//   174-shot flipper fan  ->  reached Saturn cleanly (no bumper/comet contact first):  6  (3.4%)
+//   144 seeded cluster exits -> reached Saturn:                                       52  (36%)
+//   near misses (within 45mm of the surface, travelling up-table):  4, and all 4 drained
+//
+// So bumper spill hit the board's biggest scoring object nine times more often than a clean shot
+// did, which is the opposite of a premium shot. What makes it fixable is that the two populations
+// land on DIFFERENT ARCS of Saturn's surface. Measuring the bearing of each contact point (0 =
+// crown / up-table side, +/-180 = underside):
+//
+//   cluster spill      -90..-60:5  -60..-30:15  -30..0:8  0..30:12  30..60:5  60..90:5  90..120:2
+//   clean flipper hits           -150..-120:2  -90..-60:1  60..90:1  120..150:2
+//
+// Spill arrives on the crown and upper flanks; a clean shot arrives underneath. So the canopy
+// below covers the crown arc and stops there, leaving the underside - the shot arc - wide open.
+//
+// CANOPY. A steep, narrow tent over Saturn's crown. Two things fix its shape, and the first
+// version got both wrong - qa/ball-trap-audit.js found 24 balls wedged in one spot and 11 in
+// another, so this is the corrected geometry and the reasoning that produced it.
+//
+// (1) SLOPE. The canopy is a wall that gravity presses balls against, so each arm has to be steep
+// enough that a ball on it slides off sideways instead of sitting there. On this playfield that
+// threshold is tan(angle) > friction, and these rails use friction 0.5, so anything shallower than
+// 26.6 degrees from horizontal holds a ball. The first version's arms were 10.5, 11.3, 20.4 and
+// 23.6 degrees - all under it, and balls duly parked against all four. These are 33.7 degrees.
+//
+// (2) WHERE THE ARMS END. Saturn's side gaps are narrow: 43mm to bumper1 on the left and 46mm to
+// the comet on the right, against a 27mm ball. An arm ending INSIDE one of those gaps turns it
+// into a pocket - the arm funnels balls down-outboard into the corner where it meets the bumper,
+// and they cannot get out past it. That is exactly what the 24-ball cluster at (-0.074, 0.258) and
+// the 11-ball one at (0.098, 0.247) were. So the tent now stops well short of both neighbours and
+// its arms discharge into open playfield instead.
+//
+// Clearances, against the ball's 27mm diameter:
+//   ( 0.000, 0.256) apex   13.5mm over Saturn's crown - sealed, nothing gets under it
+//   (+/-0.042, 0.228) ends  4.1mm off Saturn's surface - sealed
+//   left end to bumper1    33.9mm - passable, so a ball shed leftward carries on down the
+//                           Saturn/bumper1 channel rather than jamming against the bumper
+//   right end to the comet 39.7mm - passable, same on that side
+//
+// What this deliberately does NOT do is seal Saturn completely. The tent spans +/-42mm, so it
+// covers contact bearings inside about +/-69 degrees and leaves the flanks beyond that open. A
+// version that ran the full width and anchored on both neighbours took cluster spill from 52 hits
+// to 0, but it was the version with the pockets: sealing Saturn and keeping its side channels
+// clear are the same 43mm of space, and they cannot both have it.
+export const SATURN_CANOPY = [
+    { x: -0.042, z: 0.228 },
+    { x: 0, z: 0.256 },
+    { x: 0.042, z: 0.228 }
+];
+
+// The mouth's right-hand jaw. Saturn's lower LEFT is already framed - the mission target bank's
+// inner plate fixture sits 12.7mm off Saturn's surface there, too tight for a ball - so the shot
+// only needed its other cheek. Upper end is 9.9mm off Saturn's surface (sealed, so it is a real
+// jaw rather than a rail with a gap behind it) and it runs down-outboard from there, which is the
+// direction that sends a ball missing to the right on toward the comet and the right orbit instead
+// of straight back down the middle.
+export const SATURN_JAW = { from: { x: 0.036, z: 0.139 }, to: { x: 0.068, z: 0.104 } };
+
+// Floor tint marking the mouth, on the corridor between the Vision Gate's upper post and Saturn's
+// underside. Same lane-tint idiom the orbits and the target bank use. Kept short and clear of the
+// gate's own hardware, which carries its own visual identity right below this.
+export const SATURN_APPROACH_TINT = { x: 0.010, z: 0.113, width: 0.055, length: 0.065 };
+
 // The old "satellite" object, re-themed as a comet now that Saturn itself is a real dedicated
 // piece (having both would be a confusing "two Saturns") - same role/size/position family,
 // just reskinned (new icy-cyan identity, see HEX_COMET) and nudged slightly right/down from
