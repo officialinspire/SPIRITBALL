@@ -1028,6 +1028,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             { name: 'topWall', x: 270, y: 15, w: 540, h: 30, rot: 0 },
             { name: 'leftWall', x: 15, y: 480, w: 30, h: 960, rot: 0 },
             { name: 'rightWall', x: 525, y: 480, w: 30, h: 960, rot: 0 },
+            // LOWER-FLOW PASS - leftSlant is UNCHANGED, and that is a measured decision.
+            //
+            // It runs an unbroken 180px from the left wall down to x=-0.095, which is to say it
+            // bridges straight over the left outlane. Measured, 132 seeded descents across the full
+            // board width: the right outlane trigger registers 9 times, the left registers 0, and
+            // not one ball crosses the flipper line outboard of the divider on that side. The left
+            // outlane does not exist as a lane.
+            //
+            // Three ways of opening it were built and measured on the 174-shot fan, and all three
+            // cost the same thing:
+            //   truncated to 85px (mirroring rightSlant)  left outlane 0 -> 18, orbit completions 5 -> 2
+            //   cut in two around a 50mm gap at x -0.20   left outlane 0 -> 19, orbit completions 5 -> 2
+            //   truncated to 109px, channel at the wall   outlane hits 3 -> 16, orbit completions 5 -> 2,
+            //                                             and orbit ENTRANCES 37 -> 29 as well
+            // The section of wall that blocks the outlane is the same section a ball travelling up
+            // the left rides on its way to the orbit mouth: it is the left orbit's deflector and
+            // the left outlane's lid at once, and the board does not have room for both. Every
+            // variant also dropped the p90 height a ball reaches while outboard of x 0.16 from
+            // 0.379 to about 0.18.
+            //
+            // Left as it is rather than trading the left orbit shot away without being asked. The
+            // exchange rate is above if that trade is wanted: about 18 left-outlane registrations
+            // and 15 points of lane-registration coverage for 3 of 5 orbit completions.
             { name: 'leftSlant', x: 90, y: 760, w: 180, h: 20, rot: -0.5 },
             // Ball-flow geometry pass (user-requested, measured): rightSlant SHORTENED from its
             // outer (wall-side) end, 180px -> 85px, centre walked back along its own axis so the

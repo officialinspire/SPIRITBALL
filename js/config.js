@@ -1054,8 +1054,25 @@ export const REENTRY_LANES = [
 export const LANE_Z_TOP_M = -0.33; // ~0.0175m clear of the slingshot's own lower edge (~-0.3125)
 export const LANE_Z_BOTTOM_M = -0.40; // divider rail's far end - see block comment for the X-clearance reasoning
 export const LANE_DIVIDER_X_M = 0.145; // mirrored per side
-export const LANE_TRIGGER_Z_M = -0.365; // mid-lane, between LANE_Z_TOP_M and LANE_Z_BOTTOM_M
-export const INLANE_TRIGGER_X_M = 0.095; // mirrored - inboard of the divider, toward the flipper
+// LOWER-FLOW PASS: -0.365 -> -0.342. A rollover has to sit UP-LANE of the flipper so it fires when
+// a ball arrives, not while one rests on the bat. -0.365 is inside the flipper's own z span
+// (-0.4128..-0.3537), so once INLANE_TRIGGER_X_M moved onto the real return path the trigger ended
+// up underneath the resting ball and fired on 174 of 174 fan shots - a "there is a ball" sensor,
+// not a lane. -0.342 is above the bat's top edge and still below the divider's top at -0.33, so it
+// is a rollover the returning ball crosses on its way down.
+export const LANE_TRIGGER_Z_M = -0.342; // up-lane of the flipper's top edge, below the divider's top
+// LOWER-FLOW PASS: 0.095 -> 0.068. The inlane rollover was outboard of the path balls actually
+// take. 132 seeded descents put every returning ball across the flipper line between x -0.08 and
+// +0.08 - a 20mm histogram peaks at -0.02 (26 balls), +0.04 (22) and 0.00 (17) with NOTHING between
+// -0.08 and -0.22 - while this trigger's own span was 0.080..0.110. It sat just outboard of the
+// traffic and caught 6 of the 42 balls that crossed on its side.
+//
+// This board does not deliver an inlane ball down a channel and it structurally cannot: the config
+// block below records that the flipper-pivot-to-divider space is 28mm and any rail inside it
+// pinches the ball, which is why INLANE_GUIDE_BOTTOM_Z_M stops the guide above the pinch and the
+// ball drops onto the bat instead. So the rollover belongs where the ball crosses, which is over
+// the bat, not in a lane that cannot be built.
+export const INLANE_TRIGGER_X_M = 0.068; // mirrored - on the measured return path, over the flipper bat
 export const OUTLANE_TRIGGER_X_M = 0.185; // mirrored - outboard of the divider, toward the wall
 export const LANE_TRIGGER_WIDTH_M = 0.03;
 export const LANE_TRIGGER_DEPTH_M = 0.025;
