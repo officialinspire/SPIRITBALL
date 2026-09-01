@@ -6744,31 +6744,49 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // flanking each slingshot's outer edge, each a housing-colored post with a thin
         // matte-rubber ring at its base. Purely cosmetic - unlike every OTHER post in this file,
         // these get no PhysicsAggregate at all.
-        const rubberMat = new BABYLON.PBRMaterial('rubberRingMat', scene);
-        rubberMat.albedoColor = new BABYLON.Color3(0.05, 0.05, 0.06);
-        rubberMat.metallic = 0;
-        rubberMat.roughness = 0.9; // matte rubber, not chrome like housingMat
+        // These three were the last rubber on the board that was not real. Each was an 8mm shaft
+        // wearing a 16mm rubber ring - the shape a player reads as "this kicks the ball back" - and
+        // the file's own comment said so out loud: "Purely cosmetic - unlike every OTHER post in
+        // this file, these get no PhysicsAggregate at all". One of them is at (0, -0.31), on the
+        // centre spine, and its comment calls it the center post between the flippers. A ball
+        // headed down the middle went straight through all three.
+        //
+        // That is the mismatch this pass exists to remove, so they are now what they look like: a
+        // rubber SLEEVE, at exactly the diameter the ring already occupied (0.016 centreline +
+        // 0.0025 tube = 0.0185 outer), with a cylinder collider on that same surface. Nothing about
+        // the footprint a player already sees has changed - only whether the ball agrees with it.
+        //
+        // Restitution 0.45 is SLINGSHOT_RESTITUTION, i.e. the value the board's other struck rubber
+        // already uses, chosen over the guard posts' 0.5 precisely to keep these quiet: a lone post
+        // on the centre spine is the last place that wants a lively bounce.
+        // The CENTRE one is gone rather than made real, and that is the interesting half of this.
+        // It stood at (0, -0.31): on the spine, 75mm up-table of the flipper tips. Decorative it was
+        // harmless. Physical it is a wall across the shooting lane - a cross-table shot from either
+        // flipper crosses x 0 at about z -0.30, which is exactly where it stood. Measured on the
+        // 174-shot fan with it solid: the median shot's apex collapsed from z -0.098 to -0.262,
+        // orbit entrances fell 35 -> 27, mission targets 21 -> 18 and bumpers 24 -> 21. It was
+        // catching the shots, not the drains.
+        //
+        // So it could not be made honest by giving it physics, and leaving it drawn would have kept
+        // the one piece of fake rubber this pass exists to remove. A post that cannot be real on
+        // the centre spine should not be drawn there, so it is deleted. The two flanking posts stay
+        // and are now solid: they sit on the slingshots' outer corners, out of every shot line, and
+        // rounding those square corners is a real job.
+        const DECOR_POST_SLEEVE_M = 0.0185;
         [
-            { x: 0, z: FLIPPER_Z_M + 0.05 }, // center post between the flippers
-            { x: SLINGSHOTS[0].x - 0.03, z: SLINGSHOTS[0].z }, // flanking the left slingshot
-            { x: SLINGSHOTS[1].x + 0.03, z: SLINGSHOTS[1].z } // flanking the right slingshot
+            { x: SLINGSHOTS[0].x - 0.03, z: SLINGSHOTS[0].z }, // caps the left slingshot's outer corner
+            { x: SLINGSHOTS[1].x + 0.03, z: SLINGSHOTS[1].z } // caps the right slingshot's outer corner
         ].forEach((def, i) => {
             const post = BABYLON.MeshBuilder.CreateCylinder('decorPost' + i, {
-                diameter: 0.008,
+                diameter: DECOR_POST_SLEEVE_M,
                 height: 0.024,
-                tessellation: 8
+                tessellation: 12
             }, scene);
             post.position.set(def.x, 0.012, def.z);
-            post.material = housingMat;
-
-            const ring = BABYLON.MeshBuilder.CreateTorus('decorRing' + i, {
-                diameter: 0.016,
-                thickness: 0.0025,
-                tessellation: 8
-            }, scene);
-            ring.rotation.x = Math.PI / 2;
-            ring.position.set(def.x, 0.014, def.z);
-            ring.material = rubberMat;
+            post.metadata = { kind: 'wall' }; // generic wall shake/sound, same as every other post
+            new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER,
+                { mass: 0, restitution: SLINGSHOT_RESTITUTION, friction: 0.4 }, scene);
+            dressPostAsRubber(post, DECOR_POST_SLEEVE_M, 0.0245);
         });
 
         // 5. Visible lane guides - small angled decorative fins at each flipper's outer edge,
