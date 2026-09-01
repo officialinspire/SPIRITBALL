@@ -826,6 +826,56 @@ export const SATURN_JAW = { from: { x: 0.036, z: 0.139 }, to: { x: 0.068, z: 0.1
 // gate's own hardware, which carries its own visual identity right below this.
 export const SATURN_APPROACH_TINT = { x: 0.010, z: 0.113, width: 0.055, length: 0.065 };
 
+// --- COMET SHOT PATH -------------------------------------------------------------------------
+// The comet's corridor already existed physically; nothing on the board said so. Firing the LEFT
+// flipper across the cross-table band and recording the first SOLID thing each shot touches:
+//
+//    6-10 deg  visionGatePost0/1     12-14 deg  saturnJaw
+//      16 deg  THE COMET             18-30 deg  the right orbit rail
+//
+// So there is exactly one heading whose first contact is the comet, bounded below by the Vision
+// Gate's posts and above by the right orbit lane's inner rail - a real lane between two real walls,
+// 16 degrees off up-table from the left flipper. That is the cross-table shot this pass makes
+// legible. (Shots at 10-14 and 18-26 degrees still reach the comet, but only after bouncing off
+// the jaw or the orbit rail first, which is why the fan's contact headings scattered from -31 to
+// +20 and the comet read as something you arrive at rather than aim for.)
+//
+// RETURN RAIL. A short, steep rail hugging the comet's lower-left, which does three jobs at once:
+// it is the lane's left wall in the stretch where Saturn would otherwise be it, it holds the comet
+// and Saturn apart, and it catches rebounds coming off the comet's underside heading down-left -
+// 4 of 18 measured strikes previously rebounded straight into Saturn - and turns them back down
+// the lane toward the right inlane.
+//
+// Clearances, against the ball's 27mm diameter and the 18/42mm gap rule:
+//   upper end (0.092, 0.186)  4.6mm off the comet's surface - sealed, so it is a wall rather than
+//                              a rail with a gap behind it
+//   lower end (0.082, 0.152)  32.8mm off the Saturn jaw's upper end - deliberately PASSABLE, so
+//                              the Saturn and comet corridors stay connected instead of the gap
+//                              between two rail ends becoming a pocket
+//   lower end to Saturn      38.0mm - passable
+//   slope 73.6 degrees, far above the 26.6 needed for a ball to shed off it rather than park
+//
+// At full power the 16-degree shot reaches the comet by touching THIS RAIL first and the comet
+// immediately after - it banks off the lane wall rather than arriving dead on the nose. Pulling
+// the rail 3mm back out of the line was measured and does give the direct contact back, at the
+// cost of the rebounds it exists for: drains after a comet strike go from 0 back to 2 and Saturn
+// returns from 2 to 3. A ball riding a corridor wall into the target at the end of it is the
+// corridor working, so the rebounds win and the rail stays where it is.
+export const COMET_RETURN_RAIL = { from: { x: 0.082, z: 0.152 }, to: { x: 0.092, z: 0.186 } };
+
+// Floor tint up the lane, laid along the 16-degree line itself rather than along the board's axis,
+// so the corridor is drawn where the shot actually goes. Same lane-tint idiom as the orbits, the
+// target bank and Saturn's approach.
+export const COMET_APPROACH_TINT = { x: 0.095, z: 0.120, width: 0.045, length: 0.090, angleRad: 16 * Math.PI / 180 };
+
+// NOT DONE, and measured rather than skipped: the comet takes 24% of seeded cluster exits, and
+// like Saturn they land on its crown (bearings -90..+30 hold 31 of 35). Saturn's answer was a
+// canopy, and the comet has nowhere to put one. It has 39.7mm to Saturn's canopy on its left and
+// 31.7mm to the right orbit rail on its right; a tent wide enough to cover the crown arc of a
+// 22mm-radius body ends 24mm from one and 16mm from the other, which seals both channels and puts
+// a downward-narrowing notch at each end - the exact shape that trapped 35 balls when Saturn's
+// first canopy did it. The comet sits in a 71mm-wide slot and a shield does not fit in it.
+
 // The old "satellite" object, re-themed as a comet now that Saturn itself is a real dedicated
 // piece (having both would be a confusing "two Saturns") - same role/size/position family,
 // just reskinned (new icy-cyan identity, see HEX_COMET) and nudged slightly right/down from

@@ -87,6 +87,7 @@ import {
     ORBIT_TOP_ARC_RADIUS_M, ORBIT_TOP_ARC_SWEEP_RAD, ORBIT_TOP_ARC_SEGMENTS, orbitTopArcPoint,
     ORBIT_TOP_LIPS,
     SATURN_CANOPY, SATURN_JAW, SATURN_APPROACH_TINT,
+    COMET_RETURN_RAIL, COMET_APPROACH_TINT,
     ORBIT_OUTER_GAP_FROM_RAD, ORBIT_OUTER_GAP_TO_RAD, ORBIT_OUTER_FLANK_SIDES,
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
     MISSION_CUE_MS, MISSION_SELECT_MESSAGE_MS,
@@ -4728,6 +4729,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Saturn's approach lane, in Saturn's own gold rather than a lane colour, so the corridor
         // reads as belonging to the planet at the end of it.
         const saturnApproachMat = makeLaneFloorMat('saturnApproachMat', COLOR_SATURN, 0.14);
+        // The comet's lane, in the comet's own icy cyan so the two centre corridors read as
+        // belonging to different shots rather than as one wide bright area.
+        const cometApproachMat = makeLaneFloorMat('cometApproachMat', COLOR_COMET, 0.14);
 
         // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
         // identity, not one shared color - each bumper is its own emissive-glass PBR material so
@@ -5482,6 +5486,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         addLaneFloorTint(scene, 'saturnApproachTint', saturnApproachMat,
             SATURN_APPROACH_TINT.width, SATURN_APPROACH_TINT.length,
             SATURN_APPROACH_TINT.x, SATURN_APPROACH_TINT.z, 0);
+
+        // --- Comet lane ----------------------------------------------------------------------
+        // See COMET_RETURN_RAIL for the left-flipper band this lane was measured out of and every
+        // clearance the rail is checked against. Built with the same helper as Saturn's own
+        // framing directly above, so the two centre corridors are made of the same hardware.
+        saturnRail('cometReturnRail', COMET_RETURN_RAIL.from, COMET_RETURN_RAIL.to);
+        // Laid along the 16-degree shot line rather than the board's axis. addLaneFloorTint's
+        // `depth` runs along the strip's local Z, and rotationY = the lane's own angle puts that
+        // local Z on the shot line - so the tint is drawn where the ball actually travels.
+        addLaneFloorTint(scene, 'cometApproachTint', cometApproachMat,
+            COMET_APPROACH_TINT.width, COMET_APPROACH_TINT.length,
+            COMET_APPROACH_TINT.x, COMET_APPROACH_TINT.z, COMET_APPROACH_TINT.angleRad);
 
         // ===================================
         // Comet (board redesign) - the old "satellite" object, re-themed now that Saturn is a
@@ -6930,6 +6946,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // callout already there. Out to the right it has open board to itself.
         {
             createLabelPlane(scene, 'SATURN', SATURN_JAW.to.x + 0.030, SATURN_JAW.to.z + 0.020, '#ffb347');
+            // COMET, up its own lane and outboard of the tint, where the only thing nearby is the
+            // right orbit rail. Kept above the SATURN callout in z so the two read as labels on two
+            // different corridors rather than as one row of text across the middle of the board.
+            createLabelPlane(scene, 'COMET', 0.138, 0.168, '#66e0ff');
         }
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
