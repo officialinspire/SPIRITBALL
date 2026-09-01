@@ -4719,6 +4719,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const inlaneFloorMat = makeLaneFloorMat('inlaneFloorMat', COLOR_LANE_LAMP, 0.16);
         const outlaneFloorMat = makeLaneFloorMat('outlaneFloorMat', COLOR_OUTLANE_LAMP, 0.16);
         const orbitFloorMat = makeLaneFloorMat('orbitFloorMat', COLOR_ORBIT_LAMP, 0.14);
+        // The mission bank's approach lane. The three plates each carry their own chakra colour,
+        // so tinting the approach in any one of them would read as "this lane belongs to target N";
+        // COLOR_CHAKRA[1] is the bank's own callout colour (see the TARGETS label), which makes the
+        // strip read as the bank's lane rather than any single plate's.
+        const targetFloorMat = makeLaneFloorMat('targetFloorMat', COLOR_CHAKRA[1], 0.14);
 
         // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
         // identity, not one shared color - each bumper is its own emissive-glass PBR material so
@@ -5002,6 +5007,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             return mat;
         });
 
+        // The bank's own local frame. Every plate and every piece of its fixture is placed and
+        // rotated in THIS frame rather than in world axes, so the whole bank re-aims by editing
+        // MISSION_TARGET_BANK's three positions and nothing else can fall out of alignment with
+        // anything else. Derived from the bank's endpoints with the same atan2(-dz, dx) rail
+        // convention the header rail below already used (see inlaneGuide's comment for where that
+        // formula comes from), verified against this Babylon build rather than assumed:
+        //   local +X -> ( dx, dz)/len   along the bank, index 0 -> index 2
+        //   local +Z -> (-dz, dx)/len   out of the bank's BACK (up-table), which is the side the
+        //                               slot wall, posts and header rail have always sat on
+        // so local -Z is the plate's face, and with the bank rising to the right it points
+        // down-table and slightly right - into the measured right-flipper approach.
+        const bankFirst = MISSION_TARGET_BANK[0];
+        const bankLast = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
+        const bankDX = bankLast.x - bankFirst.x;
+        const bankDZ = bankLast.z - bankFirst.z;
+        const bankSpan = Math.hypot(bankDX, bankDZ);
+        const bankRotationY = Math.atan2(-bankDZ, bankDX);
+        const bankCos = Math.cos(bankRotationY);
+        const bankSin = Math.sin(bankRotationY);
+        // (u along the bank, v out of its face) -> world x / z, about `pos`.
+        const bankX = (pos, u, v) => pos.x + u * bankCos + v * bankSin;
+        const bankZ = (pos, u, v) => pos.z - u * bankSin + v * bankCos;
+
         const missionTargetMeshes = [];
         const missionTargetLamps = [];
         MISSION_TARGET_BANK.forEach((pos, i) => {
@@ -5011,6 +5039,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 depth: 0.008
             }, scene);
             mesh.position.set(pos.x, TARGET_RAISED_Y_M, pos.z);
+            // Square to the bank line, so all three faces present themselves to the same shot.
+            // The drop animation only ever touches position.y, so rotating here cannot affect it -
+            // and the trigger aggregate created below inherits this rotation, which is what keeps
+            // the detection volume flush with the face a player is aiming at.
+            mesh.rotation.y = bankRotationY;
             mesh.material = targetMats[i % targetMats.length];
             // Mission target face skin slot (visual-architecture pass, user-requested) - per-
             // target-index, matching this flag's own already-per-index material above. No-op
@@ -5076,7 +5109,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 height: 0.034,
                 depth: 0.003
             }, scene);
-            backPanel.position.set(pos.x, 0.017, pos.z + 0.0095);
+            backPanel.position.set(bankX(pos, 0, 0.0095), 0.017, bankZ(pos, 0, 0.0095));
+            backPanel.rotation.y = bankRotationY;
             backPanel.material = housingMat;
 
             // The two guide posts the plate runs between. Deep enough (0.020) to span from just in
@@ -5092,7 +5126,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     height: 0.032,
                     depth: 0.020
                 }, scene);
-                post.position.set(pos.x + side * 0.017, 0.016, pos.z + 0.001);
+                post.position.set(bankX(pos, side * 0.017, 0.001), 0.016, bankZ(pos, side * 0.017, 0.001));
+                post.rotation.y = bankRotationY;
                 post.material = railCapMat;
             });
 
@@ -5105,7 +5140,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 height: 0.0035,
                 depth: 0.005
             }, scene);
-            lip.position.set(pos.x, 0.00175, pos.z - 0.0070);
+            lip.position.set(bankX(pos, 0, -0.0070), 0.00175, bankZ(pos, 0, -0.0070));
+            lip.rotation.y = bankRotationY;
             lip.material = railCapMat;
 
             // Its own cloned material (not shared with the flag's targetMats[i] like before) so
@@ -5130,7 +5166,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 height: 0.028,
                 depth: 0.0012
             }, scene);
-            slotGlow.position.set(pos.x, 0.015, pos.z + 0.0065);
+            slotGlow.position.set(bankX(pos, 0, 0.0065), 0.015, bankZ(pos, 0, 0.0065));
+            slotGlow.rotation.y = bankRotationY;
             slotGlow.material = lampMat;
 
             // Indicator lamp, now in FRONT of the fixture rather than buried inside the plate's own
@@ -5140,7 +5177,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 diameter: TARGET_RADIUS_M * 0.85
             }, scene);
             lamp.scaling.y = 0.5;
-            lamp.position.set(pos.x, 0.0035, pos.z - 0.014);
+            lamp.position.set(bankX(pos, 0, -0.014), 0.0035, bankZ(pos, 0, -0.014));
             lamp.material = lampMat;
             missionTargetMeshes.push(mesh);
             missionTargetLamps.push(lamp);
@@ -5157,14 +5194,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // convention every other angled wall/rail in this file uses (see inlaneGuide's own
         // comment for how that formula was derived) - purely decorative, no physics.
         {
-            const first = MISSION_TARGET_BANK[0];
-            const last = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
-            const dx = last.x - first.x;
-            const dz = last.z - first.z;
-            const bankLength = Math.sqrt(dx * dx + dz * dz) + TARGET_RADIUS_M * 3; // overhangs past the end targets, like a real mounting rail would
-            const bankRotationY = Math.atan2(-dz, dx);
-            const bankCenterX = (first.x + last.x) / 2;
-            const bankCenterZ = (first.z + last.z) / 2;
+            const bankLength = bankSpan + TARGET_RADIUS_M * 3; // overhangs past the end targets, like a real mounting rail would
+            const bankCenterX = (bankFirst.x + bankLast.x) / 2;
+            const bankCenterZ = (bankFirst.z + bankLast.z) / 2;
             const header = BABYLON.MeshBuilder.CreateBox('missionTargetHeader', {
                 width: bankLength,
                 height: 0.006,
@@ -5177,11 +5209,33 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // border and number the faces now carry. Moved just behind the new slot back walls
             // (which end at z +0.011) it reads as the rail the three housings mount to, which is
             // what it was always meant to be. Decorative only - no collider, no gameplay effect.
-            const bankHeaderZ = bankCenterZ + 0.014;
-            header.position.set(bankCenterX, 0.034, bankHeaderZ);
+            // The +14mm nudge is now taken along the bank's own BACK (local +Z) rather than along
+            // world +z, so on an angled bank the rail stays parallel to the plates and a fixed
+            // distance behind all three of them instead of drifting across their faces.
+            const bankCenter = { x: bankCenterX, z: bankCenterZ };
+            const headerX = bankX(bankCenter, 0, 0.014);
+            const headerZ = bankZ(bankCenter, 0, 0.014);
+            header.position.set(headerX, 0.034, headerZ);
             header.rotation.y = bankRotationY;
             header.material = housingMat;
-            addRailBevel(scene, 'missionTargetHeaderCap', railCapMat, bankLength, 0.01, bankCenterX, 0.037, bankHeaderZ, bankRotationY);
+            addRailBevel(scene, 'missionTargetHeaderCap', railCapMat, bankLength, 0.01, headerX, 0.037, headerZ, bankRotationY);
+
+            // Approach tint, painted down the bank's OWN face normal - which, because the bank is
+            // mounted square to the measured flipper approach, is the shot line itself. Same
+            // floor-tint idiom the orbit lanes use to make a corridor read as a route at a glance
+            // (see addLaneFloorTint), and the reason this bank needs one is that its approach is
+            // the widest piece of open playfield on the board: nothing between the flippers and
+            // z 0.107 marks where the shot is, so the bank read as a thing to bump into rather
+            // than a thing to aim at.
+            //
+            // Deliberately narrow. makeLaneFloorMat's own comment records what happens when these
+            // strips get large: at 50mm x 75mm this is smaller than the outlane's 55mm x 58mm, so
+            // it stays a floor tint under the bank's hardware instead of becoming the brightest
+            // thing in the lower half of the table. Decorative only - height 0.001 at y 0.0012,
+            // no collider, and nothing here is in any ball's way.
+            const approachV = -0.048; // just clear of the plates' front faces (v -0.004), running 75mm down-table
+            addLaneFloorTint(scene, 'missionTargetApproachTint', targetFloorMat, 0.05, 0.075,
+                bankX(bankCenter, 0, approachV), bankZ(bankCenter, 0, approachV), bankRotationY);
         }
 
         // ===================================
@@ -6808,11 +6862,22 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // target so it doesn't overlap the header rail or any flag.
         {
             // SHOT-CORRIDOR REFACTOR: the old -0.055 X offset pushed the label outboard of the
-            // bank, which is now where the left orbit rail runs. Moved to just BELOW the bank's
-            // nearest target instead - same "outside the bank, clear of the header rail and flags"
-            // intent, on the axis that still has room in the left corridor.
-            const nearestTarget = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
-            createLabelPlane(scene, 'TARGETS', nearestTarget.x + 0.005, nearestTarget.z - 0.05, '#ff66cc');
+            // bank, which is now where the left orbit rail runs. Moved to just BELOW the bank -
+            // same "outside the bank, clear of the header rail and flags" intent, on the axis that
+            // still has room in the left corridor.
+            //
+            // BANK-AS-A-SHOT PASS: taken off the bank's CENTRE and down its own face normal rather
+            // than off whichever entry happens to be last. The old form assumed index 2 was the
+            // bank's nearest plate, which was true of a bank running down-table and is not true of
+            // one running across it - on this layout it would have hung the label off the far end.
+            // Hung off the bank's OUTERMOST plate, and a long way down its face: screenshots from
+            // the gameplay camera put the label IN the plate row at both -0.05 off the bank centre
+            // (it landed between plates 1 and 2) and -0.045 off plate 0 (it read as a fourth plate
+            // at the row's left end), because 45mm of z is only a few pixels at this camera's
+            // angle. At -0.070 it clears the row, and sits in open playfield outboard of the
+            // approach tint and well left of the Vision Gate.
+            const bankOuter = MISSION_TARGET_BANK[0];
+            createLabelPlane(scene, 'TARGETS', bankX(bankOuter, 0, -0.070), bankZ(bankOuter, 0, -0.070), '#ff66cc');
         }
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate

@@ -663,10 +663,72 @@ export const TARGET_RADIUS_M = 0.014;
 // -0.135 -> -0.055 over z 0.290 -> 0.110, still colinear (buildObstacles()'s shared backboard
 // spans first->last and assumes that), and still inside the left corridor - the top plate's
 // fixture clears the orbit rail's inner face by 1.5mm and the bumper above it by 6mm.
+//
+// BANK-AS-A-SHOT PASS. The layout above solved the readability problem (three plates that no
+// longer hide each other) but it was still not a bank, and the reason is measurable. Its line ran
+// (-0.135, 0.290) -> (-0.055, 0.110), i.e. direction (0.41, -0.91). A fan off both flipper tips
+// (qa-style probe, 174 shots, recording heading the first time the ball enters the left corridor
+// travelling up-table) puts the median approach at -15.6 degrees from up-table off the RIGHT
+// flipper and -12.2 off the left. The old bank line sat almost exactly ANTIPARALLEL to that: a
+// shot ran ALONG the bank's own axis rather than across its face, sweeping through all three
+// trigger volumes in a line. That is also why the cluster-exit probe found the bank was the most-
+// reached feature on the board - not because it was well aimed at, but because it was a corridor
+// anything descending the left side passed down.
+//
+// A real drop-target bank is mounted ACROSS the shot. This one now is: the three plates sit on one
+// line at 50mm pitch running right-and-up at 15.6 degrees, so the bank's face normal points
+// down-table and slightly right - square to the measured right-flipper approach, and 12 degrees
+// off the left flipper's, which still reads as a solid hit rather than a graze. The RIGHT flipper
+// is the primary, which is also the convention for a left-side bank.
+//
+// buildObstacles() derives the plates' rotation from these endpoints with the same
+// atan2(-dz, dx) the header rail already used, so the plates, their fixtures and the rail cannot
+// drift out of alignment with each other - and the whole bank re-aims by editing these three
+// positions alone.
+//
+// Kept: 3 entries, index order outermost-first (index 0 is still the plate nearest the left orbit
+// rail), colinear (buildObstacles()'s shared backboard spans first->last and assumes that), and
+// still triggers rather than colliders.
+//
+// Placement, all measured against the live collider dump rather than estimated:
+//   pitch 50.0mm            The floor is 40mm (the fixture width, below which plates overlap on
+//                             screen - the readability property the previous pass bought with
+//                             197mm of spread and this one gets in 140mm). The 10mm above that
+//                             floor is bought deliberately: a 27mm ball centred anywhere in the
+//                             (55 - pitch) mm band between two plates overlaps BOTH trigger
+//                             volumes at once and drops two of them off one hit. At 44.6mm that
+//                             band is 10.4mm of every 44.6 and a 174-shot fan straddled 4 times;
+//                             at 50mm it is 5mm of every 50, and the same fan straddles once or
+//                             twice across runs (~1%). 55mm would close it completely but does not
+//                             fit between the orbit rail and Saturn at any angle. Mission
+//                             SELECTION is unaffected either way - startMission() only runs when
+//                             mission.state is idle, so a straddle is one selection and two drops.
+//   z 0.107 - 0.133         near the camera instead of running back to 0.290, where the top plate
+//                             sat behind the bumper row and the orbit rail
+//   plate 0 outer corner    (-0.1575, 0.1012), 6.2mm off the left orbit rail's inner face
+//   plate 2 outer corner    (-0.0225, 0.1388), 10.1mm off Saturn's collider surface
+//   both gaps are under the 18mm floor of the trap band, so neither can catch a 27mm ball even
+//   though this hardware is decorative
+//
+// KNOWN, AND NOT FIXABLE BY MOVING THIS BANK: plate 2's trigger reaches into Saturn's drop shadow.
+// Saturn is a 90mm collider centred on x 0 and gravity here is straight down-table, so any plate
+// whose catch zone (trigger box + the ball's own 13.5mm radius) overlaps x -0.045..+0.045 collects
+// balls rebounding off its underside. A ball staged into Saturn by qa/end-of-ball.js comes off its
+// lower-left and reaches x -0.041, which this plate 2 clips. Two constraints have to hold at once -
+// plate 0's fixture must clear the orbit rail's inner face at x -0.1637, and plate 2's catch zone
+// must clear x -0.0545 - and summing them over the bank's own line bounds the pitch:
+//   at 15.6 deg  pitch <= 39.1mm       at 25 deg  pitch <= 42.3mm
+//   at 20 deg    pitch <= 40.4mm       at 30 deg  pitch <= 44.9mm
+// Every one of those is at or under the 40mm floor where the plates start overlapping on screen,
+// or far enough under 50mm to make straddling common - and a 30-degree bank was measured straddling
+// 8 times in 174 rather than once. So three plates cannot clear both the rail and Saturn's rebound
+// cone in this corridor at any angle, and the layout above takes the shot geometry instead. The
+// PREVIOUS bank had the same exposure and more of it: its plate 2 sat 17.5mm inside the shadow
+// against this one's 10mm.
 export const MISSION_TARGET_BANK = [
-    { x: -0.135, z: 0.290 },
-    { x: -0.095, z: 0.200 },
-    { x: -0.055, z: 0.110 }
+    { x: -0.1382, z: 0.1066 },
+    { x: -0.0900, z: 0.1200 },
+    { x: -0.0418, z: 0.1334 }
 ]; // 3 targets in an angled left-corridor bank, matching CONFIG.missionTargetCount
 
 // Drop-target bank upgrade (user-requested) - a hit target sinks from its raised resting

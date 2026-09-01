@@ -154,7 +154,17 @@ async function armSequenceTrace(page) {
     const seq = window.__endOfBallDebug.sequence, bg = window.__backglassDebug;
     const rec = {
       beats: [], messages: [], t0: performance.now(),
-      lastBeat: null, lastMsg: null, sawActive: false, finishedAtMs: -1
+      // Seeded with whatever is ALREADY on the backglass, not null. This records what the
+      // end-of-ball SEQUENCE says; a message still showing from before the drain is not that. With
+      // lastMsg starting null, the observer's very first frame logged the standing message as if
+      // the sequence had said it, so 'BALL LOST is the first thing said' failed whenever the ball
+      // drained within a message's dwell of a scoring hit - MISSION_SELECT_MESSAGE_MS is 1400ms,
+      // so any mission target hit inside ~1.4s of a drain does it. That is a gap in this trace,
+      // not in the game: showMessage() clears the pending timer and replaces the text (see its own
+      // comment), so BALL LOST preempts the cue rather than queueing behind it, and the beat-order
+      // check below - which reads the sequence's own beats, not this log - passes either way.
+      // Found when a playfield change moved a target onto a path this scenario happens to take.
+      lastBeat: null, lastMsg: bg.message || null, sawActive: false, finishedAtMs: -1
     };
     rec.observer = window.__flipperDebug.scene.onBeforeRenderObservable.add(() => {
       const now = performance.now() - rec.t0;
