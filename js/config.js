@@ -1546,6 +1546,43 @@ export const VISION_GATE_RADIUS_M = 0.011; // the actual capture trigger
 // x 0.020, and a wide bright strip on the centre line would read as an invitation to a shot whose
 // capture band is 4-8 degrees. Decorative only, height 0.001 at y 0.0012.
 export const VISION_GATE_APPROACH_TINT = { x: 0, z: 0.019, width: 0.038, length: 0.047 };
+
+// --- GUIDE POST AUDIT: NO POSTS ADDED ------------------------------------------------------
+// Audited for the five things a post is good for. The answer was none, and the working is here so
+// the next pass does not repeat it.
+//
+// DEAD CORNERS - none to plug. qa/ball-trap-audit.js on this board finds 26 resting balls in
+// total, and 23 of them are at (+/-0.111, -0.343): a ball on the flipper's upper edge, which is
+// the cradle an inlane is supposed to deliver, not a corner. The other 3 are balls balanced on a
+// bumper's uphill pole, which a post cannot fix and would make worse - two round bodies closer
+// than 2 x (ball radius + post radius) park a ball in the V between them, the measurement that
+// pushed the Vision Gate's far post out to 1.75 collar radii.
+//
+// LANE MOUTHS - already defined, by rails rather than posts: the two orbit rails and their top
+// lips, SATURN_CANOPY and SATURN_JAW, COMET_RETURN_RAIL, the Vision Gate's own three guard posts,
+// and the two lane dividers with their four posts. Nothing is left unmarked.
+//
+// Two candidates were built, measured and removed:
+//
+// SATURN'S LEFT CHEEK, a post at (-0.036, 0.148). Saturn's mouth has a hard right jaw and, on the
+// left, only the mission bank's inner plate fixture - which is DECORATIVE, so the art shows a
+// closed cheek 12.7mm off Saturn's surface while the physics has an open passage. The post closed
+// it at 5.3mm (sealed) and the trap audit stayed at zero clusters, so the geometry was sound. It
+// still came out: clean flipper hits on Saturn fell 6 -> 3 and cluster spill rose 21 -> 27.
+// Halving the shot to tidy a decorative/collider mismatch is the wrong way round.
+//
+// THE COMET / RIGHT ORBIT SPLIT, a post at (0.112, 0.055). Shots from the left flipper at 10-16
+// degrees reach the comet and 18-30 degrees hit the right orbit rail, and nothing marks the fork.
+// Arithmetic put the post 15.5mm clear of the ball's edge on the 16-degree line, 42.1mm off the
+// orbit rail's inner arc and 53.4mm off the Saturn jaw. Real trajectories curve: with it in place
+// the post became the FIRST solid contact for the 16-degree comet shot and for four orbit-bound
+// shots at 18-20 degrees. It was intercepting both of the corridors it was meant to separate - and
+// the fork is already defined anyway, by the orbit rail that forms one side of it.
+//
+// If a post is wanted later, the pattern is a plain cylinder collider with a decorative cap on
+// top, the way the Vision Gate's guard posts are built, and the clearance rules to check against
+// are: >=40mm centre-to-centre from any other round body, and to a flat rail face either <=18mm or
+// >=42mm. Arithmetic is necessary but not sufficient - measure the shots that pass nearby.
 export const VISION_GATE_COLLAR_RADIUS_M = 0.02; // ring radius the 3 guard posts sit on
 // Awarded once per successful capture - deliberately the single biggest configurable bonus on
 // the board (bigger than Saturn's 3000, just under a mission completion's 5000), matching a
