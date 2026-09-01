@@ -5725,6 +5725,45 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         slingshotRubberMat.roughness = 0.8;
         slingshotRubberMat.emissiveColor = new BABYLON.Color3(0.08, 0.01, 0.08);
 
+        // Post rubber. The board's guard posts - the Vision Gate's three and the four on the lane
+        // dividers - are collision surfaces with restitution 0.5 and 0.4, which IS rubber
+        // behaviour; they were just drawn as bare metal, so the one part of the board a player
+        // reads as "this will kick the ball back" looked like the parts that do not.
+        //
+        // Its own instance rather than sharing slingshotRubberMat: that one is the slingshots'
+        // identity and gets tuned with them, and a future tweak there should not silently recolour
+        // every post on the table. Same family though - matte, unlit, a shade off black - so all
+        // the rubber on the board reads as one material.
+        const postRubberMat = new BABYLON.PBRMaterial('postRubberMat', scene);
+        postRubberMat.albedoColor = new BABYLON.Color3(0.19, 0.08, 0.17);
+        postRubberMat.metallic = 0.0;
+        postRubberMat.roughness = 0.82;
+        // Half the slingshot band's emissive. That one sits on a feature that flashes on every hit
+        // and needs headroom; a guard post does not glow, and under this scene's magenta key light
+        // the higher value rendered the four lane-divider posts - the objects nearest the camera -
+        // as saturated pink rather than matte rubber.
+        postRubberMat.emissiveColor = new BABYLON.Color3(0.03, 0.005, 0.03);
+
+        // One rubber-sleeved post. The sleeve is the COLLIDER MESH ITSELF, recoloured - not a ring
+        // added around it. A real post's rubber is what the ball touches, so drawing it outside the
+        // collider would put the visible rubber where the physics is not, which is the mismatch
+        // this pass exists to remove (see the slingshot band below for the same fix). The metal cap
+        // is decorative, has no collider, and is drawn INSET to 0.8 of the post's diameter. A real
+        // star post's cap overhangs its rubber, but overhanging here would again claim contact the
+        // collider does not have - and at full width in railCapMat, the board's brightest trim, the
+        // four lane-divider caps rendered as pale discs that pulled the eye to the quietest corner
+        // of the table (checked against the previous frame from the gameplay camera). Inset, they
+        // read as the cap on top of a sleeve, which is the point.
+        const dressPostAsRubber = (post, diameter, topY) => {
+            post.material = postRubberMat;
+            const cap = BABYLON.MeshBuilder.CreateCylinder(post.name + 'Cap', {
+                diameter: diameter * 0.8, height: 0.0025
+            }, scene);
+            cap.position.set(post.position.x, topY, post.position.z);
+            cap.material = railCapMat;
+            return cap;
+        };
+
         const slingshotPlasticTex = createSlingshotPlasticTexture(scene);
 
         SLINGSHOTS.forEach((def, i) => {
@@ -5840,8 +5879,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             ridge.position.set(0, 0.0325, 0.012); // rests on the collider's own 0.030 crown, never inside it
             ridge.material = ridgeMat;
 
-            // Rubber/contact edge: the band strung between the two posts, standing 3mm proud of
-            // the collider's striking face so the ball meets rubber first.
+            // Rubber/contact edge: the band strung between the two posts, now FLUSH with the
+            // collider's striking face rather than 3.25mm proud of it.
+            //
+            // The old comment here claimed the ball "meets rubber first". It did not: the collider
+            // box is depth SLINGSHOT_SIZE_M*0.5 centred on the rig, so its striking face is at
+            // local z -0.0125, and this band sat at -0.0140 with depth 0.0035 - outer face -0.01575,
+            // i.e. 3.25mm out in front of anything solid. The ball visibly sank a quarter of its
+            // radius into the rubber before the slingshot noticed. Moved to -0.01245 so the band's
+            // outer face lands 0.2mm proud of the collider face: enough to render in front of it
+            // without z-fighting, and a mismatch of 0.2mm against a 27mm ball rather than 3.25mm.
+            // The collider is untouched, so the kick, SLINGSHOT_RESTITUTION and the lower-playfield
+            // flow are exactly as they were.
             //
             // On the rig, NOT parented to the collider. Parenting it there was tried, because
             // snapSlingshot() stretches the collider on every kick and a rubber band riding that
@@ -5854,7 +5903,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 depth: 0.0035
             }, scene);
             rubber.parent = rig;
-            rubber.position.set(0, 0.019, -0.0140);
+            rubber.position.set(0, 0.019, -0.01245);
             rubber.material = slingshotRubberMat;
 
             // Referenced by snapSlingshot() (in main(), via the collider mesh's metadata below) so
@@ -5978,7 +6027,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     height: 0.03
                 }, scene);
                 post.position.set(dividerX, 0.015, postZ);
-                post.material = housingMat;
+                // Rubber-sleeved: these are the two posts that separate the inlane from the
+                // outlane, and the ones a ball returning down the side actually strikes. Collider
+                // restitution here is 0.4, in the same band as the slingshot rubber's 0.45, so the
+                // sleeve is describing what the surface already does rather than restyling it.
+                dressPostAsRubber(post, 0.016, 0.0305);
                 post.metadata = { kind: 'wall' };
                 new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
             });
@@ -6525,7 +6578,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 height: 0.026
             }, scene);
             post.position.set(postPos.x, 0.013, postPos.z);
-            post.material = housingMat;
+            // Rubber-sleeved. These three ARE the scoop's collar - the surfaces that decide whether
+            // a shot is captured or thrown back - and the previous commit's measurements lean on
+            // them scattering a miss back toward an inlane. Restitution 0.5, the liveliest of the
+            // board's rubber, which is what that scattering is. Drawn as rubber so the collar reads
+            // as the thing it is.
+            dressPostAsRubber(post, 0.009, 0.0265);
             post.metadata = { kind: 'wall' };
             new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.5, friction: 0.4 }, scene);
         });
