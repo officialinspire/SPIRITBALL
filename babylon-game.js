@@ -5104,6 +5104,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         const missionTargetMeshes = [];
         const missionTargetLamps = [];
+        // Insert chains: 2-4 small embedded lamps leading along a route toward its feature. Each
+        // carries a `follows` id, so main()'s registration hands it to the lamp system as a shadow
+        // of the feature's OWN lamp - no new state, no new update hook, no new call site.
+        // Declared HERE, not down with orbitLampMeshes: the mission bank is built well before the
+        // orbit block and pushes into this, so a later `const` is a temporal-dead-zone throw that
+        // takes the whole scene build down with it.
+        const shotChainLamps = [];
         MISSION_TARGET_BANK.forEach((pos, i) => {
             const mesh = BABYLON.MeshBuilder.CreateBox('missionTarget' + i, {
                 width: TARGET_RADIUS_M * 2,
@@ -5251,6 +5258,22 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             lamp.scaling.y = 0.5;
             lamp.position.set(bankX(pos, 0, -0.014), 0.0035, bankZ(pos, 0, -0.014));
             lamp.material = lampMat;
+            // Chakra dot on the bank's approach, 30mm down the plate's own face normal - one per
+            // target, in that target's chakra colour, shadowing that target's OWN lamp. So the
+            // chain is not decoration that happens to sit near the bank: it reads out which
+            // targets are still standing, pulsing with them while the bank invites a shot and
+            // going LOCKED with each plate as it drops.
+            const chainMat = new BABYLON.PBRMaterial('targetChainMat' + i, scene);
+            styleInsertLampMat(chainMat, COLOR_CHAKRA[i % COLOR_CHAKRA.length], insertLensTextures.ring);
+            const chainLens = addPlayfieldInsert(scene, 'targetChain' + i, chainMat, insertCollarMat,
+                0.011, bankX(pos, 0, -0.030), bankZ(pos, 0, -0.030));
+            shotChainLamps.push({
+                id: 'targetChain' + i,
+                mesh: chainLens,
+                color: COLOR_CHAKRA[i % COLOR_CHAKRA.length],
+                follows: 'missionTarget' + i
+            });
+
             missionTargetMeshes.push(mesh);
             missionTargetLamps.push(lamp);
         });
@@ -6344,6 +6367,25 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side + i, orbitFloorMat,
                     0.03, len * 1.04, (pa.x + pb.x) / 2, (pa.z + pb.z) / 2, Math.atan2(-dz, dx));
             }
+            // Sequential dots up the lane, on the same centre line the floor tint is painted on
+            // and derived from the same arc the rails are built from, so they cannot drift out of
+            // the lane if it is ever retuned. They shadow the ENTRANCE lamp rather than the
+            // completion one: this chain is the way IN, and the entrance is the state that says
+            // whether that way is live.
+            [0.26, 0.46, 0.66].forEach((t, d) => {
+                const at = orbitArcPoint(mirror, laneRadius, ORBIT_ARC_SWEEP_RAD * t);
+                const chainMat = new BABYLON.PBRMaterial('orbitChainMat' + orbitDef.side + d, scene);
+                styleInsertLampMat(chainMat, COLOR_ORBIT_LAMP, insertLensTextures.cycle);
+                const lens = addPlayfieldInsert(scene, 'orbitChain' + orbitDef.side + d,
+                    chainMat, insertCollarMat, 0.011, at.x, at.z);
+                shotChainLamps.push({
+                    id: 'orbitChain' + orbitDef.side + d,
+                    mesh: lens,
+                    color: COLOR_ORBIT_LAMP,
+                    follows: 'orbitEntrance' + (orbitDef.side === 'left' ? 'Left' : 'Right')
+                });
+            });
+
             const laneTop = orbitArcPoint(mirror, laneRadius, 0);
             addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side + 'Upper', orbitFloorMat,
                 0.03, ORBIT_RAIL_TOP_Z_M - laneTop.z, laneTop.x, (laneTop.z + ORBIT_RAIL_TOP_Z_M) / 2, Math.PI / 2);
@@ -7107,7 +7149,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // register every lamp mesh (sideLaneLampMeshes/orbitLampMeshes: {id, mesh} pairs, the rest:
         // plain mesh arrays/refs) against the centralized lamp system (see createLampSystem()).
         return {
-            missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
+            missionTargetMeshes, missionTargetLamps, shotChainLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
             sideLaneLampMeshes, orbitLampMeshes, debugTriggerMeshes,
             kickbackLampMesh, ballSaveLampMesh, saturnRings, saturnRim, cometTailMeshes, powerUpMesh, visionGateMesh: ring,
             visionGateHalo: halo, visionGateCollarMesh: collar, visionGateThroat: throat, visionGateBeacon: beacon
@@ -7164,6 +7206,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     const LAMP_REDUCED_MOTION_PERIOD_SCALE = 2.5;
 
     function createLampSystem() {
+        // leader id -> follower ids. Only written at registration, so the per-frame cost of the
+        // whole chain feature is one Map.get() inside setLampMode/flashLamp, which are event-time
+        // calls rather than per-frame ones. A follower in OFF/ON/LOCKED is a static material like
+        // any other lamp - updateLamps() touches it and changes nothing - so the chains add no
+        // continuous animation and nothing that scales with the fidelity tier.
+        const followers = new Map();
         const lamps = new Map();
         const scratch = new BABYLON.Color3(); // reused every frame - values only ever copied OUT of it, never held onto
 
@@ -7198,6 +7246,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 flashColor: null
             };
             lamps.set(id, lamp);
+            // opts.follows makes this lamp a SHADOW of another one: every setLampMode/flashLamp on
+            // the leader is replayed onto it. That is how the insert chains get their idle/active/
+            // hit behaviour without a single new piece of state or a single new call site - they
+            // are literally showing the feature's own lamp, one step further down the approach.
+            if (opts.follows) {
+                if (!followers.has(opts.follows)) followers.set(opts.follows, []);
+                followers.get(opts.follows).push(id);
+            }
             applyMode(lamp);
         }
 
@@ -7208,6 +7264,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const lamp = lamps.get(id);
             lamp.mode = mode;
             if (mode !== LAMP_MODE.BLINK && mode !== LAMP_MODE.PULSE) applyMode(lamp);
+            const chain = followers.get(id);
+            if (chain) chain.forEach((followerId) => setLampMode(followerId, mode));
         }
 
         // One-shot brief brightening on top of whatever persistent mode is already set (hit
@@ -7219,6 +7277,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const lamp = lamps.get(id);
             lamp.flashColor = color || null;
             lamp.flashUntilMs = performance.now() + durationMs;
+            const chain = followers.get(id);
+            if (chain) chain.forEach((followerId) => flashLamp(followerId, durationMs, color));
         }
 
         // Called once per frame from the render loop. Cheap: every lamp gets one flash-expiry
@@ -7389,6 +7449,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         });
         obstacles.skillShotLampMeshes.forEach((mesh, i) => {
             lampSystem.registerLamp('skillShot' + i, mesh, COLOR_SKILL_SHOT_LAMP, LAMP_MODE.OFF);
+        });
+        // Insert chains. Registered LAST so every leader already exists, and with `follows` so the
+        // lamp system replays the leader's mode and flashes onto them - see createLampSystem().
+        obstacles.shotChainLamps.forEach((c) => {
+            lampSystem.registerLamp(c.id, c.mesh, c.color, LAMP_MODE.OFF, { follows: c.follows });
         });
         lampSystem.registerLamp('ballSave', obstacles.ballSaveLampMesh, COLOR_BALL_SAVE_LAMP, LAMP_MODE.OFF);
         lampSystem.registerLamp('kickback', obstacles.kickbackLampMesh, COLOR_KICKBACK_LAMP, LAMP_MODE.OFF);
