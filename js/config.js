@@ -1609,6 +1609,52 @@ export const VISION_GATE_COLLAR_RADIUS_M = 0.02; // ring radius the 3 guard post
 // the board (bigger than Saturn's 3000, just under a mission completion's 5000), matching a
 // signature feature's weight. Kept as its own named constant, not folded into MISSION_
 // COMPLETE_BONUS or SCORE_SATURN, specifically so it stays independently tunable.
+// --- RISK / REWARD AUDIT ----------------------------------------------------------------------
+// One fan, every feature measured the same way: 376 shots (2 flippers x 4 speeds x 47 angles at 3
+// degrees). `reach` is the share of the fan that gets there; `band` is how many distinct launch
+// angles do, which is the real accuracy cost; `miss` is the share of shots that came within 45mm
+// of it travelling up-table, did not reach it, and drained rather than returning to a lane.
+// The board's own baseline drain rate for an arbitrary shot is 64-66%, so `miss` is only bad above
+// that.
+//
+//   feature                reach  band   miss    class
+//   L ORBIT (completed)     2.1%     4    55%    RISKY
+//   R ORBIT (completed)     2.1%     4    46%    RISKY
+//   re-entry lane           2.4%     6    25%    RISKY
+//   VISION GATE             5.1%     8    55%    RISKY
+//   SATURN                  5.1%    14    52%    RISKY
+//   BOSS BUMPER             5.1%    13    40%    RISKY
+//   COMET                   8.5%    17    75%    MODERATE
+//   skill lane             10.1%    16    73%    MODERATE
+//   L orbit mouth          10.9%    23    84%    MODERATE
+//   TARGET BANK            11.7%    22    65%    MODERATE
+//   R orbit mouth          12.2%    22    67%    MODERATE
+//   pop bumper             13.0%    22    67%    MODERATE
+//   slingshot              43.1%    74    81%    SAFE
+//   inlane                 63.0%    77    86%    SAFE
+//
+// REWARD TRACKS ACCURACY, which was the thing to check. The three biggest awards need the three
+// narrowest bands: VISION GATE (4000) at 8 angles, SATURN (3000) at 14 and the BOSS BUMPER (1200)
+// at 13, against 22 for a pop bumper, 74 for a slingshot and 77 for the inlanes. Nothing
+// high-value is reachable by accident more easily than the basic furniture.
+//
+// FAILED SHOTS MOSTLY RETURN TO PLAY, and the premium shots are the best-behaved of the lot:
+// missing the boss drains 40% of the time, an orbit 46-55%, Saturn 52% and the Vision Gate 55% -
+// all BELOW the board's 64-66% baseline. Risk on this board is currently in the accuracy required,
+// not in a punitive miss, which is the right way round.
+//
+// ONE FINDING FAILS THE BRIEF: the LEFT ORBIT MOUTH at 84%, twenty points above baseline and
+// seventeen above its own mirror (R orbit mouth, 67%). A missed left-orbit shot drains far more
+// often than an average shot does. The asymmetry is the clue and it is already documented at
+// leftSlant in babylon-game.js: that wall runs unbroken from the left side wall down to x -0.095
+// and carries anything descending the left margin inboard, while the right side has the launch
+// lane wall and a working outlane instead. Three ways of opening it were built and measured in the
+// lower-flow pass and all three cost 3 of 5 orbit completions, so the fix is NOT to cut that wall
+// again - it is local geometry at the mouth itself, and it wants its own measured pass rather than
+// being bundled into an audit.
+//
+// No geometry changed for this audit.
+
 export const SCORE_VISION_GATE = 4000;
 // Total capture->eject duration. Short enough to stay "a beat," not a cutscene - about 3x a
 // mission-complete's own camera beat (500ms), the biggest existing moment on the board, since
