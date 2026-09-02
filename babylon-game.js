@@ -4680,6 +4680,32 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // giving it a visible "landing pad" grounding presence instead of just floating over bare
     // playfield the way a primitive-only sphere does. Same paper-thin/no-physics/no-z-fight
     // treatment as addLaneFloorTint(), just circular.
+    // A feature COLLAR: the plinth a sphere is mounted on. Saturn and the comet were the last two
+    // objects on the board that met the playfield at nothing - a ball of light sitting on a flat
+    // painted glow, which is exactly the "objects placed on a flat image" read this pass is against.
+    // Two stacked pieces, the same stepped-bevel language every rail on the board already uses: a
+    // dark housing plinth with a thin polished ring on top.
+    //
+    // `maxRadius` is not a style choice, it is the constraint. A ball rolling into a sphere of
+    // radius R stops with its NEAR EDGE at sqrt((R+13.5)^2 - (R-13.5)^2) - 13.5 mm from the
+    // centre - 35.8mm for Saturn's 45mm sphere, 21.0mm for the comet's 22mm one - because the two
+    // spheres touch in 3D, well above the playfield. Anything drawn inside that radius is
+    // geometrically unreachable, so these collars cannot be in a ball path however the board is
+    // played. Neither piece gets a collider and neither feature's own collider is touched.
+    function addFeatureCollar(scene, name, plinthMat, ringMat, maxRadius, x, z) {
+        const plinth = BABYLON.MeshBuilder.CreateCylinder(name, {
+            diameter: maxRadius * 2, height: 0.005, tessellation: 24
+        }, scene);
+        plinth.position.set(x, 0.0025, z);
+        plinth.material = plinthMat;
+        const ring = BABYLON.MeshBuilder.CreateCylinder(name + 'Ring', {
+            diameter: maxRadius * 1.72, height: 0.0018, tessellation: 24
+        }, scene);
+        ring.position.set(x, 0.0059, z);
+        ring.material = ringMat;
+        return plinth;
+    }
+
     function addFeatureFloorGlow(scene, name, mat, diameter, x, z) {
         const glow = BABYLON.MeshBuilder.CreateCylinder(name, { diameter, height: 0.002, tessellation: 24 }, scene);
         glow.position.set(x, 0.002, z);
@@ -5536,6 +5562,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // doesn't visually compete with them.
         const saturnFloorMat = makeLaneFloorMat('saturnFloorMat', COLOR_SATURN_RING, 0.22);
         addFeatureFloorGlow(scene, 'saturnFloorGlow', saturnFloorMat, SATURN_RADIUS_M * 2.4, SATURN_POS.x, SATURN_POS.z);
+        // 30mm against the 35.8mm a ball's near edge can reach - 5.8mm of margin.
+        addFeatureCollar(scene, 'saturnCollar', housingMat, railCapMat, 0.030, SATURN_POS.x, SATURN_POS.z);
 
         // --- Saturn's framing hardware -------------------------------------------------------
         // The canopy over the crown and the mouth's right jaw. See SATURN_CANOPY for the two
@@ -5715,6 +5743,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // than Saturn" design language (see the tail's own comment).
         const cometFloorMat = makeLaneFloorMat('cometFloorMat', COLOR_COMET, 0.18);
         addFeatureFloorGlow(scene, 'cometFloorGlow', cometFloorMat, COMET_RADIUS_M * 2.6, COMET_POS.x, COMET_POS.z);
+        // 16mm against the 21.0mm a ball's near edge can reach - 5.0mm of margin.
+        addFeatureCollar(scene, 'cometCollar', housingMat, railCapMat, 0.016, COMET_POS.x, COMET_POS.z);
 
         // ===================================
         // Score-multiplier power-up orb (board redesign) - hidden at load, toggled visible/
