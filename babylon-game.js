@@ -6057,6 +6057,21 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }, scene);
             mesh.position.set(pos.x, 0.01, pos.z);
             mesh.material = laneMat;
+            // Per-lane insert under the canopy, shadowing that lane's OWN lamp via the follower
+            // mechanism - so the three read out the bank's real lit/unlit state and nothing new is
+            // wired. Set 22mm down-table of the lane so it sits at the mouth the ball enters by,
+            // which is what makes three separate rollovers read as one banked feature.
+            const reChainMat = new BABYLON.PBRMaterial('reentryChainMat' + i, scene);
+            styleInsertLampMat(reChainMat, COLOR_MISSION_ACTIVE, insertLensTextures.ring);
+            const reChainLens = addPlayfieldInsert(scene, 'reentryChain' + i, reChainMat,
+                insertCollarMat, 0.011, pos.x, pos.z - 0.022);
+            shotChainLamps.push({
+                id: 'reentryChain' + i,
+                mesh: reChainLens,
+                color: COLOR_MISSION_ACTIVE,
+                follows: 'reentryLane' + i
+            });
+
             reentryLaneMeshes.push(mesh);
             mesh.metadata = { kind: 'reentryLane', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.5 }, scene);
@@ -6082,6 +6097,66 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 addRailBevel(scene, 'reentryLane' + i + 'RailCap' + side, railCapMat, REENTRY_LANE_RADIUS_M * 2.4, 0.004, railX, 0.023, pos.z, Math.PI / 2);
             });
         });
+
+        // --- Re-entry canopy -------------------------------------------------------------------
+        // The three re-entry rollovers were three separate objects in a row. This is the one
+        // structure that makes them a single banked feature: a segmented arch carried across all
+        // three, with a fin hanging between each pair.
+        //
+        // It follows the lanes' OWN shape rather than a straight line - REENTRY_LANES already dips
+        // in the middle (z 0.398 / 0.384 / 0.398), so the canopy is genuinely curved and derived
+        // from the same three positions the triggers are, which is also why it cannot drift off
+        // them. Both ends run out to x +/-0.150, into the orbit top arcs, so the assembly is
+        // carried by structure already there instead of floating.
+        //
+        // BALL PASSAGES ARE FULLY OPEN, by construction rather than by care. The ball's top is at
+        // y 0.027 and qa/ball-movement.js guards airborne frames at 0%, so the plane the ball
+        // occupies is fixed: the canopy sits at y 0.048 and the dividers hang down only to y 0.037,
+        // 10mm clear of it. Nothing in this assembly reaches the playfield surface, none of it has
+        // a collider, and the lane triggers, their spacing and their scoring are untouched.
+        {
+            const CANOPY_Y = 0.048, CANOPY_FIN_BOTTOM_Y = 0.037;
+            const pts = [{ x: -0.150, z: REENTRY_LANES[0].z }];
+            REENTRY_LANES.forEach((p, i) => {
+                if (i > 0) {
+                    const prev = REENTRY_LANES[i - 1];
+                    pts.push({ x: (prev.x + p.x) / 2, z: (prev.z + p.z) / 2 }); // midpoint keeps the curve smooth
+                }
+                pts.push({ x: p.x, z: p.z });
+            });
+            pts.push({ x: 0.150, z: REENTRY_LANES[REENTRY_LANES.length - 1].z });
+            for (let i = 0; i < pts.length - 1; i++) {
+                const a = pts[i], b = pts[i + 1];
+                const dx = b.x - a.x, dz = b.z - a.z;
+                const len = Math.hypot(dx, dz);
+                const rotY = Math.atan2(-dz, dx);
+                const cx = (a.x + b.x) / 2, cz = (a.z + b.z) / 2;
+                const seg = BABYLON.MeshBuilder.CreateBox('reentryCanopy' + i, {
+                    width: len * 1.04, height: 0.006, depth: 0.011
+                }, scene);
+                seg.position.set(cx, CANOPY_Y, cz);
+                seg.rotation.y = rotY;
+                seg.material = housingMat;
+                const cap = BABYLON.MeshBuilder.CreateBox('reentryCanopy' + i + 'Cap', {
+                    width: len * 0.9, height: 0.0016, depth: 0.007
+                }, scene);
+                cap.position.set(cx, CANOPY_Y + 0.0038, cz);
+                cap.rotation.y = rotY;
+                cap.material = railCapMat;
+            }
+            // Dividers, hung from the canopy between adjacent lanes. They stop 10mm above the ball
+            // rather than reaching the playfield, so they divide the lanes to the eye without
+            // narrowing a single passage.
+            for (let i = 0; i < REENTRY_LANES.length - 1; i++) {
+                const a = REENTRY_LANES[i], b = REENTRY_LANES[i + 1];
+                const h = CANOPY_Y - CANOPY_FIN_BOTTOM_Y;
+                const fin = BABYLON.MeshBuilder.CreateBox('reentryDivider' + i, {
+                    width: 0.004, height: h, depth: 0.010
+                }, scene);
+                fin.position.set((a.x + b.x) / 2, CANOPY_FIN_BOTTOM_Y + h / 2, (a.z + b.z) / 2);
+                fin.material = railCapMat;
+            }
+        }
 
         // Lower-table inlanes/outlanes - see SIDE_LANES' block comment (near its declaration) for
         // the full layout reasoning and the real-scene-measured geometry it's based on.
