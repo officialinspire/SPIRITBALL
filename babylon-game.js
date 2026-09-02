@@ -69,7 +69,7 @@ import {
     STUCK_TIME_THRESHOLD_MS, STUCK_KICK_CENTERWARD_MS, STUCK_KICK_DOWNHILL_MS, STUCK_KICK_UP_MS,
     STUCK_KICK_ESCALATION_STEP, STUCK_KICK_ESCALATION_MAX,
     FLIPPER_LENGTH_M, FLIPPER_THICKNESS_M, FLIPPER_HEIGHT_M, FLIPPER_MASS_KG,
-    FLIPPER_GAP_HALF_M, FLIPPER_PIVOT_X_M, FLIPPER_Z_M, FLIPPER_PLAYFIELD_CLEARANCE_M, FLIPPER_SWEEP_RAD,
+    FLIPPER_PIVOT_X_M, FLIPPER_Z_M, FLIPPER_PLAYFIELD_CLEARANCE_M, FLIPPER_SWEEP_RAD,
     FLIPPER_LEFT_REST_RAD, FLIPPER_RIGHT_REST_RAD, FLIPPER_ACTIVATE_SPEED_RAD_S, FLIPPER_RETURN_SPEED_RAD_S,
     FLIPPER_RESTITUTION, FLIPPER_FRICTION, FLIPPER_CONTACT_VELOCITY_TRANSFER,
     BUMPER_RADIUS_M, BUMPER_CLUSTER, BUMPER_KICK_SPEED_MS, SPECIAL_EVENT_KICK_SPEED_MS, TARGET_RADIUS_M,
@@ -1825,6 +1825,26 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         backLight.diffuse = new BABYLON.Color3(0.6, 0.2, 1);
         backLight.intensity = 0.35;
         backLight.range = TABLE_LENGTH_M * 0.7;
+        // CLUTTER-PASS FINDING, recorded so the experiment is not run again. The brightest thing
+        // over the centre of the table - a broad violet-white pool washing the playfield art
+        // between the flippers and the Vision Gate - is THIS LAMP, not any of the decoration
+        // sitting in it. Found by elimination in the live scene: each candidate was hidden one at
+        // a time and the centre destination band (Vision Gate / Saturn approach / centre lane)
+        // re-measured off the real render. Zeroing this one light took that band from 3.85% of its
+        // pixels clipped to white and a mean luminance of 93 down to 1.40% and 66. Every piece of
+        // geometry in the same area - the gate's beacon, halo, rim ring, collar, throat and
+        // approach tint - measured very slightly BETTER when hidden, i.e. they were occluding the
+        // lit floor rather than lighting it.
+        //
+        // It is left alone, deliberately, on both scope and evidence. Scope: a clutter pass
+        // removes DECORATION that misreads, and this is the table's key light - the thing that
+        // lights the bumper cluster, the re-entry lanes and Saturn. Evidence: the pool is the
+        // DIFFUSE term, not a specular mirror-smear. Tinting `specular` down (Babylon defaults a
+        // light's specular to full white however its diffuse is set, so that was the obvious
+        // suspect) was tried and measured at no change at all - 3.97% -> 3.93%, inside run-to-run
+        // noise - so it was reverted rather than shipped. Anything that would actually move this
+        // number is a lighting rebalance across the whole board, which is its own pass and would
+        // have to be re-argued against qa/visual-hierarchy.js.
 
         return { ambient, flipperLight, backLight };
     }
@@ -3688,6 +3708,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // base, so the only part of the shaft a player can actually see is the part a base-weighted
         // gradient throws away. Brightness has to live where the shaft CLEARS the bumper, and the
         // fade has to happen above that, at the end that was previously a hard cut across the sky.
+        // Still 0.55 after the clutter pass shortened the shaft from 115mm to 38mm. The reason
+        // above (hold the brightness through the part that clears whatever occludes the base,
+        // fade above it) survives the change of scale - the curve is expressed as a FRACTION of
+        // the height, so a short shaft gets the same shape, just over a shorter run.
         const holdTo = 0.55;                  // fraction of the height (from the base) kept at full
         for (let y = 0; y < h; y++) {
             const t = y / (h - 1);            // 0 at top, 1 at base
@@ -6668,7 +6692,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // it is set into, which a single ring can only ever say is "a circle drawn on the floor".
         // Deliberately the DIMMEST lit element here (0.13 against the rim's 0.4) - it is structure,
         // not signal, and the emissive hierarchy this pass establishes runs
-        // throat 0.07 < collar 0.13 < rim 0.40 < halo 0.30(spectral) < beacon 0.55.
+        // throat 0.07 < collar 0.13 < beacon 0.26 < halo 0.30(spectral) < rim 0.40. The beacon
+        // used to top that list at 0.55; the clutter pass moved it down to 0.26 (see its own
+        // comment below), which puts the RIM - the ring that actually draws the mouth's edge -
+        // back at the top where a scoop shot wants it.
         // Tessellation 16, not the 28 this started at. A torus costs tessellation-squared
         // triangles and these render about 20px across: measured, 28 cost 1682 triangles to draw
         // a shape whose polygonal edges are sub-pixel either way. 16 is ~550 for the same picture.
@@ -6721,37 +6748,50 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             halo.material = haloMat;
         }
 
-        // Vertical light beacon - a thin, tall emissive-only spire standing up from the gate,
-        // reading clearly against the open dark sky above the table instead of competing with
-        // the crowded playfield at the gate's own height. Same material/color-cycle target as the
-        // ring (see startVisionGateCapture()) - between the two, the gate is identifiable from
-        // across the whole board, not just up close.
-        // Reworked from a flat-topped solid cylinder into a tapered shaft that fades out. The old
-        // one measured (board-graphics audit) as a 7x130px hard-edged bar punching through Saturn
-        // and 50px above the top rail into empty starfield - a beam of light that ends in a
-        // straight cut across the sky reads as a missing polygon, not as light.
+        // Marker glow - a short, thin emissive-only flare standing out of the gate's mouth, so
+        // the gate reads as lit from across the board without anything of it standing in front
+        // of the board. Same material/color-cycle target as the ring (see
+        // startVisionGateCapture()).
         //
-        // Three changes, all presentation: the height comes down 0.16 -> 0.115 so the shaft stays
-        // over the board instead of running off the top of the frame; diameterTop narrows to a
-        // near-point so it tapers; and createGateBeaconTexture()'s vertical gradient carries the
-        // brightness AND the alpha, so it actually dissolves at its far end. backFaceCulling off
-        // because a translucent shaft seen from outside should show its far wall through its near
-        // one - that is what gives a volumetric beam its density.
+        // CLUTTER PASS - this used to be a 115mm SPIRE, and from the gameplay camera it was the
+        // worst piece of decoration on the table: a bloomed violet-white column standing from the
+        // gate's mouth up through Saturn, i.e. straight across the two biggest destinations on
+        // the board, in the exact place a player has to watch the ball.
+        //
+        // Measured on Saturn's face, on the beacon's own screen axis (a 12x65px strip). Luminance
+        // could not see it - the shaft and the gold planet behind it sit at the same brightness -
+        // so it is measured on colour instead, as how far each pixel's red and blue run ahead of
+        // its green: mean violet cast 55.1 -> 4.8, and the share of that strip reading violet
+        // rather than gold 59.1% -> 15.9%. Saturn's ring texture, its banding and its terminator
+        // are all legible again where the beam used to cross them.
+        //
+        // Note for anyone measuring this area later: the broad bright pool that remains over the
+        // CENTRE of the table is not this mesh and never was - it is backLight's diffuse pool, and
+        // buildLighting() carries the elimination data that proves it.
+        //
+        // It is also the SEVENTH marker on this one feature (throat, rim ring, collar, halo,
+        // approach floor tint, the triangle glyph and the insert chain all point at the gate
+        // already), so shortening it costs the player nothing they were not already told. Height
+        // 0.115 -> 0.038 and emissive 0.62 -> 0.26 keeps a lit plume at the mouth - the thing that
+        // says "this hole is powered" - and stops it being a column across the board. Geometry
+        // below is otherwise unchanged: still tapered, still fading out through
+        // createGateBeaconTexture()'s gradient, still backFaceCulling off so a translucent shaft
+        // shows its far wall through its near one.
         const beacon = BABYLON.MeshBuilder.CreateCylinder('visionGateBeacon', {
             diameterTop: 0.0016,
-            diameterBottom: 0.0092,
-            height: 0.115,
+            diameterBottom: 0.0075,
+            height: 0.038,
             tessellation: 14
         }, scene);
-        beacon.position.set(VISION_GATE_POS.x, 0.0575, VISION_GATE_POS.z);
+        beacon.position.set(VISION_GATE_POS.x, 0.019, VISION_GATE_POS.z);
         const beaconMat = new BABYLON.PBRMaterial('visionGateBeaconMat', scene);
         beaconMat.albedoColor = new BABYLON.Color3(0, 0, 0); // unlit: this is light, not a surface
         beaconMat.metallic = 0;
         beaconMat.roughness = 1;
-        beaconMat.emissiveColor = COLOR_VISION_GATE.scale(0.62);
+        beaconMat.emissiveColor = COLOR_VISION_GATE.scale(0.26); // 0.62 -> 0.26, clutter pass - see the block above
         beaconMat.emissiveTexture = createGateBeaconTexture(scene);
         beaconMat.opacityTexture = beaconMat.emissiveTexture; // same curve drives the fade-out
-        beaconMat.alpha = 0.72;
+        beaconMat.alpha = 0.45; // 0.72 -> 0.45, clutter pass - a marker glow, not a solid shaft
         beaconMat.backFaceCulling = false;
         beacon.material = beaconMat;
         ring.material = visionGateMat;
@@ -6996,21 +7036,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             dressPostAsRubber(post, DECOR_POST_SLEEVE_M, 0.0245);
         });
 
-        // 5. Visible lane guides - small angled decorative fins at each flipper's outer edge,
-        // aiming the eye up the lane the same way a real machine's flipper-base guide plastic
-        // does. The actual guide walls/rails elsewhere (inlane guides, orbit rails, launch lane
-        // wall) already handle real deflection; this is a purely visual cue at the one spot on
-        // the table without any guide accent yet.
-        [-1, 1].forEach((mirror) => {
-            const fin = BABYLON.MeshBuilder.CreateBox('flipperGuideFin' + mirror, {
-                width: 0.002,
-                height: 0.02,
-                depth: 0.06
-            }, scene);
-            fin.position.set(mirror * (FLIPPER_GAP_HALF_M + 0.09), 0.011, FLIPPER_Z_M - 0.01);
-            fin.rotation.y = mirror * 0.35;
-            fin.material = housingMat;
-        });
+        // 5. REMOVED in the clutter pass - a pair of decorative "lane guide" fins that used to
+        // stand at each flipper's outer edge. Each was a 2 x 20 x 60mm blade at y 0.011, i.e. a
+        // 60mm-long wall standing right through the ball's contact band (the ball spans y 0 to
+        // 0.027) with NO collider behind it, parked in the busiest traffic on the table. That is
+        // this pass's "appears to be collidable when it is not" case in its purest form: a ball
+        // fed down the return lane passed straight through something the player had every reason
+        // to read as a guide.
+        //
+        // It was also, by its own original comment, "a purely visual cue at the one spot on the
+        // table without any guide accent yet" - and that stopped being true. The lower-flow
+        // redesign since then gave this exact area real inlane guides, real lane dividers with
+        // lit caps, rubber-sleeved decor posts and lit lane floor tints, all of which are
+        // physical and all of which point the same way. The fins were duplicating a guide that
+        // now exists for real, in the one place where a fake one costs the most.
 
         // 6. Playfield inserts/lamps - flush glowing insert plates at each flipper's base, the
         // one classic pinball light location this table didn't have yet (every other lamp so far

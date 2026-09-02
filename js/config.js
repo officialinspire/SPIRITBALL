@@ -339,7 +339,7 @@ export const FLIPPER_THICKNESS_M = 0.014;
 export const FLIPPER_HEIGHT_M = 0.012;
 export const FLIPPER_MASS_KG = 0.03;
 export const FLIPPER_PIVOT_X_M = 0.117; // each hinge sits this far from table center X=0 - see MOUNTING LAYOUT above
-export const FLIPPER_GAP_HALF_M = 0.045; // legacy layout datum - no longer the pivot X (see FLIPPER_PIVOT_X_M); still positions the decorative outer guide fins in babylon-game.js
+export const FLIPPER_GAP_HALF_M = 0.045; // legacy layout datum only - not the pivot X (see FLIPPER_PIVOT_X_M), and no longer positions anything since the clutter pass removed the decorative outer guide fins. Kept because the left/right sign convention documented further down this file still cites it.
 export const FLIPPER_Z_M = -0.36; // near the flipper/near-camera end of the table
 export const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s comment - avoids flipper/playfield contact fighting the LOCKED constraint
 
