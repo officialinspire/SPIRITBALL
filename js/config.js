@@ -1285,6 +1285,27 @@ export const ORBIT_TOP_LIPS = [
     { side: 'left', toZ: 0.324, inboard: 0 },
     { side: 'right', toZ: 0.360, inboard: 0.021 }
 ];
+
+// Lane bridges - a decorative arch across each orbit lane, the piece a real machine uses to carry
+// a wireform or a plastic over a lane without standing in it.
+//
+// The previous depth pass declined arches on the grounds that after the corridor work almost
+// nothing on this board is a non-collision AREA. That was true and beside the point: an arch does
+// not clear the ball sideways, it clears it VERTICALLY. The ball's top sits at y 0.027 and
+// qa/ball-movement.js guards airborne frames at 0% - a ball that leaves the playfield plane is a
+// restitution bug this board tests for - so the plane the ball occupies is fixed and known, and
+// anything above it is over a path rather than in one.
+//
+//   ball top            y 0.027
+//   arch underside      y 0.037   (10mm of clearance)
+//   tallest post nearby y 0.030   (the lane dividers), so the arch reads as the highest hardware
+//
+// Neither leg stands in the lane. The span runs from the side wall's inner face to the orbit
+// rail's centre line and OVERLAPS both, so it is carried by two structures that are already there
+// and the lane's own 48mm clear width is untouched. No collider, on a piece the ball cannot reach
+// even if it had one.
+export const ORBIT_LANE_BRIDGE_Z_M = 0.150;   // mid-lane, clear of the entry arc below and the top arc above
+export const ORBIT_LANE_BRIDGE_Y_M = 0.040;   // span centre; 6mm tall, so the underside is at 0.037
 export const ORBIT_ARC_SEGMENTS = 6; // straight boxes per arc; the chord-to-arc error at 38/6 degrees is 0.3mm
 export const ORBIT_RAIL_TOP_Z_M = 0.30; // the vertical section's top - where the top arc takes over
 

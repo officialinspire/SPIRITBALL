@@ -85,7 +85,7 @@ import {
     ORBIT_ARC_RADIUS_M, ORBIT_LANE_WIDTH_M, ORBIT_ARC_SWEEP_RAD, ORBIT_INNER_SWEEP_RAD,
     ORBIT_ENTRANCE_SWEEP_RAD, ORBIT_ARC_SEGMENTS, orbitArcPoint, ORBIT_WALL_FACE_X_M,
     ORBIT_TOP_ARC_RADIUS_M, ORBIT_TOP_ARC_SWEEP_RAD, ORBIT_TOP_ARC_SEGMENTS, orbitTopArcPoint,
-    ORBIT_TOP_LIPS,
+    ORBIT_TOP_LIPS, ORBIT_LANE_BRIDGE_Z_M, ORBIT_LANE_BRIDGE_Y_M,
     SATURN_CANOPY, SATURN_JAW, SATURN_APPROACH_TINT,
     COMET_RETURN_RAIL, COMET_APPROACH_TINT, VISION_GATE_APPROACH_TINT,
     ORBIT_OUTER_GAP_FROM_RAD, ORBIT_OUTER_GAP_TO_RAD, ORBIT_OUTER_FLANK_SIDES,
@@ -6374,6 +6374,26 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const innerTop = orbitArcPoint(mirror, innerRailRadius, 0);
             railBox('orbitRail' + orbitDef.side + 'Upper',
                 { x: innerTop.x, z: innerTop.z }, { x: innerTop.x, z: ORBIT_RAIL_TOP_Z_M }, false);
+
+            // Lane bridge - see ORBIT_LANE_BRIDGE_Z_M for the vertical clearance this rests on.
+            // Spans wall face to rail centre line, overlapping both, so it is carried by structures
+            // already there and no leg stands in the lane. Decorative: no aggregate, and at y 0.040
+            // it is above the plane the ball is confined to anyway.
+            {
+                const railMidX = mirror * (ORBIT_WALL_FACE_X_M - ORBIT_LANE_WIDTH_M - ORBIT_RAIL_HALF_DEPTH_M);
+                const wallX = mirror * ORBIT_WALL_FACE_X_M;
+                const span = BABYLON.MeshBuilder.CreateBox('orbitLaneBridge' + orbitDef.side, {
+                    width: Math.abs(wallX - railMidX), height: 0.006, depth: 0.009
+                }, scene);
+                span.position.set((wallX + railMidX) / 2, ORBIT_LANE_BRIDGE_Y_M, ORBIT_LANE_BRIDGE_Z_M);
+                span.material = housingMat;
+                // Polished top face, the same stepped-bevel language every rail on the board uses.
+                const cap = BABYLON.MeshBuilder.CreateBox('orbitLaneBridge' + orbitDef.side + 'Cap', {
+                    width: Math.abs(wallX - railMidX) * 0.86, height: 0.0016, depth: 0.006
+                }, scene);
+                cap.position.set((wallX + railMidX) / 2, ORBIT_LANE_BRIDGE_Y_M + 0.0038, ORBIT_LANE_BRIDGE_Z_M);
+                cap.material = railCapMat;
+            }
 
             // Inner lip on the lower half of the top turn - see ORBIT_TOP_LIPS for the exit probe
             // that put it here and every clearance it was checked against. Starts 2mm inside the
