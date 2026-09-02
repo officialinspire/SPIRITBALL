@@ -1005,6 +1005,31 @@ export const REENTRY_LANE_RADIUS_M = 0.016;
 // time it reached x=+0.044. Dropping the middle rollover 14mm into a shallow V follows that sag
 // from either direction, which is the only symmetric shape that can (the sag is monotonic in the
 // direction of travel, so it mirrors when the loop runs the other way).
+// UNDERUSED-ROUTE PASS: unchanged, and that is a measured decision rather than an omission.
+//
+// The interaction-density run (24 autoplayed balls) made this the one clearly underused major
+// route: 0.54 contacts per ball, against 4.42 for the target bank, 4.42 for the comet and 4.04 for
+// Saturn. Two minimal levers were built and measured against a deterministic 44-entry top-band
+// probe, and neither moved it:
+//
+//   ENTRANCE WIDTH   REENTRY_LANE_RADIUS_M 0.016 -> 0.022. This is a real widening, not just a
+//                    bigger trigger - the constant also drives each lane's guide RAILS, whose
+//                    centres sat 35.2mm apart against a 27mm ball, so the mouth was barely
+//                    passable. Result: lanes touched 25/44 -> 26/44, and per-ball re-entry
+//                    contacts 0.54 -> 0.50. Within noise.
+//   LANE HEIGHT      all three lowered 10mm, to catch balls that peak short of the band.
+//                    Result: 25/44. No change at all.
+//
+// The probe says why neither works: of upper-board entries that REACH the band, 57% already touch
+// a lane, so placement and width were never the problem. What is rare is reaching z 0.395 in the
+// first place - 39% of upper entries never climb that far - and that is a whole-board circulation
+// property, not an entrance, guide angle, obstacle position or exit angle. No minimal local change
+// fixes it, and the levers that would (moving the bank far enough down-table to clear the bumper
+// row, or enlarging the lanes past 53mm to cover the 83mm gaps) are exactly the buff this pass was
+// told not to apply.
+//
+// The orbits are lower still - 2.1% reach on a 4-angle band - and were deliberately left alone:
+// that is the board's premium shot and hard shots were to stay hard.
 export const REENTRY_LANES = [
     { x: -0.115, z: 0.398 },
     { x: 0, z: 0.384 },
