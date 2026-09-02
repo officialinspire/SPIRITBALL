@@ -4478,7 +4478,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         //
         // emissiveTexture.level is the scalar Babylon already multiplies the emissive sample by,
         // so this turns an existing dial down rather than adding anything.
-        if (!opts.transparent) texture.level = LABEL_SIGNAGE_EMISSIVE_LEVEL;
+        // opts.signage is the opt-in this comment asked for. The six shot glyphs below are
+        // transparent (no chip) but ARE decoration naming a shot, so they take the same dimming the
+        // worded callouts do - without it they would sit in the undimmed gameplay-marker tier and
+        // outrank the ball, which is the exact problem the measurement above was written about.
+        if (!opts.transparent || opts.signage) texture.level = LABEL_SIGNAGE_EMISSIVE_LEVEL;
 
         // Verified via Playwright screenshot (not assumed): a flat, playfield-level decal reads
         // as an edge-on sliver from this game's actual low, close, steeply-angled fixed camera
@@ -4498,6 +4502,42 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         plane.position.set(x, 0.03, z);
         plane.rotation.x = 0.4;
         return plane;
+    }
+
+    // The six shots' glyphs. A shot callout on this board used to be a WORD on a chip - eight of
+    // them across the playfield, which is signage doing the job geometry should. These replace the
+    // six that name a shot with a single symbol each, in that shot's own identity colour, at just
+    // over half the worded plate's size and with no background chip, so the playfield art behind
+    // them stays visible.
+    //
+    // Glyphs, not arrows painted on the lane floor, for a reason already measured and recorded in
+    // createLabelPlane(): from this game's low, steeply-angled fixed camera a flat playfield decal
+    // reads as an edge-on sliver. Direction has to be carried by an upright form, so each symbol is
+    // chosen to say the shot rather than point at it - a ring for the ringed planet, a star for the
+    // comet, a triangle for the third eye - and the two orbits get the only literally directional
+    // pair, pointing the way the ball goes round.
+    //
+    // Every glyph is from a Unicode block this build already renders elsewhere on the board
+    // (the bumper inserts use U+25C9 and U+2605, the lane markers U+25B2/U+25BC), so none of them
+    // can come out as a missing-glyph box.
+    const SHOT_GLYPH = {
+        orbitLeft: '\u25c0',   // solid left triangle - the way a left orbit carries the ball round
+        orbitRight: '\u25b6',  // its mirror
+        targets: '\u25c6',     // diamond - the drop-target bank's own plate shape
+        saturn: '\u25c9',      // ringed circle, which is what Saturn is
+        comet: '\u2605',       // star
+        visionGate: '\u25b2'   // upward triangle - the third eye, and the gate is a straight-up shot
+    };
+    // Sized from a screenshot, not guessed. createLabelPlane draws into a 128x48 texture and its
+    // plane inherits that 8:3 aspect, so a single centred glyph only ever occupies the middle
+    // fontSize/48 of the height and fontSize/128 of the width. At the first attempt - fontSize 30
+    // on a 0.028 plane - that worked out to about 7mm of visible symbol and the six of them were
+    // simply not there from the gameplay camera. fontSize 44 fills the texture's height, and a
+    // 0.055 plane puts each glyph at roughly 19mm square: smaller than the 50mm worded chip it
+    // replaces, and readable.
+    function createShotGlyph(scene, glyph, x, z, color) {
+        return createLabelPlane(scene, glyph, x, z, color,
+            { transparent: true, signage: true, fontSize: 44, planeSize: 0.055 });
     }
 
     // Lane visual-polish pass (user-requested - "raised guide rails... small depth/bevel details
@@ -6878,7 +6918,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // further up-table costs nothing in legibility and puts it back under that bar, and it
             // reads better anyway: the name sits on the route, not in front of it.
             const labelAt = orbitArcPoint(orbitDef.mirror, ORBIT_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M / 2, 8 * Math.PI / 180);
-            createLabelPlane(scene, orbitLabel, labelAt.x, labelAt.z, '#33ccff');
+            createShotGlyph(scene, orbitDef.side === 'left' ? SHOT_GLYPH.orbitLeft : SHOT_GLYPH.orbitRight,
+                labelAt.x, labelAt.z, '#33ccff');
         });
         // Table-composition pass (user-requested) - the original placement (pulled TOWARD the
         // bumper cluster, z = gate_z - 0.045) sat only ~0.03m from the boss bumper's own center,
@@ -6903,7 +6944,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // callout for the shot rather than a tag on the hole. Down-table, not up: the gate ended up
         // on the centre line at z=0.060 and an up-table offset put the text behind the collar's own
         // raised beacon.
-        const visionGateLabel = createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x, VISION_GATE_POS.z - 0.075, '#cc66ff');
+        const visionGateLabel = createShotGlyph(scene, SHOT_GLYPH.visionGate, VISION_GATE_POS.x, VISION_GATE_POS.z - 0.075, '#cc66ff');
         visionGateLabel.position.y = 0.045;
 
         // 8. Physical backing around the backglass - a frame border plus a receding cabinet
@@ -7041,7 +7082,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // angle. At -0.070 it clears the row, and sits in open playfield outboard of the
             // approach tint and well left of the Vision Gate.
             const bankOuter = MISSION_TARGET_BANK[0];
-            createLabelPlane(scene, 'TARGETS', bankX(bankOuter, 0, -0.070), bankZ(bankOuter, 0, -0.070), '#ff66cc');
+            createShotGlyph(scene, SHOT_GLYPH.targets, bankX(bankOuter, 0, -0.070), bankZ(bankOuter, 0, -0.070), '#ff66cc');
         }
 
         // Saturn callout. The board's biggest scoring object was the only major feature with no
@@ -7052,11 +7093,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // underside, and a label in it would sit on the approach tint and under the VISION GATE
         // callout already there. Out to the right it has open board to itself.
         {
-            createLabelPlane(scene, 'SATURN', SATURN_JAW.to.x + 0.030, SATURN_JAW.to.z + 0.020, '#ffb347');
+            createShotGlyph(scene, SHOT_GLYPH.saturn, SATURN_JAW.to.x + 0.030, SATURN_JAW.to.z + 0.020, '#ffb347');
             // COMET, up its own lane and outboard of the tint, where the only thing nearby is the
             // right orbit rail. Kept above the SATURN callout in z so the two read as labels on two
             // different corridors rather than as one row of text across the middle of the board.
-            createLabelPlane(scene, 'COMET', 0.138, 0.168, '#66e0ff');
+            createShotGlyph(scene, SHOT_GLYPH.comet, 0.138, 0.168, '#66e0ff');
         }
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
