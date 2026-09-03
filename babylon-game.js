@@ -469,18 +469,32 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         multiverseVelocity: 'SPIRITBALL Gameplay - Multiverse Velocity.mp3'
     };
 
-    const MUSIC_FADE_S = 1.2;        // crossfade / fade-in / fade-out length
+    const MUSIC_FADE_S = 1.2;        // the fallback length, used only where a scene names none
     const MUSIC_PAUSE_DUCK = 0.35;   // 'paused' keeps the gameplay track playing, ducked - a hard
                                      // cut on pause and a restart on resume is far more jarring
+    const MUSIC_GAMEOVER_DUCK = 0.15; // game over pulls the run's music right down but does NOT
+                                      // hand over to the menu track: the player is still looking
+                                      // at their own run, and PLAY AGAIN has to be able to bring
+                                      // the same source back up rather than start a third one
+    const MUSIC_HIDE_FADE_S = 0.2;   // tab hidden - short, it is inaudible either way
 
     // Scene -> what should be playing. `null` track means silence. `duck` scales the track's own
     // gain, leaving the player's music volume untouched.
+    //
+    // TWO fade lengths per scene, because the same scene is reached two structurally different
+    // ways and the brief asks for different timings for each:
+    //   enter  - this scene's track is not the one playing, so a source starts and (if something
+    //            was already playing) crossfades against it. Menu 900ms, gameplay 700ms.
+    //   adjust - this scene's track IS already playing and only its duck changes, so the existing
+    //            source's own gain is ridden. Pause 300ms down, resume 350ms back up.
+    // Collapsing these into one number is what would force pause/resume to share the crossfade's
+    // length, which is far too slow to read as a duck.
     const AUDIO_SCENES = {
-        silent: { track: null, duck: 0 },
-        menu: { track: 'cosmicDrift', duck: 1 },
-        gameplay: { track: 'multiverseVelocity', duck: 1 },
-        paused: { track: 'multiverseVelocity', duck: MUSIC_PAUSE_DUCK },
-        gameover: { track: 'cosmicDrift', duck: 1 }
+        silent: { track: null, duck: 0, enter: 0.9, adjust: 0.9 },
+        menu: { track: 'cosmicDrift', duck: 1, enter: 0.9, adjust: 0.9 },
+        gameplay: { track: 'multiverseVelocity', duck: 1, enter: 0.7, adjust: 0.35 },
+        paused: { track: 'multiverseVelocity', duck: MUSIC_PAUSE_DUCK, enter: 0.7, adjust: 0.3 },
+        gameover: { track: 'multiverseVelocity', duck: MUSIC_GAMEOVER_DUCK, enter: 0.7, adjust: 1.1 }
     };
 
     // key -> Promise<AudioBuffer|null>. The PROMISE is cached, not just the result, which is what
@@ -529,6 +543,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     let currentMusic = null;
     let pendingAudioScene = null;   // a scene asked for before the first gesture
     let currentAudioScene = 'silent';
+    // The DESIRED end state, as opposed to currentMusic's actual one: { track, duck }. It is set
+    // the instant a scene is requested, before any load, which is what makes re-requesting the
+    // scene already in flight a genuine no-op instead of a second request that cancels the first.
+    // Without it, rapid Skip/start/pause/resume could keep bumping the token faster than the
+    // first decode resolves and nothing would ever start.
+    let musicTarget = { track: null, duck: 0 };
+    // Tab visibility. Music is silenced and the context suspended while hidden; scene changes
+    // that happen meanwhile are RECORDED and applied on the way back, so what resumes is whatever
+    // the game moved to while the player was away, not what was playing when they left.
+    let audioHidden = false;
     // Incremented by every scene change. An async load that resolves after a newer scene was
     // requested compares its captured token against this and drops its result, so a slow first
     // fetch can never start a track the player has already moved on from.
@@ -564,22 +588,38 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     }
 
     // Applies a scene for real. Assumes a live context (unlockAudio gates this).
-    function applyAudioScene(sceneName) {
+    //
+    // `force` re-applies a scene that is already the target - used by the visibility restore,
+    // which needs the ramps re-issued against a context whose clock stood still while suspended.
+    function applyAudioScene(sceneName, force) {
         const scene = AUDIO_SCENES[sceneName];
         if (!scene) return;
         currentAudioScene = sceneName;
+
+        // Already going where we are being asked to go. Returning here is what keeps every one of
+        // these transitions idempotent: hideMenuScreen(), resumeGame() and startNewGame() can all
+        // be reached twice for one player action, and a second call must not restart a fade, add
+        // a source, or re-issue a fetch.
+        if (!force && musicTarget.track === scene.track && musicTarget.duck === scene.duck) return;
+        musicTarget = { track: scene.track, duck: scene.duck };
+
+        // Nothing is audible while the tab is hidden and the context is suspended. The target
+        // above is recorded, and the restore applies it - see setAudioHidden().
+        if (audioHidden) return;
+
         const token = ++musicRequestToken;
 
-        // Same track, different duck (gameplay <-> paused): ride the existing source's gain
-        // rather than restarting it. No new fetch, no new node, no gap.
+        // Same track, different duck (gameplay <-> paused <-> gameover): ride the existing
+        // source's gain rather than restarting it. No new fetch, no new node, no gap - which is
+        // also what makes PLAY AGAIN out of game over reuse the one source that is already there.
         if (currentMusic && currentMusic.key === scene.track) {
             currentMusic.duck = scene.duck;
-            rampMusicGain(currentMusic.gain, scene.duck, MUSIC_FADE_S);
+            rampMusicGain(currentMusic.gain, scene.duck, scene.adjust || MUSIC_FADE_S);
             return;
         }
 
         if (!scene.track) {
-            stopMusicEntry(currentMusic, MUSIC_FADE_S);
+            stopMusicEntry(currentMusic, scene.enter || MUSIC_FADE_S);
             currentMusic = null;
             return;
         }
@@ -603,8 +643,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
                 const outgoing = currentMusic;
                 currentMusic = { key: scene.track, source, gain, duck: scene.duck };
-                rampMusicGain(gain, scene.duck, MUSIC_FADE_S);
-                stopMusicEntry(outgoing, MUSIC_FADE_S); // the crossfade: both ramps run together
+                rampMusicGain(gain, scene.duck, scene.enter || MUSIC_FADE_S);
+                stopMusicEntry(outgoing, scene.enter || MUSIC_FADE_S); // the crossfade: both ramps run together
             } catch (e) { /* decorative */ }
         }).catch(() => { /* loadMusicBuffer already swallows; belt and braces */ });
     }
@@ -624,6 +664,42 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
     function getAudioScene() {
         return currentAudioScene;
+    }
+
+    // Tab visibility. Called from the one visibilitychange handler that already exists for input
+    // (see its own comment) rather than adding a second listener that could fire in either order
+    // relative to it.
+    //
+    // Hidden: fade out, then suspend the whole context - that stops the music, the rolling-ball
+    // oscillator and every scheduled SFX ramp together, and costs nothing to undo.
+    // Visible: resume, then re-apply whatever scene is current NOW. That is deliberately not the
+    // scene that was playing when the tab was hidden: hiding the tab also opens the pause menu
+    // (same handler), so the correct thing to come back to is 'paused', and if the player never
+    // left the menu it is 'menu'.
+    let audioHideTimer = null;
+    function setAudioHidden(hidden) {
+        const next = !!hidden;
+        if (next === audioHidden) return; // idempotent - some engines fire this event twice
+        audioHidden = next;
+        if (audioHideTimer !== null) {
+            clearTimeout(audioHideTimer);
+            audioHideTimer = null;
+        }
+        if (!audioCtx) return;
+        if (audioHidden) {
+            if (currentMusic) rampMusicGain(currentMusic.gain, 0, MUSIC_HIDE_FADE_S);
+            audioHideTimer = setTimeout(() => {
+                audioHideTimer = null;
+                if (!audioHidden || !audioCtx) return; // came back before the fade finished
+                try { audioCtx.suspend(); } catch (e) { /* nothing to suspend */ }
+            }, MUSIC_HIDE_FADE_S * 1000 + 100);
+            return;
+        }
+        try { audioCtx.resume().catch(() => {}); } catch (e) { /* already running */ }
+        // NEVER let coming back override a mute the player chose. The master gain is the one
+        // place mute lives, and it is re-asserted from the stored flag rather than assumed.
+        if (masterGainNode) masterGainNode.gain.value = audioMuted ? 0 : 1;
+        applyAudioScene(currentAudioScene, true);
     }
 
     // ===================================
@@ -1107,6 +1183,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
     function showUnsupportedMessage(reason) {
         console.error('[SPIRITBALL 3D] Unsupported device:', reason);
+        // There is no game behind this panel, so nothing should still be playing over it. Same
+        // call in showFatalError() below. Safe before the first gesture: with no AudioContext
+        // yet, setAudioScene() only records, and there is nothing to silence anyway.
+        setAudioScene('silent');
         hideAllGameUiForFailure();
         const panel = document.getElementById('unsupported-panel');
         if (panel) panel.style.display = 'flex';
@@ -1144,6 +1224,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
     function showFatalError(title, err) {
         console.error(title, err);
+        setAudioScene('silent'); // see showUnsupportedMessage()
         hideAllGameUiForFailure();
         errorPanel.style.display = 'block';
         // Only stomp the Havok status to FAILED if it wasn't already confirmed OK - otherwise a
@@ -9148,6 +9229,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             if (document.hidden) {
                 forceReleaseAllControls();
                 if (!startupBlocksInput()) openPauseMenu();
+                // AFTER openPauseMenu(), deliberately: that call moves the scene to 'paused', and
+                // the scene recorded while hidden is the one restored on the way back. Ordering
+                // it the other way would come back to gameplay music over a pause panel.
+                setAudioHidden(true);
+            } else {
+                setAudioHidden(false);
             }
         });
 
@@ -11588,6 +11675,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             setStartupPhase(PHASE.MENU);
             menuOverlay.style.display = 'flex';
             menuUp = true;
+            // The title music starts HERE and nowhere else, which is what makes every route into
+            // the menu - the intro playing out, Skip, a rejected play(), a missing file, ?dev=1 -
+            // sound identical without any of them knowing about audio. The phase guard above is
+            // already the idempotency for it.
+            setAudioScene('menu');
         }
         // Deliberately NOT auto-focusing the CTA, despite the overlay's aria-modal. Measured in
         // Chromium: a programmatic .focus() matches :focus-visible even when the player has only
@@ -11626,6 +11718,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             if (startupPhase !== PHASE.MENU) return;
             setStartupPhase(PHASE.GAMEPLAY);
             menuUp = false;
+            // Crossfade the title track out under the run's track. Not a stop-then-start: both
+            // ramps run together over the same 700ms (see AUDIO_SCENES), so there is no gap at
+            // the exact moment the player's first ball is live.
+            setAudioScene('gameplay');
             // Name the starting state here too, not only in startNewGame(). Dismissing the title
             // screen never calls startNewGame() - it only hides the overlay and ends attract mode,
             // because a page load already begins with fresh state - so putting the message solely
@@ -11702,6 +11798,17 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             if (startupGate) startupGate.hidden = true;
             if (!introOverlay || !introVideo) { finishIntro(); return; }
             introOverlay.hidden = false;
+
+            // The intro is a <video>, so its audio does NOT go through the Web Audio bus and is
+            // not covered by the master/music gains. A player who muted the game last session
+            // would otherwise be blasted by the one sound in the whole build that ignores their
+            // setting, so the persisted values are applied to the element directly. Music volume
+            // is the right one of the two to use: this is a soundtracked title card, not an
+            // effect. No Web Audio scene is started here - the intro is played into silence.
+            try {
+                introVideo.muted = isMasterMuted();
+                introVideo.volume = getMusicVolume();
+            } catch (e) { /* an element that won't take a volume still plays */ }
 
             // Any of these means "this intro is not going to happen" - go straight to the menu.
             introVideo.addEventListener('ended', finishIntro, { once: true });
@@ -11791,6 +11898,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Entry point for the whole sequence. The scene is ready by the time main() reaches here.
         if (startupWantsIntro() && startupGate && startupGateBtn) {
             setStartupPhase(PHASE.GATE);
+            // Explicit rather than merely true-by-default: the gate and the intro are silent, and
+            // saying so here means a scene that somehow got requested during load cannot be
+            // flushed into audibility by the gate's own unlockAudio() call.
+            setAudioScene('silent');
             startupGate.hidden = false;
             document.getElementById('startup-gate-label').textContent =
                 touchControlsActive() ? 'TOUCH TO START' : 'CLICK TO START';
@@ -11896,6 +12007,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function openPauseMenu() {
             if (isPaused || gameOverActive || isMenuUp()) return;
             isPaused = true;
+            // Ducked, not stopped - the same source keeps running and only its gain moves, so
+            // resuming picks the track up exactly where the player left it.
+            setAudioScene('paused');
             scene.physicsEnabled = false;
             syncPauseStatus();
             pauseOverlay.style.display = 'flex';
@@ -11904,6 +12018,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function resumeGame() {
             if (!isPaused) return;
             isPaused = false;
+            setAudioScene('gameplay');
             scene.physicsEnabled = true;
             pauseOverlay.style.display = 'none';
             controlsOverlay.style.display = 'none';
@@ -11927,10 +12042,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function openControlsScreen() {
             pauseOverlay.style.display = 'none';
             controlsOverlay.style.display = 'flex';
+            // Controls is only ever reached FROM the pause panel, so the music is already ducked
+            // and this is a no-op by musicTarget. Stated anyway rather than relied on, because
+            // "reachable from the main menu too" is exactly the kind of thing a later screen
+            // gains, and this is then already correct instead of leaking gameplay music.
+            setAudioScene('paused');
         }
 
         function backFromControlsScreen() {
             controlsOverlay.style.display = 'none';
+            setAudioScene('paused'); // still paused - see openControlsScreen()
             // Also refreshed on the way back from Controls - the panel is being re-shown, and a
             // deferred drain resolved during the detour could have moved the state.
             syncPauseStatus();
@@ -12089,6 +12210,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             controlsOverlay.style.display = 'none';
             gameOverOverlay.style.display = 'none';
             gameOverActive = false;
+            // PLAY AGAIN / NEW GAME. Reached from game over (music ducked right down) and from
+            // the pause panel (ducked to 35%) - in BOTH cases the run's track is still the live
+            // source, so this rides that one gain back up. No second source is created, which is
+            // the duplicate-music bug this arrangement exists to make impossible.
+            setAudioScene('gameplay');
         }
 
         document.getElementById('pause-resume-btn').addEventListener('click', resumeGame);
@@ -12247,6 +12373,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function showGameOverScreen() {
             gameOverActive = true;
             playGameOverSound();
+            // Down, not away: the run's track stays the live source at a low duck rather than
+            // handing over to the menu track. The player has not gone back to the menu - they are
+            // looking at their own run - and PLAY AGAIN has to be able to bring this same source
+            // straight back up.
+            setAudioScene('gameover');
             // Raw digits, not thousands-separated - #player-hud and the backglass HIGH SCORE
             // window both print scores this way on purpose (see that window's own comment: two
             // score readouts formatting the same kind of number differently is what makes a
@@ -12411,8 +12542,30 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                             duck: currentMusic ? currentMusic.duck : null,
                             trackGain: currentMusic ? currentMusic.gain.gain.value : null,
                             cachedBuffers: musicBufferCache.size,
-                            contextState: audioCtx ? audioCtx.state : null
+                            contextState: audioCtx ? audioCtx.state : null,
+                            // Phase 3. The desired end state, which is what the idempotency and
+                            // stale-fade assertions actually need to look at: currentMusic lags
+                            // it by a load, and by a fade after that.
+                            targetTrack: musicTarget.track,
+                            targetDuck: musicTarget.duck,
+                            hidden: audioHidden,
+                            scene: currentAudioScene
                         };
+                    },
+                    // Phase 3 - drives the visibility path without needing the test to actually
+                    // background the tab, which Playwright cannot do to a page it is driving.
+                    setAudioHidden,
+                    // The declared transition lengths, published rather than duplicated in the
+                    // test, so the two cannot drift apart - same convention as the attract hook's
+                    // dwellMs/moveMs below.
+                    fades() {
+                        const out = {};
+                        Object.keys(AUDIO_SCENES).forEach((name) => {
+                            out[name] = { duck: AUDIO_SCENES[name].duck,
+                                          enter: AUDIO_SCENES[name].enter,
+                                          adjust: AUDIO_SCENES[name].adjust };
+                        });
+                        return out;
                     }
                 },
                 // Attract-camera introspection, for qa/attract-camera.js. Scrubbing the cycle
