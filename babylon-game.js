@@ -4642,13 +4642,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // Returns the LENS, because that is the mesh the lamp system registers - registerLamp() reads
     // mesh.material, so the returned mesh must be the one carrying lampMat. Neither mesh ever gets
     // a collider; the lane's real trigger volume is built separately and is untouched by this.
-    function addPlayfieldInsert(scene, name, lampMat, collarMat, diameter, x, z) {
+    // baseY lifts the whole insert off the playfield. It defaults to 0, which is every existing
+    // caller: an insert set INTO the table, at the two measured heights above. The re-entry bank's
+    // three lane indicators pass the canopy's own top face instead - see their comment for the
+    // sightline measurement that put them up there.
+    function addPlayfieldInsert(scene, name, lampMat, collarMat, diameter, x, z, baseY) {
+        const y0 = baseY || 0;
         const collar = BABYLON.MeshBuilder.CreateCylinder(name + 'Collar', {
             diameter: diameter * 1.45,
             height: INSERT_COLLAR_H_M,
             tessellation: 20
         }, scene);
-        collar.position.set(x, INSERT_COLLAR_Y_M, z);
+        collar.position.set(x, y0 + INSERT_COLLAR_Y_M, z);
         collar.material = collarMat;
 
         // diameterTop < diameterBottom gives the lens a chamfered edge, which is both what a
@@ -4660,7 +4665,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             height: INSERT_LENS_H_M,
             tessellation: 20
         }, scene);
-        lens.position.set(x, INSERT_LENS_Y_M, z);
+        lens.position.set(x, y0 + INSERT_LENS_Y_M, z);
         lens.material = lampMat;
         return lens;
     }
@@ -6189,6 +6194,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // the centralized lamp system (setLaneLit() in main(), registered as lamp id
         // 'reentryLane'+i), the same emissive-only on/off convention every other lamp in this file
         // already uses.
+        // The re-entry canopy's own two heights, declared HERE rather than inside the canopy
+        // block below because the lane loop mounts each lane's indicator to the canopy's top face
+        // (see that indicator's comment) and the two must not be able to drift apart.
+        const REENTRY_CANOPY_Y = 0.048, REENTRY_CANOPY_FIN_BOTTOM_Y = 0.037;
+
         const reentryLaneMeshes = [];
         REENTRY_LANES.forEach((pos, i) => {
             const laneMat = new BABYLON.PBRMaterial('laneMat' + i, scene);
@@ -6225,14 +6235,40 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }, scene);
             mesh.position.set(pos.x, 0.01, pos.z);
             mesh.material = laneMat;
-            // Per-lane insert under the canopy, shadowing that lane's OWN lamp via the follower
-            // mechanism - so the three read out the bank's real lit/unlit state and nothing new is
-            // wired. Set 22mm down-table of the lane so it sits at the mouth the ball enters by,
-            // which is what makes three separate rollovers read as one banked feature.
+            // Per-lane indicator, shadowing that lane's OWN lamp via the follower mechanism - so
+            // the three read out the bank's real lit/unlit state and nothing new is wired.
+            //
+            // SIGHTLINE PASS: these are mounted on the CANOPY'S TOP FACE, directly above their own
+            // lane, rather than sunk into the playfield 22mm down-table of it. The old placement
+            // put two of the three where the player cannot see them. Measured from the real
+            // gameplay camera, sampling each mesh's own world vertices and asking the scene which
+            // OPAQUE mesh is front-most at that pixel:
+            //
+            //   reentryChain0   72% of it behind bumper1Cap
+            //   reentryChain1  100% of it behind saturn  - completely invisible
+            //   reentryChain2    0% blocked
+            //
+            // The bank is the objective of a whole vision (RETURN TO BODY, "COMPLETE THE RE-ENTRY
+            // LANES") and two thirds of its readout was hidden behind other features. It cannot be
+            // fixed by moving the lanes: those are triggers, and this pass does not touch physics.
+            // It cannot be fixed by moving Saturn for the same reason.
+            //
+            // Height is the lever, because a point further UP the table projects HIGHER on screen
+            // and Saturn's silhouette ends at screen y 299. Projected and picked before building:
+            // the lane's own lamp at y 0.010 lands at screen y 327, deep inside Saturn; the canopy
+            // top at y 0.052 lands at 297, where the front-most mesh is the canopy itself. Going
+            // 2mm further up-table from there puts it behind topWallCrown instead, so the canopy's
+            // own top face is the one place on this bank that reads.
+            //
+            // It is also where a real machine puts them - the lamps for a top lane bank live in
+            // the plastic over the lanes, not on the floor in front of them - and mounting all
+            // three (not just the hidden one) keeps the bank reading as one banked feature, which
+            // is what the old placement was for. No collider, and at 52mm it is nowhere near the
+            // ball's 27mm crown.
             const reChainMat = new BABYLON.PBRMaterial('reentryChainMat' + i, scene);
             styleInsertLampMat(reChainMat, COLOR_MISSION_ACTIVE, insertLensTextures.ring);
             const reChainLens = addPlayfieldInsert(scene, 'reentryChain' + i, reChainMat,
-                insertCollarMat, 0.011, pos.x, pos.z - 0.022);
+                insertCollarMat, 0.011, pos.x, pos.z, REENTRY_CANOPY_Y + 0.0038);
             shotChainLamps.push({
                 id: 'reentryChain' + i,
                 mesh: reChainLens,
@@ -6283,7 +6319,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // 10mm clear of it. Nothing in this assembly reaches the playfield surface, none of it has
         // a collider, and the lane triggers, their spacing and their scoring are untouched.
         {
-            const CANOPY_Y = 0.048, CANOPY_FIN_BOTTOM_Y = 0.037;
+            const CANOPY_Y = REENTRY_CANOPY_Y, CANOPY_FIN_BOTTOM_Y = REENTRY_CANOPY_FIN_BOTTOM_Y;
             const pts = [{ x: -0.150, z: REENTRY_LANES[0].z }];
             REENTRY_LANES.forEach((p, i) => {
                 if (i > 0) {
