@@ -2618,11 +2618,21 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // takes a full CSS font shorthand, so the identical fallback chain applies here; on a
         // platform with none of the condensed faces both land on the same technical monospace the
         // DOM HUD does, so the two displays stay in step wherever they end up.
-        const BG_VALUE_FONT = '"Bahnschrift", "DIN Condensed", "DIN Alternate", "Roboto Condensed", '
-            + '"Arial Narrow", "Liberation Sans Narrow", "Nimbus Sans Narrow", Consolas, "SF Mono", '
-            + 'Menlo, "Roboto Mono", "DejaVu Sans Mono", "Liberation Mono", monospace';
-        const BG_LABEL_FONT = 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, '
-            + '"Liberation Sans", "DejaVu Sans", sans-serif';
+        // ANCIENT CELESTIAL TABLET (user-requested restyle). These two stacks mirror the DOM's
+        // --mystic-score-font and --mystic-ui-font exactly, so the backglass and the HUD are the
+        // same two faces rather than two different interpretations of "the UI font". They cannot
+        // literally share the CSS variables - this is a canvas 2D context, not a styled element -
+        // so the pairing is maintained by hand and stated here.
+        //
+        // Same tail discipline the DOM stacks use and for the same measured reason: no monospace
+        // and no sans-serif anywhere in either, so a machine with no serif installed lands on the
+        // generic `serif` rather than on a typewriter. Georgia is last in the VALUE stack only
+        // because its default figures are old-style, and a score with descending 3s and 9s reads
+        // as a typo rather than a total.
+        const BG_VALUE_FONT = '"Palatino Linotype", "Book Antiqua", Palatino, "Iowan Old Style", '
+            + '"Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif", Georgia, serif';
+        const BG_LABEL_FONT = 'Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", '
+            + 'Palatino, "Liberation Serif", "Nimbus Roman", "DejaVu Serif", "Times New Roman", serif';
 
         // Manual rounded-rect path (not ctx.roundRect - not universally supported on every
         // engine/browser this build might run on) used by the drawing helpers below.
@@ -2667,7 +2677,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             ctx.save();
             roundRectPath(x, y, w, h, 12);
             ctx.clip();
-            ctx.fillStyle = 'rgba(120, 245, 255, 0.05)';
+            ctx.fillStyle = 'rgba(170, 140, 220, 0.045)'; // was cyan - stone grain, not a display grid
             for (let gy = y + 6; gy < y + h; gy += 12) {
                 for (let gx = x + 6; gx < x + w; gx += 12) ctx.fillRect(gx, gy, 3, 3);
             }
@@ -2680,7 +2690,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             ctx.moveTo(x + 14, y + 3.5);
             ctx.lineTo(x + w - 14, y + 3.5);
             ctx.lineWidth = 3;
-            ctx.strokeStyle = 'rgba(190, 255, 255, 0.18)';
+            ctx.strokeStyle = 'rgba(238, 224, 255, 0.18)'; // ivory light-catch, was cyan-white
             ctx.stroke();
         }
 
@@ -2832,15 +2842,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function redraw() {
             // --- Panel face: near-black, with a top-lit gradient so it reads as a surface -----
             const face = ctx.createLinearGradient(0, 0, 0, height);
-            face.addColorStop(0, '#0a0718');
-            face.addColorStop(1, '#02010a');
+            face.addColorStop(0, '#0d0818');   // --tablet-stone-lit
+            face.addColorStop(1, '#05020a');   // --tablet-stone
             ctx.fillStyle = face;
             ctx.fillRect(0, 0, width, height);
 
             // Panel-wide dot-matrix grid. Coarser than the grid inside the display windows so the
             // two surfaces read as two materials - the same trick the DOM HUD uses between its
             // panel grain and its score well's dot grid.
-            ctx.fillStyle = 'rgba(0, 255, 255, 0.045)';
+            ctx.fillStyle = 'rgba(150, 120, 200, 0.04)'; // was cyan - see BG_VALUE_FONT's note
             for (let y = 12; y < height; y += 16) {
                 for (let x = 12; x < width; x += 16) ctx.fillRect(x, y, 4, 4);
             }
@@ -2899,7 +2909,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // returns where it stopped, and rankX is that + 22, so a longer legend eats directly
             // into the room the shrink-to-fit below has for the value. Re-measured after the
             // change - see RANK_NAMES' fit note in js/config.js for the numbers.
-            const rankLegendEnd = drawLegend('STATE', PAD + 4, ROW_Y + 6, 46, 'rgba(150, 245, 255, 0.8)', 7);
+            const rankLegendEnd = drawLegend('STATE', PAD + 4, ROW_Y + 6, 46, 'rgba(216, 184, 122, 0.8)', 7);
             const rankX = rankLegendEnd + 22;
             // Shrink-to-fit against whatever the badges left. Without this a long rank name runs
             // straight underneath them - "Ascendant" alongside both badges was overlapping in a
@@ -2924,12 +2934,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // cabinet. Idle simply shows the same "no mission selected" state the 2D HUD had. ---
             const missionActive = !!state.missionName;
             drawWindow(PAD, MI_Y, width - PAD * 2, MI_H,
-                missionActive ? 'rgba(255, 170, 0, 0.45)' : 'rgba(120, 245, 255, 0.16)');
+                missionActive ? 'rgba(255, 170, 0, 0.45)' : 'rgba(196, 168, 244, 0.16)');
             // VISION, not MISSION (user-requested). The window's value line below is drawn at a
             // fixed PAD + 26, so unlike the STATE legend above this one's width does not constrain
             // the name it labels.
             drawLegend('VISION', PAD + 26, MI_Y + 18, 46,
-                missionActive ? 'rgba(255, 210, 140, 0.9)' : 'rgba(150, 245, 255, 0.45)', 7);
+                missionActive ? 'rgba(255, 210, 140, 0.9)' : 'rgba(210, 197, 232, 0.45)', 7);
             if (missionActive) {
                 // Shrink-to-fit so a long mission name never spills past the window's bezel.
                 let nameSize = 84;
@@ -2964,7 +2974,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // player is meant to read, not a greyed-out "nothing here" placeholder - but still
                 // well below the amber an ACTIVE vision uses, so a running objective always wins
                 // the slot's visual priority.
-                ctx.fillStyle = 'rgba(150, 245, 255, 0.62)';
+                ctx.fillStyle = 'rgba(210, 197, 232, 0.62)';
                 ctx.fillText(hint, PAD + 26, MI_Y + 70);
             }
 

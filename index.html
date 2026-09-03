@@ -111,20 +111,29 @@
                10px blur) so less of it lands on gameplay, and the only light the unit now emits
                outward is a 1px hairline along its bottom edge, like a real bezel leaking a little
                of what is behind it. */
-            background-color: rgba(6, 3, 14, 0.9);
+            /* TABLET PASS. Same three-layer construction the comment above argues for - a sheen
+               falling from the upper left, a face gradient, and a grain under 2% alpha - restated
+               in stone instead of glass. The grain is now two crossed repeating gradients at
+               different pitches (3px vertical, 7px diagonal) so it reads as mineral rather than as
+               the scanline the old single-axis 3px pitch could suggest. Layout is untouched: the
+               border stays 1px, the radius stays 10px, and background/box-shadow cost no space. */
+            background-color: rgba(5, 2, 10, 0.92);
             background-image:
                 linear-gradient(158deg,
-                    rgba(200, 255, 255, 0.07) 0%,
-                    rgba(200, 255, 255, 0.03) 20%,
-                    rgba(200, 255, 255, 0.008) 40%,
-                    rgba(200, 255, 255, 0) 62%),
+                    rgba(226, 208, 255, 0.06) 0%,
+                    rgba(226, 208, 255, 0.025) 22%,
+                    rgba(226, 208, 255, 0.006) 44%,
+                    rgba(226, 208, 255, 0) 64%),
                 linear-gradient(180deg,
-                    rgba(255, 255, 255, 0.035) 0%,
-                    rgba(0, 0, 0, 0.17) 100%),
+                    rgba(255, 250, 255, 0.03) 0%,
+                    rgba(0, 0, 0, 0.2) 100%),
                 repeating-linear-gradient(180deg,
-                    rgba(150, 255, 255, 0.018) 0 1px,
-                    rgba(150, 255, 255, 0) 1px 3px);
-            border: 1px solid rgba(126, 226, 236, 0.3);
+                    rgba(198, 176, 240, 0.016) 0 1px,
+                    rgba(198, 176, 240, 0) 1px 3px),
+                repeating-linear-gradient(56deg,
+                    rgba(150, 120, 200, 0.012) 0 1px,
+                    rgba(150, 120, 200, 0) 1px 7px);
+            border: 1px solid var(--tablet-edge);
             border-radius: 10px;
             /* Scoreboard typography pass: 6px/7px -> 4px, absorbing the score window's own
                vertical padding so adding a recessed display costs the panel no height. The panel
@@ -132,13 +141,13 @@
                this corner at a fixed offset, so a taller panel would eat into it. */
             padding: 4px 14px 4px;
             box-shadow:
-                inset 0 1px 0 rgba(190, 255, 255, 0.14),      /* bezel catching light, inside top */
-                inset 0 -1px 0 rgba(0, 0, 0, 0.6),            /* bezel's own shadow, inside bottom */
-                inset 0 5px 10px -6px rgba(0, 0, 0, 0.75),    /* the face sitting below the frame */
-                0 0 0 1px rgba(0, 0, 0, 0.5),                 /* dark outer ring - reads against a lit table */
-                0 1px 0 rgba(120, 240, 255, 0.09),            /* the only outward light: a hairline */
-                0 3px 10px rgba(0, 0, 0, 0.6);                /* grounding, tighter than the old 14px */
-            color: #00ffff;
+                inset 0 1px 0 rgba(238, 224, 255, 0.13),      /* the cut edge catching light, inside top */
+                inset 0 -1px 0 rgba(0, 0, 0, 0.65),           /* its own shadow, inside bottom */
+                inset 0 5px 10px -6px rgba(0, 0, 0, 0.78),    /* the face sitting below the frame */
+                0 0 0 1px rgba(0, 0, 0, 0.55),                /* dark outer ring - reads against a lit table */
+                0 1px 0 rgba(176, 138, 255, 0.10),            /* the only outward light: a hairline */
+                0 3px 10px rgba(0, 0, 0, 0.62);               /* grounding, unchanged radius */
+            color: var(--glyph-primary);
             /* Fixed max-width room for an 8-digit score at the largest step below, so the panel's
                footprint (and therefore its distance from #pause-btn/#effects-hud) doesn't shift
                as the score grows more digits mid-game. */
@@ -158,11 +167,11 @@
                both ends the way a milled channel does, and casts a 1px hard shadow down its right
                side. The shadow has zero blur and zero spread, so it costs no layout. */
             background: linear-gradient(180deg,
-                rgba(0, 255, 255, 0) 0%,
-                rgba(0, 255, 255, 0.3) 24%,
-                rgba(0, 255, 255, 0.3) 76%,
-                rgba(0, 255, 255, 0) 100%);
-            box-shadow: 1px 0 0 rgba(0, 0, 0, 0.45);
+                rgba(196, 168, 244, 0) 0%,
+                rgba(196, 168, 244, 0.28) 24%,
+                rgba(196, 168, 244, 0.28) 76%,
+                rgba(196, 168, 244, 0) 100%);
+            box-shadow: 1px 0 0 rgba(0, 0, 0, 0.5);
             /* Scoreboard typography pass: the score's display window is now an opaque surface, and
                the existing "strong" score pulse scales it 1.16 from its centre - enough to reach
                the 12px gap and momentarily paint over this rule. Lifting the divider a layer keeps
@@ -233,32 +242,84 @@
            the two surfaces resolve the identical stack instead of duplicating thirteen family
            names. Custom properties inherit, so #player-hud's own var() references below are
            unchanged in value. */
+        /* =================================================================================
+           ANCIENT CELESTIAL TABLET (user-requested restyle).
+
+           Everything above this block describes the instrument-panel treatment this replaces -
+           condensed DIN digits in a dot-matrix window behind a cyan bezel, sans-serif legends at
+           engineering tracking. It is kept because the REASONING in it is still load-bearing (why
+           the score has to out-rank the label, why a stack's tail matters more than its head, why
+           every shadow here is 1px or 0), and only the faces and colours it recommends are
+           superseded.
+
+           The board is black, cosmic and glow-heavy, and the UI now belongs to it: heavenly words
+           carved into black meteorite stone, lit from inside the stone rather than painted on top
+           of it.
+
+           THREE TYPE ROLES, defined once here and consumed everywhere through the three role
+           variables that already existed - so this pass changes ~20 call sites by rewriting three
+           values rather than by touching each of them:
+
+             DISPLAY  --mystic-display-font   SPIRITBALL, VISION PAUSED, VISION ENDED, ASCENSION.
+                                              An old-style serif with real stroke contrast, which
+                                              is what makes a word look CUT rather than printed.
+             LABEL    --mystic-ui-font        SCORE, BALLS, STATE, VISION, menu labels. A readable
+                                              serif at ordinary tracking - the old 0.16em
+                                              engineering track is pulled back at the call sites.
+             SCORE    --mystic-score-font     Lining, tabular figures. Palatino/Book Antiqua and
+                                              Times/Liberation/DejaVu Serif all carry LINING
+                                              figures; Georgia is deliberately last in this one
+                                              stack because its default figures are old-style, and
+                                              a score reel with descending 3s and 9s reads as a
+                                              typo, not as a total. font-variant-numeric keeps its
+                                              tabular-nums exactly as before.
+
+           No `monospace` and no `sans-serif` appears in any of the three, so the worst case on a
+           machine with no serif at all is the generic `serif` rather than a typewriter - the same
+           tail-of-the-stack reasoning the old wordmark comment above records learning the hard
+           way. */
         :root {
-            --hud-digit-font:
-                'Bahnschrift', 'DIN Condensed', 'DIN Alternate', 'Roboto Condensed',
-                'Arial Narrow', 'Liberation Sans Narrow', 'Nimbus Sans Narrow',
-                'Consolas', 'SF Mono', 'Menlo', 'Roboto Mono', 'DejaVu Sans Mono',
-                'Liberation Mono', ui-monospace, monospace;
-            --hud-label-font:
-                system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial,
-                'Liberation Sans', 'DejaVu Sans', sans-serif;
+            --mystic-display-font:
+                'Palatino Linotype', 'Book Antiqua', Palatino, 'Iowan Old Style',
+                'Hoefler Text', 'EB Garamond', Garamond, 'Times New Roman',
+                'Liberation Serif', 'Nimbus Roman', 'DejaVu Serif', Georgia, serif;
+            --mystic-ui-font:
+                Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino,
+                'Liberation Serif', 'Nimbus Roman', 'DejaVu Serif', 'Times New Roman', serif;
+            --mystic-score-font:
+                'Palatino Linotype', 'Book Antiqua', Palatino, 'Iowan Old Style',
+                'Times New Roman', 'Liberation Serif', 'Nimbus Roman', 'DejaVu Serif',
+                Georgia, serif;
 
-            /* The LOGO stack, and deliberately not --hud-digit-font. The title used to borrow the
-               HUD's display stack, whose whole job is tabular numerals, so its tail is
-               `Consolas, 'DejaVu Sans Mono', 'Liberation Mono', ui-monospace, monospace`. That is
-               correct for a score readout and wrong for a wordmark: on any machine without
-               Bahnschrift or DIN - every stock Linux box, and Windows without Office - SPIRITBALL
-               resolved to a monospace and the title read as Courier at 96px.
+            /* THE STONE. Near-black obsidian, with a lit face a few points above it so a panel can
+               have a top that catches light and a bottom that turns away. */
+            --tablet-stone: #05020a;
+            --tablet-stone-lit: #0d0818;
+            /* Carved edges: a thin bright line is the whole border language here - no neon
+               outlines, no 2px rules. */
+            --tablet-edge: rgba(206, 184, 246, 0.16);
+            --tablet-edge-strong: rgba(224, 206, 255, 0.30);
 
-               Geometric heavy faces first (Futura / Century Gothic / URW Gothic / Poppins /
-               Montserrat / Avenir), then the heaviest grotesques as a silhouette-preserving
-               fallback, then plain sans-serif. There is no `monospace` anywhere in it, so the
-               worst case is a neutral grotesque rather than a typewriter. */
-            --title-font:
-                'Futura', 'Futura PT', 'Century Gothic', 'URW Gothic', 'URW Gothic L',
-                'Poppins', 'Montserrat', 'Avenir Next', 'Avenir', 'Arial Black',
-                'Nimbus Sans', 'Helvetica Neue', Helvetica, 'Liberation Sans',
-                'DejaVu Sans', Arial, sans-serif;
+            /* THE GLYPHS. Warm ivory drifting violet, a muted step down for secondary text, and
+               the two accents. Cyan survives only where it already carries meaning. */
+            --glyph-primary: #ece4f6;
+            --glyph-muted: rgba(210, 197, 232, 0.74);
+            --glyph-violet: #b98cff;
+            --glyph-gold: #d8b87a;
+
+            /* THE CARVE. A dark line under each stroke and a tight bright line above it is what
+               reads as cut stone; the glow is 6px and low-alpha, deliberately nowhere near a neon
+               bloom, because the playfield behind this is already the brightest thing on screen
+               and has to stay that way. */
+            --carve: 0 1px 0 rgba(0, 0, 0, 0.92), 0 -1px 0 rgba(255, 248, 235, 0.13);
+            --carve-violet: var(--carve), 0 0 6px rgba(158, 112, 255, 0.34);
+            --carve-gold: var(--carve), 0 0 6px rgba(216, 184, 122, 0.28);
+
+            /* The three role variables the rest of the sheet already reads. Rewritten in terms of
+               the stacks above so no other rule in this file needs to change to adopt the tablet. */
+            --hud-digit-font: var(--mystic-score-font);
+            --hud-label-font: var(--mystic-ui-font);
+            --title-font: var(--mystic-display-font);
         }
 
         #player-hud {
@@ -269,15 +330,19 @@
         }
 
         #player-hud .hud-label {
-            color: rgba(150, 245, 255, 0.78);
+            color: var(--glyph-gold);
             display: block;
             font-family: var(--hud-label-font);
             font-weight: 700;
             text-transform: uppercase;
-            /* Wide tracking is most of what separates a legend from a readout - the digits below
-               go the other way (negative) in the same panel. */
-            letter-spacing: 0.16em;
-            text-shadow: none;
+            /* 0.16em -> 0.09em. The old value was engineering tracking, which is exactly the
+               register this pass is leaving; a carved legend is spaced, not stretched. Enough
+               separation from the digits below (which still go negative) survives that the two
+               strings read as legend and readout, which is what that tracking was for. */
+            letter-spacing: 0.09em;
+            /* Cut, not printed: a dark line under each stroke and a tight ivory line above it.
+               No glow on the legend - the score is the lit thing in this panel. */
+            text-shadow: var(--carve);
         }
 
         #player-hud .hud-value {
@@ -306,7 +371,7 @@
         }
         #player-hud #hud-score {
             font-size: 30px;
-            color: #dffcff;
+            color: var(--glyph-primary);
             /* The recessed display window. Darker than #player-hud's own fill so it reads as a
                cut-out in the panel rather than a highlight painted on it. */
             padding: 1px var(--hud-well-pad) 3px;
@@ -316,21 +381,23 @@
                reading as a hole cut into it rather than a patch painted on it - a fill difference
                the recess shadow alone could not carry over a DARK playfield, where both surfaces
                otherwise land within a few luminance points of each other. */
-            background-color: rgba(0, 2, 6, 0.95);
-            /* Dot-matrix panel texture. 3px pitch and ~4% alpha: present as a surface at reading
-               distance, invisible as a pattern, and coarse enough not to alias into moire at
-               DPR 1. Sits behind the glyphs, never over them, so it cannot soften an edge. */
-            background-image: radial-gradient(circle at 50% 50%,
-                rgba(130, 245, 255, 0.045) 0.5px, rgba(130, 245, 255, 0) 0.75px);
-            background-size: 3px 3px;
+            background-color: rgba(2, 0, 6, 0.96);
+            /* The dot-matrix grid is GONE - it was the single most "display panel" thing in this
+               HUD. What replaces it is the stone continuing through the cut: a faint diagonal
+               mineral grain at a different pitch and angle from the panel face around it, so the
+               recess reads as the same material seen deeper rather than as a screen set into it.
+               Same discipline as before: behind the glyphs, never over them. */
+            background-image: repeating-linear-gradient(56deg,
+                rgba(170, 140, 220, 0.022) 0 1px,
+                rgba(170, 140, 220, 0) 1px 7px);
             box-shadow:
-                inset 0 1px 2px rgba(0, 0, 0, 0.85),          /* the recess itself */
-                inset 0 0 0 1px rgba(0, 255, 255, 0.14),      /* thin bezel around the window */
-                inset 0 -1px 0 rgba(150, 255, 255, 0.10);     /* light catching the bottom lip */
+                inset 0 1px 2px rgba(0, 0, 0, 0.88),          /* the cut itself */
+                inset 0 0 0 1px rgba(196, 168, 244, 0.13),    /* thin carved border around it */
+                inset 0 -1px 0 rgba(216, 184, 122, 0.10);     /* gold catching the bottom lip */
             text-shadow:
-                0 -1px 0 rgba(255, 255, 255, 0.3),            /* inner highlight along each stroke */
-                0 1px 0 rgba(0, 26, 38, 0.9),                 /* grounds the glyph in the well */
-                0 0 1px rgba(120, 250, 255, 0.5);             /* lit edge - 1px, not a bloom */
+                0 -1px 0 rgba(255, 248, 235, 0.30),           /* tight bright edge along each stroke */
+                0 1px 0 rgba(10, 0, 20, 0.92),                /* the engraved shadow under it */
+                0 0 6px rgba(158, 112, 255, 0.34);            /* violet light from inside the stone */
         }
 
         #player-hud #hud-lives-block { align-items: flex-start; }
@@ -339,8 +406,8 @@
             font-size: 18px;
             /* Secondary by construction: no window, no bevel, no lit edge, and a fill pulled well
                back from the score's near-white so the eye lands on the score first every time. */
-            color: rgba(125, 236, 224, 0.88);
-            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.8);
+            color: var(--glyph-muted);
+            text-shadow: 0 1px 0 rgba(10, 0, 20, 0.85);
         }
 
         @media (max-width: 480px) {
@@ -372,8 +439,8 @@
                turning into a 1px-thick outline of themselves. */
             #player-hud #hud-score {
                 text-shadow:
-                    0 -1px 0 rgba(255, 255, 255, 0.16),
-                    0 0 1px rgba(120, 250, 255, 0.5);
+                    0 -1px 0 rgba(255, 248, 235, 0.16),
+                    0 0 4px rgba(158, 112, 255, 0.32);
             }
         }
 
@@ -942,7 +1009,8 @@
             inset: 0;
             z-index: 5000;
             background: rgba(0, 0, 0, 0.95);
-            color: #00ffff;
+            color: var(--glyph-primary);
+            font-family: var(--mystic-ui-font);
             flex-direction: column;
             justify-content: center;
             align-items: center;
@@ -969,7 +1037,7 @@
         .rotate-overlay p {
             font-size: 18px;
             line-height: 1.5;
-            text-shadow: 0 0 12px #00ffff;
+            text-shadow: var(--carve-violet);
         }
 
         @keyframes rotate-hint {
@@ -1058,8 +1126,11 @@
             padding: 24px;
             box-sizing: border-box;
             overflow-y: auto;
-            font-family: 'Courier New', monospace;
-            color: #ffffff;
+            /* Was 'Courier New', monospace - the one inherited value every overlay's un-styled
+               text fell back to, and a typewriter is the opposite of carved stone. The LABEL role
+               now backstops all of them. */
+            font-family: var(--mystic-ui-font);
+            color: var(--glyph-primary);
         }
 
         /* ==========================================================================
@@ -1148,7 +1219,7 @@
             text-indent: 0.09em;
             line-height: 0.95;
             margin: 0;
-            color: #f4feff;
+            color: var(--glyph-primary);
 
             /* The mark is built entirely from stacked text-shadows, deliberately: a
                `background-clip: text` fill cannot coexist with them. Chromium paints a clipped
@@ -1164,14 +1235,21 @@
                ground that separates the mark where it crosses the backglass, and one restrained
                cyan bloom. Every offset is in em so the whole construction scales with the clamp
                instead of turning into a slab at 36px. */
+            /* TABLET PASS. The construction above is kept exactly - stacked text-shadows in em,
+               for the reason the comment gives, since a background-clip fill still cannot coexist
+               with them - but what it builds changes from a neon sign to a cut in stone:
+               the magenta/cyan chromatic split is gone (that was the single most "sci-fi" thing on
+               the title screen), the three-step extrude is re-cut in violet-to-black so the
+               letters read as sinking into the slab, a tight ivory line along the top edge is the
+               light catching the cut, and the outward bloom drops from a 0.19em cyan halo to a
+               0.14em violet one at lower alpha. */
             text-shadow:
-                -0.016em 0 0 rgba(255, 60, 190, 0.6),
-                0.016em 0 0 rgba(50, 238, 255, 0.6),
-                0 0.024em 0 #8c1f9e,
-                0 0.046em 0 #4b1068,
-                0 0.068em 0 #1e0730,
-                0 0.1em 0.09em rgba(0, 0, 0, 0.55),
-                0 0 0.19em rgba(0, 225, 255, 0.24);
+                0 -0.012em 0 rgba(255, 248, 235, 0.22),
+                0 0.024em 0 #3a1f5c,
+                0 0.046em 0 #221036,
+                0 0.068em 0 #0d0518,
+                0 0.1em 0.09em rgba(0, 0, 0, 0.62),
+                0 0 0.14em rgba(158, 112, 255, 0.28);
         }
 
         /* Hairline keyline, for the widths where the title crosses the lit backglass. Gated on
@@ -1200,17 +1278,17 @@
         #menu-overlay .title-rule i {
             flex: 1;
             height: 1px;
-            background: linear-gradient(90deg, rgba(0, 255, 255, 0), rgba(0, 255, 255, 0.45));
+            background: linear-gradient(90deg, rgba(216, 184, 122, 0), rgba(216, 184, 122, 0.42));
         }
         #menu-overlay .title-rule i:last-child {
-            background: linear-gradient(90deg, rgba(0, 255, 255, 0.45), rgba(0, 255, 255, 0));
+            background: linear-gradient(90deg, rgba(216, 184, 122, 0.42), rgba(216, 184, 122, 0));
         }
         #menu-overlay .title-rule b {
             width: 5px;
             height: 5px;
             transform: rotate(45deg);
-            background: rgba(120, 245, 255, 0.8);
-            box-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
+            background: rgba(216, 184, 122, 0.85);
+            box-shadow: 0 0 8px rgba(158, 112, 255, 0.5);
         }
 
         /* Same family as the logo, so the two read as one lockup rather than two typefaces
@@ -1225,7 +1303,8 @@
             font-size: clamp(9.5px, 2.6vw, 12px);
             letter-spacing: 0.44em;
             text-indent: 0.44em;
-            color: rgba(146, 226, 243, 0.66);
+            color: rgba(216, 184, 122, 0.62);
+            text-shadow: var(--carve);
             margin: 0;
         }
 
@@ -1239,9 +1318,11 @@
             font-family: var(--hud-label-font);
             font-weight: 700;
             font-size: clamp(10px, 2.7vw, 12px);
-            letter-spacing: 0.24em;
-            text-indent: 0.24em;
-            color: rgba(150, 245, 255, 0.72);
+            /* 0.24em -> 0.16em, the same pull-back the HUD legend takes: carved, not engineered. */
+            letter-spacing: 0.16em;
+            text-indent: 0.16em;
+            color: var(--glyph-muted);
+            text-shadow: var(--carve);
             margin-bottom: 3px;
         }
         #menu-overlay .title-score-value {
@@ -1253,8 +1334,8 @@
             letter-spacing: -0.015em;
             /* Amber, not cyan: this is the same number the backglass shows, in the same register,
                so a player reads the two as one fact rather than two. */
-            color: #ffc849;
-            text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7), 0 0 14px rgba(255, 170, 40, 0.32);
+            color: var(--glyph-gold);
+            text-shadow: var(--carve-gold);
         }
 
         /* The only filled element on the screen. An outlined pill reads as one more label among
@@ -1267,17 +1348,27 @@
             font-size: clamp(14px, 4vw, 19px);
             letter-spacing: 0.13em;
             text-indent: 0.13em;
-            color: #04211a;
-            background: linear-gradient(180deg, #8effcd 0%, #23e39a 55%, #12c383 100%);
-            border: 0;
+            /* Was a mint-green gradient lozenge with dark green text and a 26px green spill - a
+               web CTA button, and the brightest object on the title screen. It becomes the
+               inscription the whole tablet is built around: gold letters cut into the same stone
+               as everything else, lit from within. The 0 border becomes 1px and the padding drops
+               by exactly 1px on each axis, so the pill's box, its 48px minimum touch target and
+               the breathe animation's geometry are all unchanged. */
+            color: var(--glyph-gold);
+            background-color: rgba(9, 4, 18, 0.92);
+            background-image:
+                linear-gradient(180deg, rgba(255, 250, 255, 0.05) 0%, rgba(0, 0, 0, 0.25) 100%),
+                repeating-linear-gradient(56deg,
+                    rgba(150, 120, 200, 0.014) 0 1px, rgba(150, 120, 200, 0) 1px 7px);
+            border: 1px solid rgba(216, 184, 122, 0.34);
             border-radius: 999px;
-            padding: 14px 34px;
-            text-shadow: none;
+            padding: 13px 33px;
+            text-shadow: var(--carve-gold);
             box-shadow:
-                inset 0 1px 0 rgba(255, 255, 255, 0.55),
-                inset 0 -1px 0 rgba(0, 60, 40, 0.35),
-                0 0 0 1px rgba(0, 255, 160, 0.35),
-                0 8px 26px rgba(0, 255, 150, 0.26);
+                inset 0 1px 0 rgba(255, 244, 220, 0.14),
+                inset 0 0 18px rgba(158, 112, 255, 0.16),
+                0 0 0 1px rgba(0, 0, 0, 0.5),
+                0 8px 26px rgba(0, 0, 0, 0.45);
             animation: title-cta-breathe 2.6s ease-in-out infinite;
 
             /* --- button reset + interaction ------------------------------------------------
@@ -1339,7 +1430,8 @@
             letter-spacing: 0.16em;
             text-indent: 0.16em;
             text-transform: uppercase;
-            color: rgba(4, 33, 26, 0.62);
+            /* Followed the old green pill's dark ink; on stone it is the same gold held back. */
+            color: rgba(216, 184, 122, 0.6);
             margin-top: 3px;
         }
         /* Same platform split as .title-hint, and the same specificity trap - each selector
@@ -1370,11 +1462,13 @@
         /* Breathes on the GLOW only. The old treatment reused .pulse-text, which fades opacity to
            0.4 - acceptable on thin outlined text, but on a filled pill it visibly blinks the one
            thing the player is trying to read. */
+        /* The breathe is now the light INSIDE the stone rising and falling, not a green halo
+           growing outside it. Same 2.6s cycle, same two stops, same reduced-motion opt-out. */
         @keyframes title-cta-breathe {
-            0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), inset 0 -1px 0 rgba(0,60,40,0.35),
-                                   0 0 0 1px rgba(0,255,160,0.35), 0 8px 26px rgba(0,255,150,0.26); }
-            50%      { box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), inset 0 -1px 0 rgba(0,60,40,0.35),
-                                   0 0 0 1px rgba(0,255,160,0.5),  0 8px 34px rgba(0,255,150,0.44); }
+            0%, 100% { box-shadow: inset 0 1px 0 rgba(255,244,220,0.14), inset 0 0 18px rgba(158,112,255,0.16),
+                                   0 0 0 1px rgba(0,0,0,0.5), 0 8px 26px rgba(0,0,0,0.45); }
+            50%      { box-shadow: inset 0 1px 0 rgba(255,244,220,0.18), inset 0 0 26px rgba(158,112,255,0.3),
+                                   0 0 0 1px rgba(0,0,0,0.5), 0 8px 26px rgba(0,0,0,0.45); }
         }
 
         #menu-overlay .title-hint {
@@ -1383,7 +1477,7 @@
             font-size: clamp(9px, 2.5vw, 11px);
             letter-spacing: 0.16em;
             line-height: 1.9;
-            color: rgba(160, 210, 235, 0.5);
+            color: var(--glyph-muted);
             margin: clamp(14px, 3vh, 22px) 0 0;
         }
         #menu-overlay .title-hint span {
@@ -1466,11 +1560,28 @@
            new visual style, and gives the menu's text real contrast against the busy 3D scene
            behind it. */
         .overlay-card {
-            background: rgba(12, 0, 30, 0.72);
-            border: 2px solid #00ffff;
+            /* The same stone as the HUD tablet, at menu scale. The 2px cyan outline and the 30px
+               outward cyan bloom are both gone - a tablet is a dark mass with a cut edge, and the
+               bloom was the single biggest thing competing with the playfield. The 2px border
+               becomes 1px, absorbed into padding (36px 28px -> 37px 29px) so the card's box is
+               unchanged. */
+            background-color: rgba(5, 2, 10, 0.9);
+            background-image:
+                linear-gradient(158deg,
+                    rgba(226, 208, 255, 0.05) 0%, rgba(226, 208, 255, 0.02) 26%,
+                    rgba(226, 208, 255, 0) 58%),
+                linear-gradient(180deg, rgba(255, 250, 255, 0.028) 0%, rgba(0, 0, 0, 0.24) 100%),
+                repeating-linear-gradient(56deg,
+                    rgba(150, 120, 200, 0.013) 0 1px, rgba(150, 120, 200, 0) 1px 7px);
+            border: 1px solid var(--tablet-edge);
             border-radius: 18px;
-            box-shadow: 0 0 30px rgba(0, 255, 255, 0.3), inset 0 0 40px rgba(138, 43, 226, 0.12);
-            padding: 36px 28px;
+            box-shadow:
+                inset 0 1px 0 rgba(238, 224, 255, 0.11),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.65),
+                inset 0 0 44px rgba(90, 50, 150, 0.16),      /* light living inside the stone */
+                0 0 0 1px rgba(0, 0, 0, 0.55),
+                0 6px 22px rgba(0, 0, 0, 0.6);
+            padding: 37px 29px;
             max-width: 420px;
             width: 100%;
             box-sizing: border-box;
@@ -1478,12 +1589,30 @@
 
         .screen-overlay h1 {
             font-size: clamp(32px, 9vw, 56px);
-            color: #00ffff;
-            text-shadow: 0 0 12px #ff00ff, 0 0 24px #00ffff;
+            /* DISPLAY role. The old treatment was a cyan word inside a 24px magenta+cyan double
+               bloom, i.e. neon tubing - the loudest thing on the screen and lit from outside the
+               letterform. Carved instead: ivory stroke, a hard black line under it, a tight ivory
+               line above it, and 10px of violet light coming from INSIDE the cut. The total spill
+               is less than half what it was, which is what keeps a full-screen heading from
+               out-glowing the playfield behind it. */
+            font-family: var(--mystic-display-font);
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            color: var(--glyph-primary);
+            text-shadow:
+                0 2px 0 rgba(0, 0, 0, 0.95),
+                0 -1px 0 rgba(255, 248, 235, 0.16),
+                0 0 10px rgba(158, 112, 255, 0.38);
             margin: 0 0 8px 0;
         }
 
-        #controls-overlay h1, #menu-overlay .tagline { color: #ffff00; }
+        /* Was a flat #ffff00 - pure yellow is the one hue that cannot sit on this palette, and
+           on the controls screen it was the brightest thing in the interface. Both take the muted
+           antique gold instead, carved like every other heading. */
+        #controls-overlay h1, #menu-overlay .tagline {
+            color: var(--glyph-gold);
+            text-shadow: var(--carve-gold);
+        }
 
         .screen-overlay .tagline {
             font-size: clamp(14px, 3.5vw, 18px);
@@ -1518,9 +1647,9 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            background: #05010f;
-            color: #00ffff;
-            font-family: 'Courier New', monospace;
+            background: var(--tablet-stone);
+            color: var(--glyph-muted);
+            font-family: var(--mystic-ui-font);
             text-align: center;
             padding: 24px;
             box-sizing: border-box;
@@ -1533,7 +1662,11 @@
         #loading-panel h1 {
             font-size: clamp(28px, 8vw, 48px);
             margin: 0 0 16px 0;
-            text-shadow: 0 0 12px #ff00ff, 0 0 24px #00ffff;
+            font-family: var(--mystic-display-font);
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            color: var(--glyph-primary);
+            text-shadow: var(--carve-violet);
             animation: menu-pulse 1.1s ease-in-out infinite;
         }
 
@@ -1555,24 +1688,50 @@
         .start-instructions {
             display: inline-block;
             font-size: clamp(15px, 4.2vw, 24px);
-            color: #00ff99;
-            text-shadow: 0 0 8px #00ff99;
-            border: 2px solid #00ff99;
+            /* Was a green neon pill: #00ff99 text inside a 2px #00ff99 ring with 20px of outward
+               spill. Now an inscription cut into the tablet - gold letters, a 1px carved edge, and
+               the only light comes from inside it. Border 2px -> 1px absorbed into padding
+               (12px 30px -> 13px 31px), so the pill's box is unchanged. */
+            color: var(--glyph-gold);
+            text-shadow: var(--carve-gold);
+            border: 1px solid rgba(216, 184, 122, 0.3);
             border-radius: 999px;
-            padding: 12px 30px;
-            box-shadow: 0 0 20px rgba(0, 255, 153, 0.35), inset 0 0 12px rgba(0, 255, 153, 0.08);
+            padding: 13px 31px;
+            background-color: rgba(7, 3, 15, 0.72);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 244, 220, 0.10),
+                inset 0 0 16px rgba(158, 112, 255, 0.14),
+                0 0 0 1px rgba(0, 0, 0, 0.45);
         }
 
         .screen-overlay button {
             font-family: inherit;
             font-size: clamp(16px, 4vw, 22px);
-            font-weight: bold;
-            color: #ffffff;
-            background: #1a1a3e;
-            border: 3px solid #00ffff;
+            /* A CARVED SELECTABLE INSCRIPTION, not a neon button box. The old rule was a flat
+               #1a1a3e fill inside a 3px cyan outline; the border drops to 1px of carved edge and
+               the fill becomes stone, so what the eye reads is the lettering rather than the box
+               around it. Idle is dim; :hover/:focus-visible below light it from within. The 3px
+               border is absorbed into padding (14px 28px -> 16px 30px) so every button keeps the
+               exact box it had - verified below at 320/390/desktop. */
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            color: var(--glyph-muted);
+            background-color: rgba(7, 3, 15, 0.9);
+            background-image:
+                linear-gradient(180deg, rgba(255, 250, 255, 0.035) 0%, rgba(0, 0, 0, 0.22) 100%),
+                repeating-linear-gradient(56deg,
+                    rgba(150, 120, 200, 0.012) 0 1px, rgba(150, 120, 200, 0) 1px 7px);
+            border: 1px solid var(--tablet-edge);
             border-radius: 8px;
-            padding: 14px 28px;
+            padding: 16px 30px;
             margin: 10px 0;
+            text-shadow: var(--carve);
+            box-shadow:
+                inset 0 1px 0 rgba(238, 224, 255, 0.10),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+                0 0 0 1px rgba(0, 0, 0, 0.5);
+            transition: color 140ms ease-out, border-color 140ms ease-out,
+                        box-shadow 140ms ease-out, background-color 140ms ease-out;
             /* Responsive QA pass fix: a bare 240px caused real horizontal overflow (buttons
                visibly clipped past the right edge, confirmed via Playwright) at extreme narrow
                effective widths - genuine page zoom on an already-narrow phone reflows the CSS
@@ -1587,9 +1746,28 @@
             cursor: pointer;
         }
 
-        .screen-overlay button:active, .screen-overlay button:hover {
-            color: #00ffff;
-            background: #2a2a5e;
+        /* Lit from within, not filled in. Hover and keyboard focus get the SAME treatment on
+           purpose - a keyboard user must see exactly what a pointer user sees - and :active adds a
+           real pressed inset rather than another colour. */
+        .screen-overlay button:hover,
+        .screen-overlay button:focus-visible {
+            color: var(--glyph-primary);
+            background-color: rgba(14, 7, 26, 0.94);
+            border-color: var(--tablet-edge-strong);
+            box-shadow:
+                inset 0 1px 0 rgba(238, 224, 255, 0.16),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+                inset 0 0 14px rgba(158, 112, 255, 0.18),   /* the glow is INSIDE the stone */
+                0 0 0 1px rgba(0, 0, 0, 0.5);
+            text-shadow: var(--carve-violet);
+        }
+        .screen-overlay button:active {
+            color: var(--glyph-primary);
+            background-color: rgba(3, 1, 8, 0.96);
+            box-shadow:
+                inset 0 2px 5px rgba(0, 0, 0, 0.8),          /* pressed into the tablet */
+                inset 0 -1px 0 rgba(238, 224, 255, 0.07),
+                0 0 0 1px rgba(0, 0, 0, 0.5);
         }
 
         /* ==========================================================================
@@ -1716,19 +1894,21 @@
             border-radius: 14px;
             /* Same face as #player-hud, one step more opaque: this one sits over the brightest
                part of the table rather than a corner of it. */
-            background-color: rgba(6, 3, 14, 0.86);
-            /* The panel grain, at the HUD's own 3px pitch. Pulled to ~3% (the HUD uses ~4.5%)
+            background-color: rgba(5, 2, 10, 0.88);
+            /* The panel grain, restated as mineral rather than dot-matrix: two crossed repeating
+               gradients at 3px and 7px, the same construction the HUD tablet uses, kept at ~2%
                because this is a much larger surface and the texture should stay felt-not-seen. */
-            background-image: radial-gradient(circle at 50% 50%,
-                rgba(130, 245, 255, 0.03) 0.5px, rgba(130, 245, 255, 0) 0.75px);
-            background-size: 3px 3px;
-            /* The thin structural bezel - 1px at 30% alpha, exactly #player-hud's, replacing the
-               old 2px solid #00ffff that drew a hard box around the whole composition. */
-            border: 1px solid rgba(126, 226, 236, 0.30);
+            background-image:
+                repeating-linear-gradient(180deg,
+                    rgba(198, 176, 240, 0.012) 0 1px, rgba(198, 176, 240, 0) 1px 3px),
+                repeating-linear-gradient(56deg,
+                    rgba(150, 120, 200, 0.013) 0 1px, rgba(150, 120, 200, 0) 1px 7px);
+            /* The thin carved edge - 1px, exactly #player-hud's. */
+            border: 1px solid var(--tablet-edge);
             box-shadow:
-                inset 0 1px 0 rgba(170, 240, 255, 0.13),   /* light catching the top edge */
-                inset 0 0 46px rgba(138, 43, 226, 0.10),   /* the subtle internal violet glow */
-                0 20px 52px rgba(0, 0, 0, 0.55);           /* the panel sitting off the playfield */
+                inset 0 1px 0 rgba(238, 224, 255, 0.12),   /* light catching the cut top edge */
+                inset 0 0 46px rgba(90, 50, 150, 0.16),    /* light living inside the stone */
+                0 20px 52px rgba(0, 0, 0, 0.58);           /* the tablet sitting off the playfield */
             /* Progressive: where it is unsupported the panel is simply a solid dark face, which
                is already legible - nothing depends on the blur. */
             -webkit-backdrop-filter: blur(3px);
@@ -1754,16 +1934,19 @@
 
         #pause-overlay h1 {
             margin: 0;
-            font-family: var(--hud-label-font);
+            /* DISPLAY role - VISION PAUSED is one of the headings the restyle names, so it moves
+               off the LABEL stack onto the serif. Size, tracking and every breakpoint override
+               below are untouched. */
+            font-family: var(--mystic-display-font);
             font-size: 19px;
             font-weight: 700;
             letter-spacing: 0.20em;
             text-indent: 0.20em;
             text-transform: uppercase;
-            color: rgba(163, 246, 255, 0.94);
+            color: var(--glyph-primary);
             /* A 1px lit edge, not a bloom - the same call #player-hud's score makes. The old
                `0 0 12px #ff00ff, 0 0 24px #00ffff` is what made this read as neon signage. */
-            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.8), 0 0 1px rgba(120, 250, 255, 0.55);
+            text-shadow: var(--carve-violet);
         }
 
         .pause-actions {
@@ -1818,21 +2001,25 @@
             font-size: 15px;
             letter-spacing: 0.2em;
             text-indent: 0.2em;
-            color: #eafcff;
-            background-color: rgba(0, 30, 44, 0.78);
-            background-image: radial-gradient(circle at 50% 50%,
-                rgba(130, 245, 255, 0.05) 0.5px, rgba(130, 245, 255, 0) 0.75px);
-            background-size: 3px 3px;
-            border: 1px solid rgba(126, 226, 236, 0.62);
+            /* Tablet pass: the same three-tier hierarchy, restated in stone. Every dimension
+               above is untouched - only hue, texture and where the light comes from change. The
+               dot grid is replaced by the panel's mineral grain, and the 22px outward cyan spill
+               becomes an INTERNAL glow, so the brightest control on the screen still stops at its
+               own edge. */
+            color: var(--glyph-primary);
+            background-color: rgba(16, 8, 30, 0.82);
+            background-image: repeating-linear-gradient(56deg,
+                rgba(170, 140, 220, 0.02) 0 1px, rgba(170, 140, 220, 0) 1px 7px);
+            border: 1px solid rgba(206, 184, 246, 0.5);
             box-shadow:
-                inset 0 1px 2px rgba(0, 0, 0, 0.55),
-                inset 0 0 0 1px rgba(120, 250, 255, 0.16),
-                inset 0 -1px 0 rgba(150, 255, 255, 0.16),
-                0 0 22px rgba(0, 200, 230, 0.18);
+                inset 0 1px 2px rgba(0, 0, 0, 0.58),
+                inset 0 0 0 1px rgba(226, 206, 255, 0.14),
+                inset 0 0 18px rgba(158, 112, 255, 0.22),
+                inset 0 -1px 0 rgba(238, 224, 255, 0.16);
             text-shadow:
-                0 -1px 0 rgba(255, 255, 255, 0.22),
-                0 1px 0 rgba(0, 26, 38, 0.9),
-                0 0 1px rgba(120, 250, 255, 0.6);
+                0 -1px 0 rgba(255, 248, 235, 0.24),
+                0 1px 0 rgba(10, 0, 20, 0.92),
+                0 0 6px rgba(158, 112, 255, 0.4);
         }
 
         /* SECONDARY - a recess cut into the panel, same construction as the score window, but
@@ -1843,16 +2030,15 @@
             font-size: 13px;
             letter-spacing: 0.18em;
             text-indent: 0.18em;
-            color: rgba(206, 240, 250, 0.88);
-            background-color: rgba(0, 2, 6, 0.7);
-            background-image: radial-gradient(circle at 50% 50%,
-                rgba(130, 245, 255, 0.035) 0.5px, rgba(130, 245, 255, 0) 0.75px);
-            background-size: 3px 3px;
-            border: 1px solid rgba(126, 226, 236, 0.22);
+            color: var(--glyph-muted);
+            background-color: rgba(2, 0, 6, 0.72);
+            background-image: repeating-linear-gradient(56deg,
+                rgba(170, 140, 220, 0.014) 0 1px, rgba(170, 140, 220, 0) 1px 7px);
+            border: 1px solid var(--tablet-edge);
             box-shadow:
-                inset 0 1px 2px rgba(0, 0, 0, 0.7),
-                inset 0 -1px 0 rgba(150, 255, 255, 0.06);
-            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.85);
+                inset 0 1px 2px rgba(0, 0, 0, 0.72),
+                inset 0 -1px 0 rgba(238, 224, 255, 0.06);
+            text-shadow: var(--carve);
         }
 
         /* TERTIARY / DESTRUCTIVE - the only control here that discards a run. Given the least
@@ -1872,7 +2058,7 @@
             background-image: none;
             border: 1px solid transparent;
             box-shadow: none;
-            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.85);
+            text-shadow: var(--carve);
         }
         /* Grouping by proximity. RESUME and CONTROLS are both "carry on" actions and stay a
            tight pair; the one control that throws the run away gets extra air above it, so
@@ -1888,23 +2074,24 @@
            for them anyway. */
         @media (hover: hover) and (pointer: fine) {
             #pause-overlay .pause-btn-primary:hover {
-                color: #f6ffff;
-                border-color: rgba(170, 250, 255, 0.85);
-                background-color: rgba(0, 38, 54, 0.85);
+                color: #fdf7ff;
+                border-color: rgba(226, 206, 255, 0.75);
+                background-color: rgba(24, 12, 44, 0.88);
                 box-shadow:
-                    inset 0 1px 2px rgba(0, 0, 0, 0.5),
-                    inset 0 0 0 1px rgba(150, 253, 255, 0.24),
-                    inset 0 -1px 0 rgba(170, 255, 255, 0.2),
-                    0 0 28px rgba(0, 210, 240, 0.28);
+                    inset 0 1px 2px rgba(0, 0, 0, 0.52),
+                    inset 0 0 0 1px rgba(238, 224, 255, 0.22),
+                    inset 0 0 26px rgba(158, 112, 255, 0.3),
+                    inset 0 -1px 0 rgba(238, 224, 255, 0.2);
             }
             #pause-overlay .pause-btn-secondary:hover {
-                color: #eafcff;
-                border-color: rgba(150, 245, 255, 0.5);
-                background-color: rgba(0, 16, 26, 0.8);
+                color: var(--glyph-primary);
+                border-color: var(--tablet-edge-strong);
+                background-color: rgba(12, 6, 24, 0.82);
                 box-shadow:
-                    inset 0 1px 2px rgba(0, 0, 0, 0.6),
-                    inset 0 0 0 1px rgba(120, 250, 255, 0.12),
-                    inset 0 -1px 0 rgba(150, 255, 255, 0.1);
+                    inset 0 1px 2px rgba(0, 0, 0, 0.62),
+                    inset 0 0 0 1px rgba(226, 206, 255, 0.12),
+                    inset 0 0 14px rgba(158, 112, 255, 0.16),
+                    inset 0 -1px 0 rgba(238, 224, 255, 0.1);
             }
             #pause-overlay .pause-btn-reset:hover {
                 color: #f4e9ff;
@@ -1929,7 +2116,7 @@
         #pause-overlay .pause-btn-secondary:active {
             color: #f2ffff;
             background-color: rgba(0, 8, 14, 0.9);
-            border-color: rgba(150, 245, 255, 0.55);
+            border-color: rgba(216, 184, 122, 0.5);
             box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.85);
         }
         #pause-overlay .pause-btn-reset:active {
@@ -1981,7 +2168,7 @@
             font-weight: 700;
             letter-spacing: 0.18em;
             text-transform: uppercase;
-            color: rgba(150, 245, 255, 0.55);
+            color: rgba(216, 184, 122, 0.62);
         }
         .pause-summary-row dd {
             margin: 0;
@@ -1991,7 +2178,7 @@
             font-weight: 800;
             font-variant-numeric: tabular-nums lining-nums;
             letter-spacing: 0.02em;
-            color: rgba(214, 245, 255, 0.9);
+            color: var(--glyph-primary);
             text-align: right;
             /* A long value truncates rather than wrapping the row into two lines and breaking the
                summary's rhythm. */
@@ -2038,7 +2225,7 @@
             font-weight: 600;
             letter-spacing: 0.14em;
             text-transform: uppercase;
-            color: rgba(160, 210, 235, 0.45);
+            color: rgba(210, 197, 232, 0.45);
         }
         /* Platform copy, same mechanism as the title screen's hint: a coarse-pointer media query
            as the pre-script default, then [data-touch-controls] once the game has decided. */
@@ -2073,8 +2260,11 @@
         .control-row .key {
             display: block;
             font-size: clamp(16px, 4vw, 20px);
-            font-weight: bold;
-            color: #00ffff;
+            font-weight: 600;
+            /* The key itself is the inscription on the controls tablet - gold, carved, and the one
+               accent on that screen. */
+            color: var(--glyph-gold);
+            text-shadow: var(--carve);
         }
         .control-row .action {
             display: block;
@@ -2105,16 +2295,18 @@
             box-sizing: border-box;
             border-radius: 14px;
             /* The four properties that make this the same material as .pause-panel and
-               #player-hud: near-black face, 3px dot-matrix grain, 1px bezel, panel shadow. */
-            background-color: rgba(6, 3, 14, 0.86);
-            background-image: radial-gradient(circle at 50% 50%,
-                rgba(130, 245, 255, 0.03) 0.5px, rgba(130, 245, 255, 0) 0.75px);
-            background-size: 3px 3px;
-            border: 1px solid rgba(126, 226, 236, 0.30);
+               #player-hud: near-black face, mineral grain, 1px carved edge, panel shadow. */
+            background-color: rgba(5, 2, 10, 0.88);
+            background-image:
+                repeating-linear-gradient(180deg,
+                    rgba(198, 176, 240, 0.012) 0 1px, rgba(198, 176, 240, 0) 1px 3px),
+                repeating-linear-gradient(56deg,
+                    rgba(150, 120, 200, 0.013) 0 1px, rgba(150, 120, 200, 0) 1px 7px);
+            border: 1px solid var(--tablet-edge);
             box-shadow:
-                inset 0 1px 0 rgba(170, 240, 255, 0.13),
-                inset 0 0 46px rgba(138, 43, 226, 0.10),
-                0 20px 52px rgba(0, 0, 0, 0.55);
+                inset 0 1px 0 rgba(238, 224, 255, 0.12),
+                inset 0 0 46px rgba(90, 50, 150, 0.16),
+                0 20px 52px rgba(0, 0, 0, 0.58);
         }
 
         /* The heading drops the old neon entirely. It was `color:#ff0099` with a 12px magenta
@@ -2123,14 +2315,15 @@
            1px-lit-edge treatment the pause heading uses instead. */
         #gameover-overlay h1 {
             margin: 0;
-            font-family: var(--hud-label-font);
+            /* DISPLAY role, same call as the pause heading above. */
+            font-family: var(--mystic-display-font);
             font-size: 19px;
             font-weight: 700;
             letter-spacing: 0.20em;
             text-indent: 0.20em;
             text-transform: uppercase;
-            color: rgba(163, 246, 255, 0.94);
-            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.8), 0 0 1px rgba(120, 250, 255, 0.55);
+            color: var(--glyph-primary);
+            text-shadow: var(--carve-violet);
         }
 
         .over-score { text-align: center; }
@@ -2141,7 +2334,7 @@
             font-weight: 700;
             letter-spacing: 0.18em;
             text-transform: uppercase;
-            color: rgba(150, 245, 255, 0.55);
+            color: rgba(216, 184, 122, 0.62);
         }
         /* The one large readout on the panel, in the HUD's own digit face with tabular figures so
            a six-digit score does not jitter against a five-digit one. */
@@ -2153,8 +2346,8 @@
             font-variant-numeric: tabular-nums lining-nums;
             letter-spacing: 0.01em;
             line-height: 1.05;
-            color: rgba(226, 250, 255, 0.96);
-            text-shadow: 0 1px 0 rgba(0, 20, 30, 0.8), 0 0 2px rgba(120, 250, 255, 0.4);
+            color: var(--glyph-primary);
+            text-shadow: var(--carve-violet);
         }
 
         /* Summary rows: .pause-summary's legend/readout split at the same sizes, so the two
@@ -2181,7 +2374,7 @@
             font-weight: 700;
             letter-spacing: 0.18em;
             text-transform: uppercase;
-            color: rgba(150, 245, 255, 0.55);
+            color: rgba(216, 184, 122, 0.62);
         }
         .over-summary-row dd {
             margin: 0;
@@ -2191,7 +2384,7 @@
             font-weight: 800;
             font-variant-numeric: tabular-nums lining-nums;
             letter-spacing: 0.02em;
-            color: rgba(214, 245, 255, 0.9);
+            color: var(--glyph-primary);
             text-align: right;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -2229,22 +2422,31 @@
             min-height: 56px;
             border-radius: 10px;
             cursor: pointer;
-            color: rgba(228, 252, 255, 0.97);
-            background: linear-gradient(180deg, rgba(0, 190, 214, 0.30), rgba(0, 120, 150, 0.20));
-            border: 1px solid rgba(120, 240, 255, 0.55);
+            /* Same call as the pause panel's primary: the one lit inscription on the tablet. The
+               teal gradient and its 18px outward spill become stone with the light inside it. */
+            color: var(--glyph-primary);
+            background-color: rgba(16, 8, 30, 0.82);
+            background-image:
+                linear-gradient(180deg, rgba(255, 250, 255, 0.04) 0%, rgba(0, 0, 0, 0.22) 100%),
+                repeating-linear-gradient(56deg,
+                    rgba(170, 140, 220, 0.02) 0 1px, rgba(170, 140, 220, 0) 1px 7px);
+            border: 1px solid rgba(206, 184, 246, 0.5);
+            text-shadow: var(--carve);
             box-shadow:
-                inset 0 1px 0 rgba(190, 250, 255, 0.22),
-                0 0 18px rgba(0, 220, 255, 0.16);
+                inset 0 1px 0 rgba(238, 224, 255, 0.16),
+                inset 0 0 18px rgba(158, 112, 255, 0.22),
+                inset 0 -1px 0 rgba(238, 224, 255, 0.14);
             transition: background 120ms ease, box-shadow 120ms ease, transform 60ms ease;
         }
         /* Hover gated behind a real pointer, and :active kept a separate state from hover, both
            matching how the pause buttons handle the same problem on touch. */
         @media (hover: hover) and (pointer: fine) {
             #gameover-overlay .over-btn:hover {
-                background: linear-gradient(180deg, rgba(0, 214, 240, 0.40), rgba(0, 140, 172, 0.26));
+                background-color: rgba(24, 12, 44, 0.88);
                 box-shadow:
-                    inset 0 1px 0 rgba(200, 252, 255, 0.28),
-                    0 0 26px rgba(0, 230, 255, 0.26);
+                    inset 0 1px 0 rgba(238, 224, 255, 0.22),
+                    inset 0 0 26px rgba(158, 112, 255, 0.3),
+                    inset 0 -1px 0 rgba(238, 224, 255, 0.18);
             }
         }
         #gameover-overlay .over-btn:active {
@@ -2252,7 +2454,7 @@
             box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
         }
         #gameover-overlay .over-btn:focus-visible {
-            outline: 2px solid rgba(150, 245, 255, 0.9);
+            outline: 2px solid rgba(255, 248, 235, 0.95);
             outline-offset: 3px;
         }
 
@@ -2270,7 +2472,7 @@
             font-weight: 700;
             letter-spacing: 0.18em;
             text-transform: uppercase;
-            color: rgba(150, 245, 255, 0.38);
+            color: rgba(210, 197, 232, 0.38);
         }
         /* Multi-column, NOT a two-column grid, and the difference is reading order. A grid fills
            row-major, so a tally list laid out that way reads BUMPERS, COMET / SATURN, TARGETS -
@@ -2298,7 +2500,7 @@
             font-weight: 600;
             letter-spacing: 0.10em;
             text-transform: uppercase;
-            color: rgba(160, 210, 235, 0.5);
+            color: rgba(210, 197, 232, 0.5);
         }
         #gameover-stats p span {
             flex: 0 0 auto;
@@ -2320,7 +2522,7 @@
             font-weight: 600;
             letter-spacing: 0.14em;
             text-transform: uppercase;
-            color: rgba(160, 210, 235, 0.45);
+            color: rgba(210, 197, 232, 0.45);
         }
 
         /* Mobile-first scale-up, same shape as the pause panel's: size only, no layout change. */
@@ -2353,9 +2555,18 @@
             height: 44px;
             border-radius: 50%;
             font-size: 20px;
-            color: #00ffff;
-            background: rgba(10, 0, 25, 0.8);
-            border: 2px solid #00ffff;
+            /* A small carved disc rather than a cyan ring. Border 2px -> 1px; the button is a
+               fixed 44px square with no padding, so its box and its 44px touch target are
+               unchanged by construction. */
+            color: var(--glyph-muted);
+            background-color: rgba(5, 2, 10, 0.86);
+            background-image:
+                linear-gradient(180deg, rgba(255, 250, 255, 0.05) 0%, rgba(0, 0, 0, 0.25) 100%);
+            border: 1px solid var(--tablet-edge-strong);
+            box-shadow:
+                inset 0 1px 0 rgba(238, 224, 255, 0.12),
+                0 0 0 1px rgba(0, 0, 0, 0.5);
+            text-shadow: var(--carve);
             cursor: pointer;
             touch-action: none;
         }
