@@ -273,21 +273,86 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // needed. Every play function is wrapped defensively - audio is decorative, a failure here
     // must never break gameplay (same philosophy as vibrateDevice() above).
     // ===================================
+    // ===================================
+    // PHASE 1 - one centralized audio controller.
+    //
+    // The block above describes the SFX-only foundation this extends. What changes is the
+    // routing and the ownership of state; what does NOT change is a single play*Sound() function,
+    // a single gameplay call site, or the lazy "no AudioContext until a real gesture" rule that
+    // made the original autoplay-safe. Every synthesized effect still sounds exactly as it did.
+    //
+    // THREE GAIN STAGES, in place of the single master the old code had:
+    //
+    //     playTone / playNoiseClick / rolling loop  ->  sfxGainNode   -.
+    //                                                                  >-> masterGainNode -> destination
+    //     looping music sources -> per-track gain  ->  musicGainNode -'
+    //
+    // That shape is what lets music and SFX carry independent 0-1 volumes while master mute stays
+    // ONE multiplication at the end - so a mute still silences sounds already mid-decay, which is
+    // the property the original single-bus design was chosen for and is worth keeping.
+    //
+    // WHY THE SFX PATH IS A THREE-LINE CHANGE. The old code had exactly three
+    // `connect(masterGainNode)` calls (playTone, playNoiseClick, initRollingSound). Those three
+    // now connect to sfxGainNode instead. Nothing else in the file references the bus, so no
+    // caller had to move.
+    // ===================================
     let audioCtx = null;
     let masterGainNode = null;
-    // High-score audit fix (same "storage failures never break the game" policy the fix was
-    // written for, applied here too): this runs at module load, before main() and its own
-    // defensive high-score storage wrapper even exist - a throwing localStorage (blocked/disabled
-    // storage in the current context) used to take the ENTIRE game down before a single frame
-    // rendered, matching this block's own "a failure here must never break gameplay" comment in
-    // spirit but not, until now, in the actual code.
-    let audioMuted = false;
-    try {
-        audioMuted = localStorage.getItem('spiritball-muted') === 'true';
-    } catch (e) {
-        // Default to unmuted and move on - see the comment above.
+    let musicGainNode = null;
+    let sfxGainNode = null;
+    let audioUnlocked = false;
+
+    // Storage keys. The two volumes are new; the mute key is the ORIGINAL one, deliberately.
+    //
+    // MIGRATION. 'spiritball-muted' already means exactly "master mute", it is already persisted
+    // by shipped builds, and players have it set. Reading it under a new name and abandoning the
+    // old one would silently reset every existing player's preference on their next visit, so the
+    // new namespaced key is written as the primary and the legacy key is kept in sync on every
+    // write. A build that predates this pass (a cached tab, a stale service worker) therefore
+    // still sees the right value, and this build adopts the legacy value when the new key is
+    // absent. Neither direction loses the setting.
+    const AUDIO_STORE_MUTED = 'spiritball-audio-muted';
+    const AUDIO_STORE_MUTED_LEGACY = 'spiritball-muted';
+    const AUDIO_STORE_MUSIC_VOL = 'spiritball-audio-music-volume';
+    const AUDIO_STORE_SFX_VOL = 'spiritball-audio-sfx-volume';
+
+    // Every storage touch in this block goes through these two. Same policy the original mute
+    // read already established, and for the same reason it was written: this runs at MODULE LOAD,
+    // before main() and its own defensive storage wrapper exist, so a blocked/disabled
+    // localStorage must not be able to take the game down before a frame renders.
+    function readStoredAudio(key) {
+        try {
+            return localStorage.getItem(key);
+        } catch (e) {
+            return null;
+        }
+    }
+    function writeStoredAudio(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch (e) {
+            // Storage unavailable/blocked - the setting still works for this session, it just
+            // won't be remembered next time.
+        }
     }
 
+    // A stored volume is only honoured if it parses to a real number in 0-1. Anything else (a
+    // hand-edited value, a string from another app sharing the origin, NaN) falls back to the
+    // default rather than propagating into a gain node.
+    function clampVolume(value, fallback) {
+        const n = typeof value === 'number' ? value : parseFloat(value);
+        if (!isFinite(n)) return fallback;
+        return Math.max(0, Math.min(1, n));
+    }
+
+    const AUDIO_DEFAULT_MUSIC_VOLUME = 0.55; // music sits under the effects by default
+    const AUDIO_DEFAULT_SFX_VOLUME = 1;
+
+    let audioMuted = (readStoredAudio(AUDIO_STORE_MUTED) || readStoredAudio(AUDIO_STORE_MUTED_LEGACY)) === 'true';
+    let musicVolume = clampVolume(readStoredAudio(AUDIO_STORE_MUSIC_VOL), AUDIO_DEFAULT_MUSIC_VOLUME);
+    let sfxVolume = clampVolume(readStoredAudio(AUDIO_STORE_SFX_VOL), AUDIO_DEFAULT_SFX_VOLUME);
+
+    // Builds the bus once. Deliberately NOT called at module load - see unlockAudio().
     function getAudioContext() {
         if (!audioCtx) {
             try {
@@ -297,6 +362,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 masterGainNode = audioCtx.createGain();
                 masterGainNode.gain.value = audioMuted ? 0 : 1;
                 masterGainNode.connect(audioCtx.destination);
+
+                musicGainNode = audioCtx.createGain();
+                musicGainNode.gain.value = musicVolume;
+                musicGainNode.connect(masterGainNode);
+
+                sfxGainNode = audioCtx.createGain();
+                sfxGainNode.gain.value = sfxVolume;
+                sfxGainNode.connect(masterGainNode);
             } catch (e) {
                 return null;
             }
@@ -307,19 +380,250 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return audioCtx;
     }
 
-    function setAudioMuted(muted) {
-        audioMuted = muted;
-        try {
-            localStorage.setItem('spiritball-muted', String(muted));
-        } catch (e) {
-            // Storage unavailable/blocked - the toggle still works for this session, it just
-            // won't be remembered next time. Same policy as the read above.
+    // Call ONLY from a real user gesture (pointerdown/keydown/touchstart handler). Creating or
+    // resuming an AudioContext outside a gesture is what browser autoplay policy blocks, and a
+    // context created too early lands in 'suspended' and stays there.
+    //
+    // Safe to call repeatedly - it is idempotent, and re-calling it on a later gesture is in fact
+    // how a context that got suspended (tab backgrounded, iOS interruption) gets resumed.
+    function unlockAudio() {
+        const ctx = getAudioContext();
+        if (!ctx) return false;
+        audioUnlocked = true;
+        // A scene requested before the first gesture was recorded rather than played (see
+        // setAudioScene) - now that there is a live context, honour it.
+        if (pendingAudioScene !== null) {
+            const scene = pendingAudioScene;
+            pendingAudioScene = null;
+            applyAudioScene(scene);
         }
-        if (masterGainNode) masterGainNode.gain.value = muted ? 0 : 1;
+        return true;
+    }
+
+    function isAudioUnlocked() {
+        return audioUnlocked;
+    }
+
+    function setMasterMuted(muted) {
+        audioMuted = !!muted;
+        writeStoredAudio(AUDIO_STORE_MUTED, String(audioMuted));
+        writeStoredAudio(AUDIO_STORE_MUTED_LEGACY, String(audioMuted)); // see the MIGRATION note above
+        if (masterGainNode) masterGainNode.gain.value = audioMuted ? 0 : 1;
+    }
+
+    function isMasterMuted() {
+        return audioMuted;
+    }
+
+    function setMusicVolume(value) {
+        musicVolume = clampVolume(value, AUDIO_DEFAULT_MUSIC_VOLUME);
+        writeStoredAudio(AUDIO_STORE_MUSIC_VOL, String(musicVolume));
+        // Written directly, not ramped: this is a settings change, and any fade currently running
+        // is on a per-TRACK gain node one stage further in, so a crossfade in flight is unaffected.
+        if (musicGainNode) musicGainNode.gain.value = musicVolume;
+    }
+
+    function getMusicVolume() {
+        return musicVolume;
+    }
+
+    function setSfxVolume(value) {
+        sfxVolume = clampVolume(value, AUDIO_DEFAULT_SFX_VOLUME);
+        writeStoredAudio(AUDIO_STORE_SFX_VOL, String(sfxVolume));
+        if (sfxGainNode) sfxGainNode.gain.value = sfxVolume;
+    }
+
+    function getSfxVolume() {
+        return sfxVolume;
+    }
+
+    // The original two names, kept as wrappers so the Controls-screen mute button and any other
+    // existing caller needs no edit.
+    function setAudioMuted(muted) {
+        setMasterMuted(muted);
     }
 
     function isAudioMuted() {
-        return audioMuted;
+        return isMasterMuted();
+    }
+
+    // ===================================
+    // Music - looping Web Audio sources with cancellable crossfades.
+    //
+    // WHY new URL(file, import.meta.url) AND NOT A BARE STRING. Both track filenames contain
+    // SPACES, and one contains a hyphen surrounded by them. A bare './SPIRITBALL - Cosmic
+    // Drift.mp3' handed to fetch() is resolved against the DOCUMENT's URL, not this module's, and
+    // is not percent-encoded - which breaks the moment the game is served from a project
+    // subpath rather than a domain root, exactly what GitHub Pages does
+    // (/SPIRITBALL/index.html). new URL(..., import.meta.url) resolves against THIS FILE and
+    // percent-encodes the spaces, so the request is correct in both layouts. This file is loaded
+    // with <script type="module"> (see index.html), so import.meta is available.
+    //
+    // EVERYTHING HERE FAILS SILENTLY. A missing file, a 404 from a stale cache, a decode error on
+    // a browser without MP3 support, an AudioContext that never unlocked - each results in no
+    // music and nothing else. Gameplay never waits on, or is blocked by, any of it: no await in a
+    // frame path, no throw that escapes, no promise rejection left unhandled.
+    // ===================================
+    const MUSIC_TRACKS = {
+        cosmicDrift: 'SPIRITBALL - Cosmic Drift.mp3',
+        multiverseVelocity: 'SPIRITBALL Gameplay - Multiverse Velocity.mp3'
+    };
+
+    const MUSIC_FADE_S = 1.2;        // crossfade / fade-in / fade-out length
+    const MUSIC_PAUSE_DUCK = 0.35;   // 'paused' keeps the gameplay track playing, ducked - a hard
+                                     // cut on pause and a restart on resume is far more jarring
+
+    // Scene -> what should be playing. `null` track means silence. `duck` scales the track's own
+    // gain, leaving the player's music volume untouched.
+    const AUDIO_SCENES = {
+        silent: { track: null, duck: 0 },
+        menu: { track: 'cosmicDrift', duck: 1 },
+        gameplay: { track: 'multiverseVelocity', duck: 1 },
+        paused: { track: 'multiverseVelocity', duck: MUSIC_PAUSE_DUCK },
+        gameover: { track: 'cosmicDrift', duck: 1 }
+    };
+
+    // key -> Promise<AudioBuffer|null>. The PROMISE is cached, not just the result, which is what
+    // makes a second request for a track already in flight join the first instead of starting a
+    // second fetch. A failure caches a resolved-null, so a missing file is attempted once per
+    // session rather than re-fetched on every scene change.
+    const musicBufferCache = new Map();
+
+    function loadMusicBuffer(key) {
+        if (musicBufferCache.has(key)) return musicBufferCache.get(key);
+        const filename = MUSIC_TRACKS[key];
+        if (!filename) return Promise.resolve(null);
+
+        const promise = (async () => {
+            try {
+                const ctx = getAudioContext();
+                if (!ctx) return null;
+                const url = new URL(filename, import.meta.url);
+                const response = await fetch(url);
+                if (!response || !response.ok) return null;
+                const bytes = await response.arrayBuffer();
+                // decodeAudioData's promise form is not universal on older Safari; the callback
+                // form is. Wrapping it covers both without a feature test.
+                return await new Promise((resolve) => {
+                    let settled = false;
+                    const done = (buffer) => { if (!settled) { settled = true; resolve(buffer || null); } };
+                    try {
+                        const maybe = ctx.decodeAudioData(bytes, (buffer) => done(buffer), () => done(null));
+                        if (maybe && typeof maybe.then === 'function') maybe.then(done, () => done(null));
+                    } catch (e) {
+                        done(null);
+                    }
+                });
+            } catch (e) {
+                return null; // network failure, bad URL, blocked request - silence, not a crash
+            }
+        })();
+
+        musicBufferCache.set(key, promise);
+        return promise;
+    }
+
+    // The one playing track, if any: { key, source, gain, duck }. Exactly one source node per
+    // track is ever live, and starting the track that is already current is a no-op - together
+    // those are what prevent the overlapping-copies bug this kind of controller usually grows.
+    let currentMusic = null;
+    let pendingAudioScene = null;   // a scene asked for before the first gesture
+    let currentAudioScene = 'silent';
+    // Incremented by every scene change. An async load that resolves after a newer scene was
+    // requested compares its captured token against this and drops its result, so a slow first
+    // fetch can never start a track the player has already moved on from.
+    let musicRequestToken = 0;
+
+    // Cancels any ramp in flight on a gain and starts a new one from wherever the value ACTUALLY
+    // is right now - not from where the cancelled ramp was headed. That is what makes a fade
+    // interruptible mid-flight without a click.
+    function rampMusicGain(gainNode, target, seconds) {
+        const ctx = audioCtx;
+        if (!ctx || !gainNode) return;
+        try {
+            const now = ctx.currentTime;
+            const current = gainNode.gain.value;
+            gainNode.gain.cancelScheduledValues(now);
+            gainNode.gain.setValueAtTime(current, now);
+            gainNode.gain.linearRampToValueAtTime(target, now + Math.max(0.01, seconds));
+        } catch (e) { /* decorative */ }
+    }
+
+    function stopMusicEntry(entry, seconds) {
+        if (!entry) return;
+        rampMusicGain(entry.gain, 0, seconds);
+        try {
+            const stopAt = audioCtx.currentTime + Math.max(0.01, seconds) + 0.05;
+            entry.source.stop(stopAt);
+            // Release the node graph once it has actually finished, so a long session that
+            // changes scene repeatedly does not accumulate dead sources.
+            entry.source.onended = () => {
+                try { entry.source.disconnect(); entry.gain.disconnect(); } catch (e) { /* already gone */ }
+            };
+        } catch (e) { /* already stopped */ }
+    }
+
+    // Applies a scene for real. Assumes a live context (unlockAudio gates this).
+    function applyAudioScene(sceneName) {
+        const scene = AUDIO_SCENES[sceneName];
+        if (!scene) return;
+        currentAudioScene = sceneName;
+        const token = ++musicRequestToken;
+
+        // Same track, different duck (gameplay <-> paused): ride the existing source's gain
+        // rather than restarting it. No new fetch, no new node, no gap.
+        if (currentMusic && currentMusic.key === scene.track) {
+            currentMusic.duck = scene.duck;
+            rampMusicGain(currentMusic.gain, scene.duck, MUSIC_FADE_S);
+            return;
+        }
+
+        if (!scene.track) {
+            stopMusicEntry(currentMusic, MUSIC_FADE_S);
+            currentMusic = null;
+            return;
+        }
+
+        loadMusicBuffer(scene.track).then((buffer) => {
+            // A newer scene was requested while this was loading - drop it.
+            if (token !== musicRequestToken) return;
+            if (!buffer) return;                       // load/decode failed - silence, no throw
+            const ctx = audioCtx;
+            if (!ctx || !musicGainNode) return;
+            if (currentMusic && currentMusic.key === scene.track) return; // already started
+            try {
+                const source = ctx.createBufferSource();
+                source.buffer = buffer;
+                source.loop = true;
+                const gain = ctx.createGain();
+                gain.gain.value = 0;                   // always fade IN, never a hard start
+                source.connect(gain);
+                gain.connect(musicGainNode);
+                source.start();
+
+                const outgoing = currentMusic;
+                currentMusic = { key: scene.track, source, gain, duck: scene.duck };
+                rampMusicGain(gain, scene.duck, MUSIC_FADE_S);
+                stopMusicEntry(outgoing, MUSIC_FADE_S); // the crossfade: both ramps run together
+            } catch (e) { /* decorative */ }
+        }).catch(() => { /* loadMusicBuffer already swallows; belt and braces */ });
+    }
+
+    // The public entry point. Callable at any time, including before the first gesture: with no
+    // context yet it records the request and unlockAudio() plays it on the next real gesture.
+    // Nothing here creates an AudioContext, so this can never trip autoplay policy.
+    function setAudioScene(sceneName) {
+        if (!AUDIO_SCENES[sceneName]) return;
+        if (!audioUnlocked || !audioCtx) {
+            pendingAudioScene = sceneName;
+            currentAudioScene = sceneName;
+            return;
+        }
+        applyAudioScene(sceneName);
+    }
+
+    function getAudioScene() {
+        return currentAudioScene;
     }
 
     // Continuous ball-rolling texture (user-requested) - tuning for updateRollingSound()/
@@ -355,7 +659,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             gain.gain.setValueAtTime(volume, ctx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + durationS);
             osc.connect(gain);
-            gain.connect(masterGainNode);
+            gain.connect(sfxGainNode); // SFX bus (was masterGainNode) - see the three-stage note above
             osc.start();
             osc.stop(ctx.currentTime + durationS);
         } catch (e) { /* decorative only - never let a failure break gameplay */ }
@@ -379,7 +683,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const gain = ctx.createGain();
             gain.gain.value = volume;
             source.connect(gain);
-            gain.connect(masterGainNode);
+            gain.connect(sfxGainNode); // SFX bus (was masterGainNode)
             source.start();
         } catch (e) { /* ignore */ }
     }
@@ -636,7 +940,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
             source.connect(filter);
             filter.connect(gain);
-            gain.connect(masterGainNode); // shared master gain, same as every other sound - respects mute automatically
+            gain.connect(sfxGainNode); // shared SFX bus, same as every other effect - respects the SFX volume and master mute automatically
             source.start();
 
             rollingSoundNodes = { source, filter, gain };
@@ -11829,6 +12133,35 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             window.__flipperDebug = {
                 leftFlipper, rightFlipper, FLIPPER_SWEEP_RAD, FLIPPER_LENGTH_M, mainBall, scene,
                 isBallInPlay() { return ballInPlay; },
+                // Audio controller (Phase 1), on the same ?dev=1-only, no-effect-on-a-real-player
+                // terms as everything else on this hook. Phase 2's screen transitions will call
+                // these from inside the module and will not need the hook - it exists so the
+                // controller is drivable from qa/audio-controller.js before any of it is wired,
+                // and so the bus can be inspected without a second/competing implementation.
+                audio: {
+                    unlockAudio, isAudioUnlocked, setAudioScene, getAudioScene,
+                    setMasterMuted, isMasterMuted,
+                    setMusicVolume, getMusicVolume, setSfxVolume, getSfxVolume,
+                    // Read-only introspection for the gain-stage assertions.
+                    gains() {
+                        return {
+                            master: masterGainNode ? masterGainNode.gain.value : null,
+                            music: musicGainNode ? musicGainNode.gain.value : null,
+                            sfx: sfxGainNode ? sfxGainNode.gain.value : null
+                        };
+                    },
+                    // Which track is live, and how many distinct fetch/decode promises exist -
+                    // the two facts the "no duplicate sources / no duplicate fetches" checks need.
+                    musicState() {
+                        return {
+                            key: currentMusic ? currentMusic.key : null,
+                            duck: currentMusic ? currentMusic.duck : null,
+                            trackGain: currentMusic ? currentMusic.gain.gain.value : null,
+                            cachedBuffers: musicBufferCache.size,
+                            contextState: audioCtx ? audioCtx.state : null
+                        };
+                    }
+                },
                 // Attract-camera introspection, for qa/attract-camera.js. Scrubbing the cycle
                 // clock is the only way to inspect a specific framing: the shots are 13.5s apart,
                 // so waiting for them in real time would make that suite minutes long. The timing
