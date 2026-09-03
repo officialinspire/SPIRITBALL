@@ -626,6 +626,66 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         return currentAudioScene;
     }
 
+    // ===================================
+    // Startup phase machine (Phase 2).
+    //
+    //     loading -> gate -> intro -> menu -> gameplay
+    //
+    // ONE authoritative variable. The old flow had no phase at all: "are we at the menu?" was
+    // answered by a menuUp boolean, and before that by reading #menu-overlay's computed display -
+    // the comment on hideMenuScreen() records why that second version was a bug (a fade makes the
+    // CSS lie about state for 170ms and swallow the input arriving during it). Adding two more
+    // screens in front of the menu makes that failure mode worse, not better, so nothing here
+    // reads visibility: the overlays are a CONSEQUENCE of the phase, never its storage.
+    //
+    // Module scope, because the handlers that must be gated by it (flippers, launch, Escape,
+    // pause button, window blur) are spread across main() and each captures it by closure.
+    // ===================================
+    const PHASE = Object.freeze({
+        LOADING: 'loading',
+        GATE: 'gate',
+        INTRO: 'intro',
+        MENU: 'menu',
+        GAMEPLAY: 'gameplay'
+    });
+    let startupPhase = PHASE.LOADING;
+
+    function getStartupPhase() {
+        return startupPhase;
+    }
+
+    function setStartupPhase(phase) {
+        startupPhase = phase;
+    }
+
+    // The single gate every gameplay input asks. During loading/gate/intro the player is looking
+    // at a full-screen overlay and NOTHING behind it may respond - not a flipper, not a plunger
+    // charge, not Escape, not the pause button. The overlays already block the pointer; this is
+    // what blocks the keyboard, which they cannot.
+    //
+    // Menu and gameplay are deliberately BOTH permissive here, because the menu's existing
+    // behaviour (Space dismisses it, arrows already flip behind it) is preserved by this pass
+    // rather than changed by it.
+    function startupBlocksInput() {
+        return startupPhase === PHASE.LOADING
+            || startupPhase === PHASE.GATE
+            || startupPhase === PHASE.INTRO;
+    }
+
+    // ?dev=1 skips gate+intro and lands on the menu, which is exactly the flow every existing
+    // automated test was written against - qa/menu-interaction.js and friends open ?dev=1 and
+    // expect the title screen immediately. ?dev=1&intro=1 opts a dev/QA session back into the
+    // full sequence so the new path is testable. A normal URL always shows the full sequence.
+    function startupWantsIntro() {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            if (!params.has('dev')) return true;        // normal player: always the full sequence
+            return params.has('intro');                  // dev session: only when asked for
+        } catch (e) {
+            return true; // an unparseable URL is not a reason to skip the product's own intro
+        }
+    }
+
     // Continuous ball-rolling texture (user-requested) - tuning for updateRollingSound()/
     // initRollingSound() further below. Mapped against the same MAX_BALL_SPEED_MS ceiling every
     // other speed-based system in this file already uses, not a separately-invented range.
@@ -8462,6 +8522,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // press - see its own comment), turning a harmless chord into a phantom launch; and
             // Escape's only chords (Ctrl/Alt+Esc) background the window, where the blur handler's
             // openPauseMenu() already produces the exact same, idempotent result.
+            // Phase gate (Phase 2): during loading/gate/intro the player is looking at a
+            // full-screen overlay and nothing behind it may respond. The overlays block the
+            // pointer; only this blocks the keyboard.
+            if (startupBlocksInput()) return;
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             // Optional "lane change" mechanic (rotateLaneLamps()) - checked on the off->on edge,
             // BEFORE activateFlipper() flips flipper.active to true, same guard activateFlipper()
@@ -8486,6 +8550,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // looked unusual. deactivateFlipper() is idempotent, so an unmatched keyup is a harmless
         // no-op; a filtered one would be a flipper stuck up for the rest of the ball.
         window.addEventListener('keyup', (e) => {
+            // Phase gate. Safe to bail on release here, unlike the modifier case the comment
+            // above refuses to filter: during loading/gate/intro the keydown was blocked too, so
+            // there is no held flipper this could strand up.
+            if (startupBlocksInput()) return;
             if (e.code === 'ArrowLeft') deactivateFlipper(leftFlipper);
             if (e.code === 'ArrowRight') deactivateFlipper(rightFlipper);
         });
@@ -8756,6 +8824,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // *.md's desktop-launch-after-death fix, ported here since Stage 5's acceptance criteria
         // calls out the exact same scenario).
         function handleLaunchPress() {
+            if (startupBlocksInput()) return; // nothing may charge the plunger before the menu exists
             endAttractMode(); // first launch input ends attract mode, even if this press turns out to be a no-op below
             if (ballInPlay || isPaused) return;
             plungerCharging = true;
@@ -8775,6 +8844,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Space mid-pause produced backglass.state.message === 'LAUNCH!' while the pause overlay
         // was still showing.
         function handleLaunchRelease() {
+            if (startupBlocksInput()) return; // pairs with the press gate above
             // Gameplay-QA regression fix: a drain just happened but resetBallToPlunger() hasn't
             // run yet - the ball is still wherever it physically landed (mid-fall,
             // well below the table), not at the plunger. Without this guard, a launch input
@@ -8860,6 +8930,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         window.addEventListener('keydown', (e) => {
             if (e.code !== 'Space') return;
             e.preventDefault(); // stop the page from scrolling on spacebar
+            // Phase gate: the gate's own button and the intro's Space handler own this key until
+            // the menu exists. Without this, the starting gesture would fall through here and
+            // dismiss a menu the player has not been shown yet.
+            if (startupBlocksInput()) return;
             // Input-boundary audit fix: a real, physically-held key fires keydown repeatedly
             // (browser-native auto-repeat), not just once on the initial press - confirmed via a
             // simulated real-repeat sequence in Playwright (repeat:true keydowns, matching actual
@@ -8903,6 +8977,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         });
         window.addEventListener('keyup', (e) => {
             if (e.code !== 'Space') return;
+            if (startupBlocksInput()) return; // see the keydown gate above
             if (suppressNextLaunchRelease) {
                 suppressNextLaunchRelease = false;
                 return;
@@ -9065,12 +9140,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }
         window.addEventListener('blur', () => {
             forceReleaseAllControls();
-            openPauseMenu();
+            // Releasing controls is always right; opening the pause menu is not, if the player is
+            // still on the gate or watching the intro - there is no game to pause yet.
+            if (!startupBlocksInput()) openPauseMenu();
         });
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 forceReleaseAllControls();
-                openPauseMenu();
+                if (!startupBlocksInput()) openPauseMenu();
             }
         });
 
@@ -11503,8 +11580,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         document.getElementById('menu-highscore').textContent = String(backglass.state.highScore);
         document.getElementById('menu-start-label').textContent =
             touchControlsActive() ? 'TAP TO START' : 'PRESS SPACE TO START';
-        menuOverlay.style.display = 'flex';
-        menuUp = true;
+
+        // Revealing the title screen is now a function rather than three statements, because it
+        // is reached from three places: directly (?dev=1), and from either end of the intro.
+        function showMenuScreen() {
+            if (startupPhase === PHASE.MENU || startupPhase === PHASE.GAMEPLAY) return;
+            setStartupPhase(PHASE.MENU);
+            menuOverlay.style.display = 'flex';
+            menuUp = true;
+        }
         // Deliberately NOT auto-focusing the CTA, despite the overlay's aria-modal. Measured in
         // Chromium: a programmatic .focus() matches :focus-visible even when the player has only
         // ever used the mouse, so autofocus puts a 3px ring around the button on every load for
@@ -11528,15 +11612,19 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // moment the overlay lingers for a fade, every one of them would keep reporting MENU for
         // 170ms and would swallow the input that arrives during it. menuUp is the single source
         // of truth precisely so the visual can take as long as it likes.
+        // Reads the PHASE, not the overlay and not a second boolean that could drift from it.
+        // menuUp is still assigned alongside so the two can be compared in the dev HUD, but this
+        // is the answer every guard gets.
         function isMenuUp() {
-            return menuUp;
+            return startupPhase === PHASE.MENU;
         }
 
         // Idempotent: the click-anywhere handler, the Space handler and a click on the CTA itself
         // can all arrive for one dismissal (a keyboard activation of the button fires both the
         // Space handler and a synthetic click), and re-entering must not restart the fade.
         function hideMenuScreen() {
-            if (!menuUp) return;
+            if (startupPhase !== PHASE.MENU) return;
+            setStartupPhase(PHASE.GAMEPLAY);
             menuUp = false;
             // Name the starting state here too, not only in startNewGame(). Dismissing the title
             // screen never calls startNewGame() - it only hides the overlay and ends attract mode,
@@ -11554,6 +11642,162 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 menuOverlay.style.display = 'none';
                 menuOverlay.classList.remove('is-starting');
             }, MENU_EXIT_MS);
+        }
+
+        // ===================================
+        // Startup gate + INSPIRE intro (Phase 2).
+        //
+        // The gate exists for one reason: browsers require a real user gesture before an
+        // AudioContext may be created and before a video may play with sound. It is the ONE place
+        // that gesture is captured, and unlockAudio() (Phase 1) is called from inside the handler
+        // for it - not from a later timer, which would no longer count as user-activated.
+        //
+        // What the gate gesture must NOT do is anything the game does: it does not dismiss the
+        // menu (the menu has not been shown yet - the phase is GATE, so isMenuUp() is false), it
+        // cannot charge the plunger or flip a flipper (startupBlocksInput() is true for every
+        // handler that could), and it does not start gameplay. It advances one phase and starts a
+        // video. That separation is exactly the one the input-boundary audit had to make for the
+        // menu's own tap-anywhere handler - see its comment below.
+        // ===================================
+        const startupGate = document.getElementById('startup-gate');
+        const startupGateBtn = document.getElementById('startup-gate-btn');
+        const introOverlay = document.getElementById('intro-overlay');
+        const introVideo = document.getElementById('intro-video');
+        const introSkipBtn = document.getElementById('intro-skip-btn');
+        const INTRO_SRC = 'inspiresoftwareintro.mp4';
+        // If the file neither plays nor errors - a server that stalls the response, a codec the
+        // browser accepts and then never decodes - nothing would ever fire and the player would
+        // sit on a black screen. This is the backstop for that: it is cancelled the moment real
+        // playback is observed, so it can only fire when the intro genuinely never started.
+        const INTRO_START_TIMEOUT_MS = 6000;
+        let introStartTimer = null;
+        let introFinished = false;
+        let gateConsumed = false;
+
+        // The ONE exit from the intro. Every path - 'ended', Skip, Space/Enter, a rejected play(),
+        // an 'error' event, a missing file, a decode failure, the watchdog above - calls this and
+        // only this. It is idempotent by its own flag, which matters because several of those can
+        // legitimately arrive together (a Skip click during an error, say).
+        function finishIntro() {
+            if (introFinished) return;
+            introFinished = true;
+            if (introStartTimer !== null) {
+                clearTimeout(introStartTimer);
+                introStartTimer = null;
+            }
+            // Stop and release the video rather than just hiding it: a hidden <video> left with a
+            // src keeps decoding and keeps its audio audible.
+            try {
+                introVideo.pause();
+                introVideo.currentTime = 0;
+                introVideo.removeAttribute('src');
+                introVideo.load();
+            } catch (e) { /* the element is on its way out either way */ }
+            if (introOverlay) introOverlay.hidden = true;
+            showMenuScreen();
+        }
+
+        function beginIntro() {
+            setStartupPhase(PHASE.INTRO);
+            if (startupGate) startupGate.hidden = true;
+            if (!introOverlay || !introVideo) { finishIntro(); return; }
+            introOverlay.hidden = false;
+
+            // Any of these means "this intro is not going to happen" - go straight to the menu.
+            introVideo.addEventListener('ended', finishIntro, { once: true });
+            introVideo.addEventListener('error', finishIntro, { once: true });
+            // Fires when the browser gives up on the resource (404, aborted fetch) - on some
+            // engines this arrives instead of 'error' on the element itself.
+            introVideo.addEventListener('stalled', () => {
+                if (introVideo.readyState === 0) finishIntro();
+            }, { once: true });
+            introVideo.addEventListener('playing', () => {
+                if (introStartTimer !== null) {
+                    clearTimeout(introStartTimer);
+                    introStartTimer = null;
+                }
+            }, { once: true });
+
+            introStartTimer = setTimeout(() => {
+                introStartTimer = null;
+                if (introVideo.readyState < 2 || introVideo.paused) finishIntro();
+            }, INTRO_START_TIMEOUT_MS);
+
+            try {
+                // Same reasoning as the music loader's URL handling: both this filename and the
+                // page can sit under a project subpath on GitHub Pages, and the document-relative
+                // form is the one that breaks there.
+                introVideo.src = new URL(INTRO_SRC, import.meta.url).href;
+                const played = introVideo.play();
+                if (played && typeof played.then === 'function') {
+                    played.catch(() => finishIntro()); // autoplay rejection, decode failure
+                }
+            } catch (e) {
+                finishIntro();
+            }
+        }
+
+        // The gate's single accepted gesture. A native <button> already answers to click, tap,
+        // Enter and Space, so this one listener IS all four - no per-key handling to keep in sync,
+        // and no way for two of them to fire twice. gateConsumed makes "exactly once" explicit
+        // anyway, since a keyboard activation can produce both a keypress and a synthetic click.
+        function consumeStartupGate(e) {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation(); // never let the starting gesture reach the menu or the canvas
+            }
+            if (gateConsumed || startupPhase !== PHASE.GATE) return;
+            gateConsumed = true;
+            // Must be called synchronously inside the gesture handler - this is the user
+            // activation that lets an AudioContext exist at all. Deliberately no setAudioScene()
+            // here: Phase 2 does not start music, and the intro must not be played over.
+            try { unlockAudio(); } catch (err) { /* audio is never allowed to block startup */ }
+            beginIntro();
+        }
+
+        if (startupGateBtn) {
+            startupGateBtn.addEventListener('click', consumeStartupGate);
+            // Space would otherwise scroll the page before the button's own activation lands.
+            startupGateBtn.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter') e.preventDefault();
+            });
+        }
+
+        if (introSkipBtn) {
+            // stopPropagation on both, and on pointerdown as well as click: the click alone would
+            // still let the preceding pointerdown reach the canvas/menu underneath. This is the
+            // "Skip must not bubble into menu/gameplay input" requirement, and it is why Skip is a
+            // real button with its own handler rather than a styled div over the video.
+            introSkipBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+            introSkipBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                finishIntro();
+            });
+        }
+
+        // Space/Enter during the intro. Scoped by phase rather than by adding/removing the
+        // listener, matching this file's existing "one persistent listener that checks state"
+        // convention (see the Escape handler's comment). preventDefault stops Space from
+        // scrolling and from reaching the launch handler, which is separately phase-gated anyway.
+        window.addEventListener('keydown', (e) => {
+            if (startupPhase !== PHASE.INTRO) return;
+            if (e.code !== 'Space' && e.code !== 'Enter' && e.code !== 'NumpadEnter') return;
+            if (e.repeat) return;
+            e.preventDefault();
+            finishIntro();
+        });
+
+        // Entry point for the whole sequence. The scene is ready by the time main() reaches here.
+        if (startupWantsIntro() && startupGate && startupGateBtn) {
+            setStartupPhase(PHASE.GATE);
+            startupGate.hidden = false;
+            document.getElementById('startup-gate-label').textContent =
+                touchControlsActive() ? 'TOUCH TO START' : 'CLICK TO START';
+        } else {
+            // ?dev=1 without &intro=1 - straight to the title screen, which is the flow every
+            // existing automated test was written against.
+            showMenuScreen();
         }
 
         // Tap-anywhere-to-start, matching MenuScene's this.input.once('pointerdown', ...) in
@@ -11914,6 +12158,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const CLICK_AFTER_TOUCH_SUPPRESS_MS = 700;
         function togglePauseFromButton(e) {
             e.preventDefault();
+            if (startupBlocksInput()) return; // the overlays cover it, but belt and braces
             if (e.type === 'touchstart') {
                 lastTouchToggleMs = performance.now();
             } else if (performance.now() - lastTouchToggleMs < CLICK_AFTER_TOUCH_SUPPRESS_MS) {
@@ -11940,6 +12185,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // that submenu is open, matching the 2D version's exact behavior.
         window.addEventListener('keydown', (e) => {
             if (e.code !== 'Escape') return;
+            if (startupBlocksInput()) return; // no pause menu over the gate or the intro
             // Input-boundary audit fix: Escape auto-repeats like any other key, and every branch
             // below is a TOGGLE, so a held Escape was strobing the game between paused and running
             // once per repeat - confirmed via Playwright (a hold with an odd number of repeats
@@ -12138,6 +12384,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // these from inside the module and will not need the hook - it exists so the
                 // controller is drivable from qa/audio-controller.js before any of it is wired,
                 // and so the bus can be inspected without a second/competing implementation.
+                // Startup phase machine (Phase 2), same ?dev=1-only terms. Exposed so
+                // qa/startup-intro.js can assert the sequence and the input gating without
+                // reading element visibility - which is the thing the phase exists to replace.
+                startup: {
+                    getStartupPhase, startupBlocksInput,
+                    PHASES: PHASE
+                },
                 audio: {
                     unlockAudio, isAudioUnlocked, setAudioScene, getAudioScene,
                     setMasterMuted, isMasterMuted,
