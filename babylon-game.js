@@ -4646,7 +4646,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // caller: an insert set INTO the table, at the two measured heights above. The re-entry bank's
     // three lane indicators pass the canopy's own top face instead - see their comment for the
     // sightline measurement that put them up there.
-    function addPlayfieldInsert(scene, name, lampMat, collarMat, diameter, x, z, baseY) {
+    // `domed` swaps the flat chamfered lens for a low dome of the same footprint. A flat lens is
+    // the right thing for an insert set into the playfield - the camera looks at it from about 16
+    // degrees, and flush is what flush looks like. It is the WRONG thing for a lamp mounted on a
+    // structure and read as a state, because at that angle a flat disc collapses to a few pixels
+    // of height: measured on a real 320px-wide frame, the re-entry bank's three 11mm lenses came
+    // out 6x2 PIXELS each. A dome of the same width keeps its height from every angle. See the
+    // re-entry indicator's own comment for the mobile audit that forced this.
+    function addPlayfieldInsert(scene, name, lampMat, collarMat, diameter, x, z, baseY, domed) {
         const y0 = baseY || 0;
         const collar = BABYLON.MeshBuilder.CreateCylinder(name + 'Collar', {
             diameter: diameter * 1.45,
@@ -4659,13 +4666,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // diameterTop < diameterBottom gives the lens a chamfered edge, which is both what a
         // moulded insert actually looks like and a surface angled to catch the playfield lights -
         // a highlight that a perfectly flat disc could never pick up.
-        const lens = BABYLON.MeshBuilder.CreateCylinder(name, {
-            diameterTop: diameter * 0.84,
-            diameterBottom: diameter,
-            height: INSERT_LENS_H_M,
-            tessellation: 20
-        }, scene);
-        lens.position.set(x, y0 + INSERT_LENS_Y_M, z);
+        const lens = domed
+            ? BABYLON.MeshBuilder.CreateSphere(name, { diameter, segments: 10 }, scene)
+            : BABYLON.MeshBuilder.CreateCylinder(name, {
+                diameterTop: diameter * 0.84,
+                diameterBottom: diameter,
+                height: INSERT_LENS_H_M,
+                tessellation: 20
+            }, scene);
+        if (domed) lens.scaling.y = 0.62; // a moulded dome, not a ball sitting on the plastic
+        lens.position.set(x, y0 + INSERT_LENS_Y_M + (domed ? diameter * 0.2 : 0), z);
         lens.material = lampMat;
         return lens;
     }
@@ -6267,8 +6277,22 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // ball's 27mm crown.
             const reChainMat = new BABYLON.PBRMaterial('reentryChainMat' + i, scene);
             styleInsertLampMat(reChainMat, COLOR_MISSION_ACTIVE, insertLensTextures.ring);
+            //
+            // MOBILE AUDIT: this is a DOME at 14mm, not the 11mm flat lens the playfield inserts
+            // use, and both numbers come from measuring real phone-width frames (320/360/390/412
+            // CSS px) rather than from taste. As a flat lens on the canopy it rendered 6x2 PIXELS
+            // at 320 and 10x3 at 412 - the smallest thing on the board by an order of magnitude,
+            // and unreadable as three separate lit states on any phone. The cause is the camera's
+            // ~16-degree elevation: a horizontal disc's height collapses to about a quarter of its
+            // width, so widening it alone would have bought almost nothing. A dome keeps its
+            // height from every angle, which is why the fix is a shape change plus a small size
+            // bump rather than simply making it bigger.
+            //
+            // Nothing else about the indicator changes - same name, same material, same follower
+            // registration against the lane's own lamp, no collider, and at 52mm it is still
+            // nowhere near the ball's 27mm crown.
             const reChainLens = addPlayfieldInsert(scene, 'reentryChain' + i, reChainMat,
-                insertCollarMat, 0.011, pos.x, pos.z, REENTRY_CANOPY_Y + 0.0038);
+                insertCollarMat, 0.014, pos.x, pos.z, REENTRY_CANOPY_Y + 0.0038, true);
             shotChainLamps.push({
                 id: 'reentryChain' + i,
                 mesh: reChainLens,
