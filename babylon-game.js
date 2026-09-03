@@ -9563,6 +9563,81 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // is a deliberate avoidance rather than an inconsistency: pulseMesh() scales the mesh, and
         // the comet is the one objective element carrying a physics body with an explicit collision
         // radius. Scaling it would be a mechanics change on a pass that is not allowed one.
+        // --- STATE-BASED ROUTE LIGHTING (user-requested) --------------------------------------
+        //
+        // Real controlled inserts, not nightclub lighting: while a vision is running, the route it
+        // asks for is held a step brighter, and it is held - one material write when the vision
+        // starts, one when it ends, nothing per frame, no blink, no pulse, no timer.
+        //
+        // It only ever RAISES the active route. Nothing is dimmed to make the emphasis read, so the
+        // rest of the board stays exactly as legible as it is with no vision running - which is the
+        // "do not darken unrelated gameplay" line, satisfied by construction rather than by taste.
+        //
+        // WHICH SURFACE EACH ROUTE USES was chosen by measuring what actually changes on screen,
+        // not by picking the nearest mesh:
+        //
+        //   bumper / CHAKRA AWAKENING   bumperBaseMat, the lathe skirt ringing every pop bumper at
+        //                               the playfield. Shared by all four, which is exactly what
+        //                               this vision means ("hit the pop bumpers", all of them), and
+        //                               a lit ring at the base of a pop bumper is what a real
+        //                               machine's insert under that fixture looks like. Its
+        //                               emissive is black at rest, so this lights something that
+        //                               was genuinely unlit rather than nudging something already
+        //                               glowing.
+        //   comet / ASTRAL PURSUIT      cometApproachMat, the lane floor tint the shot runs up.
+        //                               This one needs its ALPHA raised as well as its emissive,
+        //                               and that is a measured correction rather than a flourish:
+        //                               makeLaneFloorMat's third argument is the strip's alpha, not
+        //                               an emissive scale, so this tint sits at 14% opacity. Lifting
+        //                               only its emissive moved the rendered lane 1.05x - nothing.
+        //                               Raising both makes the corridor itself read.
+        //   lane / RETURN TO BODY       reentryTrimMat, the trim along the whole re-entry assembly
+        //                               - canopy caps, hanging dividers and the lane flanking rails
+        //                               - so the assembly reads as one lit feature, which is what
+        //                               "the re-entry lane assembly" means.
+        //
+        // WHAT IS DELIBERATELY NOT TOUCHED, and why each would be a bug:
+        //   - the bumpers' own bodies and lamp collars: pulseMesh/pulseBumperLamp save and restore
+        //     those on a 90ms timer, and two independent save/restore pairs on one material do not
+        //     compose (see cueMissionObjective's own comment for the exact failure).
+        //   - bumperCapMat and the comet's body: the 620ms selection CUE lifts those. This runs
+        //     BEFORE the cue in startMission, deliberately, so the cue snapshots the emphasised
+        //     value as its rest and settles back to it rather than undoing the emphasis.
+        //   - the re-entry lane lamps and their canopy domes: those are lamp-system state carrying
+        //     which lanes are still needed. Writing them here would overwrite real information.
+        //
+        // Every material below is written by this function and nothing else at runtime, which is
+        // what makes a plain save/restore safe here.
+        const ROUTE_EMPHASIS = {
+            bumper: [{ mat: 'bumperBaseMat', to: new BABYLON.Color3(0.10, 0.07, 0.13) }],
+            comet: [{ mat: 'cometApproachMat', to: COLOR_COMET.scale(0.34), alpha: 0.30 }],
+            lane: [{ mat: 'reentryTrimMat', to: COLOR_MISSION_ACTIVE.scale(0.22) }]
+        };
+        const routeEmphasisRest = new Map();   // material -> its true rest emissive (and alpha)
+        let emphasisedRoute = null;
+        function setRouteEmphasis(type) {
+            if (emphasisedRoute === type) return;
+            // Release whatever is held first, so switching visions can never leave two routes lit.
+            routeEmphasisRest.forEach((rest, mat) => {
+                mat.emissiveColor.copyFrom(rest.emissive);
+                if (rest.alpha !== undefined) mat.alpha = rest.alpha;
+            });
+            routeEmphasisRest.clear();
+            emphasisedRoute = type;
+            const plan = type ? ROUTE_EMPHASIS[type] : null;
+            if (!plan) return;
+            plan.forEach((step) => {
+                const mat = scene.getMaterialByName(step.mat);
+                if (!mat || !mat.emissiveColor) return;
+                routeEmphasisRest.set(mat, {
+                    emissive: mat.emissiveColor.clone(),
+                    alpha: step.alpha !== undefined ? mat.alpha : undefined
+                });
+                mat.emissiveColor.copyFrom(step.to);
+                if (step.alpha !== undefined) mat.alpha = step.alpha;
+            });
+        }
+
         function cueMissionObjective(index) {
             const type = MISSION_DEFS[index].type;
             if (type === 'lane') {
@@ -9670,6 +9745,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 'VISION: ' + MISSION_DEFS[index].name + ': ' + MISSION_DEFS[index].objective,
                 MISSION_SELECT_MESSAGE_MS
             );
+            // Hold this vision's route a step brighter for as long as it runs (see
+            // ROUTE_EMPHASIS). Before the cue on purpose: the cue's own lift snapshots whatever it
+            // finds as the rest value, so setting the emphasis first makes the 620ms flash settle
+            // back to the emphasised level instead of undoing it.
+            setRouteEmphasis(MISSION_DEFS[index].type);
             // Light the objective's own hardware, once, so the text above has something on the
             // table to point at. Runs last so it lands with the message rather than before it.
             cueMissionObjective(index);
@@ -9693,6 +9773,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.state = 'idle';
             mission.selectedIndex = null;
             mission.progress = 0;
+            setRouteEmphasis(null); // the vision is over - its route goes back to the rest level
+
             syncMissionTargetLamps(); // back to inviting the next vision
             // Bug fix (playtest audit): at the top rank (index RANK_NAMES.length - 1), mission.rank
             // was already capped by this same Math.min() below, but the message still read
@@ -11411,6 +11493,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.selectedIndex = null;
             mission.progress = 0;
             mission.required = 0;
+            setRouteEmphasis(null); // a new game cannot inherit the last one's lit route
             syncMissionTargetLamps();
             mission.rank = 0;
             backglass.state.rank = RANK_NAMES[0];
