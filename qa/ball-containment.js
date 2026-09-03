@@ -48,25 +48,48 @@ function check(name, ok, detail) {
   await page.waitForTimeout(1800);
 
   // --- clamp, on the real render loop ---
-  const clampOut = await page.evaluate(async () => {
-    const d = window.__flipperDebug, V = BABYLON.Vector3;
-    const body = d.mainBall.aggregate.body, mesh = d.mainBall.mesh;
-    const speed = () => body.getLinearVelocity().length();
-    const res = [];
-    for (const v of [5, 12, 40]) {
+  // The clamp lives in updateBallPhysics(), which only governs a ball that is IN PLAY. A drained
+  // ball is not clamped - it is falling out of the world, and its speed climbs without limit.
+  // This loop used to sample 10 frames per velocity with no idea whether the ball was still in
+  // play, and a headless frame here is 150-300ms, so the ball crosses the whole table between
+  // samples and can drain inside the window. It passed anyway only because the board's old
+  // bumper cluster sat at (0, 0.16), directly on the +Z line this fires along, and intercepted
+  // the ball before it could get back down; once the shot-corridor refactor opened the centre
+  // channel, all ten samples of the 12 m/s and 40 m/s runs were of a drained ball at z=-1.6m,
+  // 1.2m PAST the drain, reporting 4.0 m/s and "failing" a clamp that was never asked to run.
+  //
+  // Two fixes, so this measures the clamp rather than the layout: re-launch a real ball before
+  // each velocity, and tag every sample with isBallInPlay() so only in-play samples are asserted
+  // on. A run that collects no in-play samples at all is itself a failure below - the check can
+  // no longer pass by never observing the thing it claims to test.
+  const clampOut = [];
+  for (const v of [5, 12, 40]) {
+    // Settle first: a ball that drained during the previous velocity's samples can still read as
+    // in play for a moment while the drain sequence resolves, and checking too early skips the
+    // re-launch and leaves the next velocity sampling a dead ball (0/10 in-play).
+    await page.waitForTimeout(1600);
+    const live = await page.evaluate(() => window.__flipperDebug.isBallInPlay());
+    if (!live) {
+      await page.keyboard.down('Space'); await page.waitForTimeout(600); await page.keyboard.up('Space');
+      await page.waitForTimeout(1800);
+    }
+    clampOut.push(await page.evaluate(async (speedAsked) => {
+      const d = window.__flipperDebug, V = BABYLON.Vector3;
+      const body = d.mainBall.aggregate.body, mesh = d.mainBall.mesh;
       mesh.position.set(0, 0.0135, 0.05);
       body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
-      body.setLinearVelocity(new V(0, 0, v));
+      body.setLinearVelocity(new V(0, 0, speedAsked));
       body.setAngularVelocity(new V(0, 0, 0));
       const samples = [];
       for (let f = 0; f < 10; f++) {
         await new Promise((r) => requestAnimationFrame(r));
-        samples.push(+speed().toFixed(3));
+        samples.push({ s: +body.getLinearVelocity().length().toFixed(3), inPlay: d.isBallInPlay() });
       }
-      res.push({ asked: v, samples, peak: Math.max(...samples) });
-    }
-    return res;
-  });
+      const inPlay = samples.filter((x) => x.inPlay).map((x) => x.s);
+      return { asked: speedAsked, samples: samples.map((x) => (x.inPlay ? x.s : `${x.s}*`)),
+               inPlayCount: inPlay.length, peak: inPlay.length ? Math.max(...inPlay) : null };
+    }, v));
+  }
 
   const out = await page.evaluate(() => {
     const d = window.__flipperDebug, s = d.scene, V = BABYLON.Vector3;
@@ -122,9 +145,13 @@ function check(name, ok, detail) {
   console.log(`\n=== BALL CONTAINMENT ===`);
   console.log(`  wall footprint  x ${out.bounds.minX}..${out.bounds.maxX}   z ${out.bounds.minZ}..${out.bounds.maxZ}\n`);
   console.log('  speed clamp (real render loop; MAX_BALL_SPEED_MS is ~2.55 m/s):');
-  for (const c of clampOut) console.log(`     asked ${String(c.asked).padStart(2)} m/s  ->  per-frame ${JSON.stringify(c.samples)}`);
-  const worstClamp = Math.max(...clampOut.map((c) => c.peak));
-  check('an absurd velocity is pulled back under the clamp', worstClamp <= 2.8, { worstClamp, ceiling: 2.8 });
+  console.log('  (a sample marked * is a drained ball - out of play, so not governed by the clamp)');
+  for (const c of clampOut) console.log(`     asked ${String(c.asked).padStart(2)} m/s  ->  per-frame ${JSON.stringify(c.samples)}  in-play ${c.inPlayCount}/10`);
+  const clampPeaks = clampOut.filter((c) => c.peak !== null).map((c) => c.peak);
+  const observedInPlay = clampOut.reduce((n, c) => n + c.inPlayCount, 0);
+  const worstClamp = clampPeaks.length ? Math.max(...clampPeaks) : null;
+  check('the clamp was actually exercised on a ball in play', observedInPlay > 0, { observedInPlay });
+  check('an absurd velocity is pulled back under the clamp', worstClamp !== null && worstClamp <= 2.8, { worstClamp, ceiling: 2.8 });
   // No "the clamp is not too tight" assertion here on purpose. A headless frame is ~200ms, so by
   // the first sample the ball has already crossed the table and bounced - the peak this harness
   // can see is a post-bounce speed, not the clamp value, and asserting on it would be measuring

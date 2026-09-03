@@ -339,7 +339,7 @@ export const FLIPPER_THICKNESS_M = 0.014;
 export const FLIPPER_HEIGHT_M = 0.012;
 export const FLIPPER_MASS_KG = 0.03;
 export const FLIPPER_PIVOT_X_M = 0.117; // each hinge sits this far from table center X=0 - see MOUNTING LAYOUT above
-export const FLIPPER_GAP_HALF_M = 0.045; // legacy layout datum - no longer the pivot X (see FLIPPER_PIVOT_X_M); still positions the decorative outer guide fins in babylon-game.js
+export const FLIPPER_GAP_HALF_M = 0.045; // legacy layout datum only - not the pivot X (see FLIPPER_PIVOT_X_M), and no longer positions anything since the clutter pass removed the decorative outer guide fins. Kept because the left/right sign convention documented further down this file still cites it.
 export const FLIPPER_Z_M = -0.36; // near the flipper/near-camera end of the table
 export const FLIPPER_PLAYFIELD_CLEARANCE_M = 0.003; // see createFlipper()'s comment - avoids flipper/playfield contact fighting the LOCKED constraint
 
@@ -515,12 +515,81 @@ export const FLIPPER_CONTACT_VELOCITY_TRANSFER = 2.4;
 
 // --- Obstacle layout (placeholder geometry only this stage - see file header) ---
 export const BUMPER_RADIUS_M = 0.02;
+// SHOT-CORRIDOR REFACTOR (user-requested "deliberate shot corridors"). The cluster used to be a
+// diamond straddling the table's centre line from z=-0.02 up to z=0.16 - i.e. sitting in the
+// middle of every shot lane leaving the flippers. Measured (174-shot fan through the live
+// physics scene, 2 flippers x 3 exit speeds x 29 angles): 50% of shots reached a bumper and 39%
+// hit one FIRST, which sounds healthy until you notice what it cost - the Vision Gate and the
+// power-up were reached 0 times in 174 shots, because this diamond plus the stacked centre
+// column above it left no ball-width route past. bumper3 at (0,-0.02) sat 60mm above the flipper
+// line and shadowed the entire centre channel on its own.
+//
+// The four bumpers are now a single ROW across the upper board at z=0.325, above Saturn, where
+// balls ARRIVE (orbit exits, Saturn rebounds, re-entry drops) rather than where flipper shots
+// DEPART. That is where a pop-bumper nest belongs on a real table, and it is what clears the
+// centre spine: nothing now occupies x=0 between the drain and Saturn's lower edge at z=0.160.
+//
+// Gaps are held out of the 27-39mm "trap band" (a gap the 27mm ball enters but cannot pass
+// comfortably is where balls come to rest): boss<->pop 40.0mm and pop<->pop 50.0mm are real
+// lanes THROUGH the row; each outer pop sits 7.5mm from its orbit rail's inner face, sealed, so
+// the orbit lane is not open into the nest at that height.
+//
+// INDEX 0 IS THE BOSS (buildObstacles() uses `isBoss = i === 0`, radius BUMPER_RADIUS_M*1.5 =
+// 0.03, not 0.02) - it keeps index 0 here so nothing about its scoring, message, pitch or kick
+// tier changes; only where it stands.
+// Camera-readability revision: at z=0.325 with Saturn at 0.205, the two left-hand bumpers - the
+// BOSS among them - were hidden behind Saturn's dome and rings from the fixed low gameplay camera
+// (confirmed by screenshot, not assumed). The row moved up to 0.345 and Saturn down to 0.190,
+// taking their separation from 120mm to 155mm, which clears the whole row above Saturn's
+// silhouette. 0.345 is the ceiling: any higher and the boss's fixture reaches the re-entry lane
+// inserts at z=0.400.
+// CLUSTER LAYOUT: a hub with channels onto it, not a row and not a blob.
+//
+// Two failure modes bracket this. Four bumpers on one Z line is a wall - every approach meets the
+// same face at the same height and is thrown back the way it came. Four bumpers packed tight is one
+// blob - the ball cannot get between them, so it strikes the outside and leaves. What makes the
+// cluster a section of playfield rather than an obstacle is CHANNELS: gaps wide enough to weave
+// through but narrow enough that a bumper's kick lands the ball on a neighbour.
+//
+// The geometry here is severely constrained and the layout was solved against it rather than
+// sketched. Every position has to clear Saturn by 40mm, the comet by 40mm, both orbit top arcs by
+// 40mm, and the orbit rails by either 18mm or 42mm (a gap between those two figures is where a ball
+// jams); its top edge has to stay under the top-crossing corridor; and no two bumpers may sit
+// closer than 40mm, because two round bodies nearer than that form a V the ball settles into - the
+// single worst trap this board's audit has found. Saturn's 40mm exclusion circle alone rules out a
+// two-deep centre column: the usable band above it is 55mm tall and a bumper is 40-60mm across.
+//
+// The result is a hub-and-spoke, not a chain:
+//   BOSS      (-0.045, 0.345)  the apex, upper, with THREE channels feeding it (47.1mm to the far
+//                              left pop, 68.6mm to the low one, 69.5mm to the right one). It is
+//                              the hardest of the four to reach directly - Saturn shields it from
+//                              straight below - and everything that ricochets tends toward it
+//   pop L-low (-0.102, 0.241)  hangs BELOW the arch, leaving a 49mm channel between it and Saturn
+//                              that a ball coming up the centre-left threads
+//   pop R     (+0.073, 0.326)  upper right, in the right orbit's exit path
+//   pop L-far (-0.142, 0.341)  upper left, in the left orbit's exit path
+//
+// Four of the six pairs sit in the 40-70mm chaining band (47.1, 67.7, 68.6, 69.5) and two are
+// deliberately far apart (154mm and 176mm) - those are the through-routes ACROSS the cluster rather
+// than channels through it. Nothing is mirror-symmetric: the left carries two pops at different
+// depths, the right one, and the boss sits 45mm off the centre line, so a ball arriving at the same
+// angle from either side takes a different path.
+//
+// INDEX 0 IS THE BOSS (buildObstacles() uses `isBoss = i === 0`, radius BUMPER_RADIUS_M*1.5 = 0.03,
+// not 0.02) - it keeps index 0 so nothing about its scoring, message, pitch or kick tier changes.
+// Its POSITION is also a readability constraint, not a free choice. Measured by its boss-only gold
+// trim's visible pixel count, which qa/skin-bumper-cap.js requires to be at least 80: Saturn
+// occludes anything close behind it from this game's fixed low camera, and the occlusion depends on
+// x at least as much as z - (-0.045, 0.300) read 67 px, (-0.130, 0.320) read 77, and (-0.021, 0.338)
+// read 42 despite being HIGHER than the last, because it sits almost directly behind Saturn's
+// centre. (-0.045, 0.345) reads clean. That is why the boss is upper-and-left-of-centre rather than
+// on the centre line.
 export const BUMPER_CLUSTER = [
-    { x: 0, z: 0.16 },
-    { x: -0.08, z: 0.06 },
-    { x: 0.08, z: 0.06 },
-    { x: 0, z: -0.02 }
-]; // 4 bumpers in a tight diamond near table center, matching CONFIG.attackBumperCount in ../index.js
+    { x: -0.045, z: 0.345 }, // BOSS (index 0 - see note above)
+    { x: -0.102, z: 0.241 },
+    { x: 0.073, z: 0.326 },
+    { x: -0.142, z: 0.341 }
+]; // 4 bumpers, matching CONFIG.attackBumperCount in ../index.js
 
 // Active pop-bumper kick: bumpers previously only ever bounced the ball via Havok's own
 // restitution (set in buildObstacles()) - a real pop bumper actively fires the ball away on
@@ -563,11 +632,104 @@ export const BUMPER_KICK_SPEED_MS = 480 * PX_TO_M; // ~0.453 m/s added away from
 export const SPECIAL_EVENT_KICK_SPEED_MS = 900 * PX_TO_M; // ~0.850 m/s - boss bumper + Saturn's shared "boss/special event" tier
 
 export const TARGET_RADIUS_M = 0.014;
+// SHOT-CORRIDOR REFACTOR: the bank moved inboard and down-table, out of the top-left corner and
+// into the LEFT CORRIDOR - the lane between the left orbit rail and Saturn's shoulder. It was
+// reached by 10% of measured shots and hit first by 2%; the old outermost target at x=-0.20 left
+// only 12.7mm between its own edge and leftWall's inner face, so nothing could get behind it and
+// the whole corner was dead space.
+//
+// Still colinear (buildObstacles()'s shared backboard spans first->last and assumes that), still
+// angled, still ordered outermost-first so per-index colours/skins are unchanged. These meshes
+// are TRIGGERS, not colliders (verified against the live scene), so the only clearance that
+// matters here is decorative: each target's fixture is +/-0.020 wide, and the outermost one now
+// clears the left orbit rail's inner face by 4.5mm instead of overlapping it.
+// Trap-audit revision (qa/ball-trap-audit.js, run against the first placement): the bank and the
+// Vision Gate cannot sit side by side in the left corridor - the corridor is ~120mm wide between
+// the orbit rail's inner face and Saturn's shoulder, and two features that wide leave gaps in the
+// 27-39mm trap band on both sides of the gate. They are stacked ALONG the corridor instead: bank
+// low (the first thing a cross-table shot from the right flipper meets), gate above it.
+// Spread widened after qa/skin-mission-targets.js flagged targets 0 and 1 as reading upside-down:
+// they were not: at 20mm of X spread over 80mm of Z the three plates stack almost vertically in
+// screen space from this game's fixed low camera, so the nearer plate overlaps the further one and
+// the suite's per-target quadrant sampling was reading two plates as one. That is a real
+// readability problem before it is a test problem - a drop-target bank whose plates hide each
+// other is not a bank a player can aim at. 40mm of X spread was not enough - the suite still read
+// each plate's bottom-right quadrant as its neighbour's top-left, which is the signature of two
+// plates overlapping on screen rather than of a flipped UV (the other three quadrants were right
+// on every plate, so the mapping was never wrong).
+//
+// Each plate's fixture is 40mm wide, so adjacent plates need 40mm of X between their centres to
+// stop overlapping at all; across three plates that is an 80mm spread, which is what this is:
+// -0.135 -> -0.055 over z 0.290 -> 0.110, still colinear (buildObstacles()'s shared backboard
+// spans first->last and assumes that), and still inside the left corridor - the top plate's
+// fixture clears the orbit rail's inner face by 1.5mm and the bumper above it by 6mm.
+//
+// BANK-AS-A-SHOT PASS. The layout above solved the readability problem (three plates that no
+// longer hide each other) but it was still not a bank, and the reason is measurable. Its line ran
+// (-0.135, 0.290) -> (-0.055, 0.110), i.e. direction (0.41, -0.91). A fan off both flipper tips
+// (qa-style probe, 174 shots, recording heading the first time the ball enters the left corridor
+// travelling up-table) puts the median approach at -15.6 degrees from up-table off the RIGHT
+// flipper and -12.2 off the left. The old bank line sat almost exactly ANTIPARALLEL to that: a
+// shot ran ALONG the bank's own axis rather than across its face, sweeping through all three
+// trigger volumes in a line. That is also why the cluster-exit probe found the bank was the most-
+// reached feature on the board - not because it was well aimed at, but because it was a corridor
+// anything descending the left side passed down.
+//
+// A real drop-target bank is mounted ACROSS the shot. This one now is: the three plates sit on one
+// line at 50mm pitch running right-and-up at 15.6 degrees, so the bank's face normal points
+// down-table and slightly right - square to the measured right-flipper approach, and 12 degrees
+// off the left flipper's, which still reads as a solid hit rather than a graze. The RIGHT flipper
+// is the primary, which is also the convention for a left-side bank.
+//
+// buildObstacles() derives the plates' rotation from these endpoints with the same
+// atan2(-dz, dx) the header rail already used, so the plates, their fixtures and the rail cannot
+// drift out of alignment with each other - and the whole bank re-aims by editing these three
+// positions alone.
+//
+// Kept: 3 entries, index order outermost-first (index 0 is still the plate nearest the left orbit
+// rail), colinear (buildObstacles()'s shared backboard spans first->last and assumes that), and
+// still triggers rather than colliders.
+//
+// Placement, all measured against the live collider dump rather than estimated:
+//   pitch 50.0mm            The floor is 40mm (the fixture width, below which plates overlap on
+//                             screen - the readability property the previous pass bought with
+//                             197mm of spread and this one gets in 140mm). The 10mm above that
+//                             floor is bought deliberately: a 27mm ball centred anywhere in the
+//                             (55 - pitch) mm band between two plates overlaps BOTH trigger
+//                             volumes at once and drops two of them off one hit. At 44.6mm that
+//                             band is 10.4mm of every 44.6 and a 174-shot fan straddled 4 times;
+//                             at 50mm it is 5mm of every 50, and the same fan straddles once or
+//                             twice across runs (~1%). 55mm would close it completely but does not
+//                             fit between the orbit rail and Saturn at any angle. Mission
+//                             SELECTION is unaffected either way - startMission() only runs when
+//                             mission.state is idle, so a straddle is one selection and two drops.
+//   z 0.107 - 0.133         near the camera instead of running back to 0.290, where the top plate
+//                             sat behind the bumper row and the orbit rail
+//   plate 0 outer corner    (-0.1575, 0.1012), 6.2mm off the left orbit rail's inner face
+//   plate 2 outer corner    (-0.0225, 0.1388), 10.1mm off Saturn's collider surface
+//   both gaps are under the 18mm floor of the trap band, so neither can catch a 27mm ball even
+//   though this hardware is decorative
+//
+// KNOWN, AND NOT FIXABLE BY MOVING THIS BANK: plate 2's trigger reaches into Saturn's drop shadow.
+// Saturn is a 90mm collider centred on x 0 and gravity here is straight down-table, so any plate
+// whose catch zone (trigger box + the ball's own 13.5mm radius) overlaps x -0.045..+0.045 collects
+// balls rebounding off its underside. A ball staged into Saturn by qa/end-of-ball.js comes off its
+// lower-left and reaches x -0.041, which this plate 2 clips. Two constraints have to hold at once -
+// plate 0's fixture must clear the orbit rail's inner face at x -0.1637, and plate 2's catch zone
+// must clear x -0.0545 - and summing them over the bank's own line bounds the pitch:
+//   at 15.6 deg  pitch <= 39.1mm       at 25 deg  pitch <= 42.3mm
+//   at 20 deg    pitch <= 40.4mm       at 30 deg  pitch <= 44.9mm
+// Every one of those is at or under the 40mm floor where the plates start overlapping on screen,
+// or far enough under 50mm to make straddling common - and a 30-degree bank was measured straddling
+// 8 times in 174 rather than once. So three plates cannot clear both the rail and Saturn's rebound
+// cone in this corridor at any angle, and the layout above takes the shot geometry instead. The
+// PREVIOUS bank had the same exposure and more of it: its plate 2 sat 17.5mm inside the shadow
+// against this one's 10mm.
 export const MISSION_TARGET_BANK = [
-    { x: -0.20, z: 0.32 },
-    { x: -0.16, z: 0.28 },
-    { x: -0.11, z: 0.24 }
-]; // 3 targets in an angled upper-left bank, matching CONFIG.missionTargetCount
+    { x: -0.1382, z: 0.1066 },
+    { x: -0.0900, z: 0.1200 },
+    { x: -0.0418, z: 0.1334 }
+]; // 3 targets in an angled left-corridor bank, matching CONFIG.missionTargetCount
 
 // Drop-target bank upgrade (user-requested) - a hit target sinks from its raised resting
 // height down to below the playfield surface instead of just flashing in place. Named here
@@ -586,20 +748,188 @@ export const TARGET_DROP_ANIM_MS = 220;
 // 0.365) stays comfortably clear of the re-entry lanes at z=0.40 (0.035m of margin) without
 // needing to move them.
 export const SATURN_RADIUS_M = 0.045;
-export const SATURN_POS = { x: 0, z: 0.32 };
+// SHOT-CORRIDOR REFACTOR: down-table from z=0.32 to z=0.205. Two reasons, both measured. (1) At
+// 0.32 its collider edge sat 19mm from the centre re-entry lane - under the ball's own 27mm
+// diameter, so nothing could pass between them. (2) The apex reach of a real flipper shot: of the
+// 174-shot fan, the median mid-power shot died at z=-0.011 and only near-tip shots cleared z=0.30,
+// so anything above z~0.30 was a top-power-only feature. At 0.205 Saturn is the far end of an open
+// centre channel instead of the lid on a blocked one, and it now clears the bumper row above it by
+// 53.2mm and the Vision Gate beside it by 25.0mm (sealed - see VISION_GATE_POS).
+export const SATURN_POS = { x: 0, z: 0.190 };
+
+// SATURN AS A PREMIUM SHOT. Saturn's position is unchanged and deliberately so: a grid scan of the
+// centre/upper board for the spot giving a 45mm-radius disc the most surface-to-surface clearance
+// from every other collider puts (0, 0.190) FIRST, at 43mm - nowhere else on the board is better,
+// and the runners-up are all within 5mm of it. Saturn was never in the wrong place. It was
+// unframed, and the numbers said so:
+//
+//   174-shot flipper fan  ->  reached Saturn cleanly (no bumper/comet contact first):  6  (3.4%)
+//   144 seeded cluster exits -> reached Saturn:                                       52  (36%)
+//   near misses (within 45mm of the surface, travelling up-table):  4, and all 4 drained
+//
+// So bumper spill hit the board's biggest scoring object nine times more often than a clean shot
+// did, which is the opposite of a premium shot. What makes it fixable is that the two populations
+// land on DIFFERENT ARCS of Saturn's surface. Measuring the bearing of each contact point (0 =
+// crown / up-table side, +/-180 = underside):
+//
+//   cluster spill      -90..-60:5  -60..-30:15  -30..0:8  0..30:12  30..60:5  60..90:5  90..120:2
+//   clean flipper hits           -150..-120:2  -90..-60:1  60..90:1  120..150:2
+//
+// Spill arrives on the crown and upper flanks; a clean shot arrives underneath. So the canopy
+// below covers the crown arc and stops there, leaving the underside - the shot arc - wide open.
+//
+// CANOPY. A steep, narrow tent over Saturn's crown. Two things fix its shape, and the first
+// version got both wrong - qa/ball-trap-audit.js found 24 balls wedged in one spot and 11 in
+// another, so this is the corrected geometry and the reasoning that produced it.
+//
+// (1) SLOPE. The canopy is a wall that gravity presses balls against, so each arm has to be steep
+// enough that a ball on it slides off sideways instead of sitting there. On this playfield that
+// threshold is tan(angle) > friction, and these rails use friction 0.5, so anything shallower than
+// 26.6 degrees from horizontal holds a ball. The first version's arms were 10.5, 11.3, 20.4 and
+// 23.6 degrees - all under it, and balls duly parked against all four. These are 33.7 degrees.
+//
+// (2) WHERE THE ARMS END. Saturn's side gaps are narrow: 43mm to bumper1 on the left and 46mm to
+// the comet on the right, against a 27mm ball. An arm ending INSIDE one of those gaps turns it
+// into a pocket - the arm funnels balls down-outboard into the corner where it meets the bumper,
+// and they cannot get out past it. That is exactly what the 24-ball cluster at (-0.074, 0.258) and
+// the 11-ball one at (0.098, 0.247) were. So the tent now stops well short of both neighbours and
+// its arms discharge into open playfield instead.
+//
+// Clearances, against the ball's 27mm diameter:
+//   ( 0.000, 0.256) apex   13.5mm over Saturn's crown - sealed, nothing gets under it
+//   (+/-0.042, 0.228) ends  4.1mm off Saturn's surface - sealed
+//   left end to bumper1    33.9mm - passable, so a ball shed leftward carries on down the
+//                           Saturn/bumper1 channel rather than jamming against the bumper
+//   right end to the comet 39.7mm - passable, same on that side
+//
+// What this deliberately does NOT do is seal Saturn completely. The tent spans +/-42mm, so it
+// covers contact bearings inside about +/-69 degrees and leaves the flanks beyond that open. A
+// version that ran the full width and anchored on both neighbours took cluster spill from 52 hits
+// to 0, but it was the version with the pockets: sealing Saturn and keeping its side channels
+// clear are the same 43mm of space, and they cannot both have it.
+export const SATURN_CANOPY = [
+    { x: -0.042, z: 0.228 },
+    { x: 0, z: 0.256 },
+    { x: 0.042, z: 0.228 }
+];
+
+// The mouth's right-hand jaw. Saturn's lower LEFT is already framed - the mission target bank's
+// inner plate fixture sits 12.7mm off Saturn's surface there, too tight for a ball - so the shot
+// only needed its other cheek. Upper end is 9.9mm off Saturn's surface (sealed, so it is a real
+// jaw rather than a rail with a gap behind it) and it runs down-outboard from there, which is the
+// direction that sends a ball missing to the right on toward the comet and the right orbit instead
+// of straight back down the middle.
+export const SATURN_JAW = { from: { x: 0.036, z: 0.139 }, to: { x: 0.068, z: 0.104 } };
+
+// Floor tint marking the mouth, on the corridor between the Vision Gate's upper post and Saturn's
+// underside. Same lane-tint idiom the orbits and the target bank use. Kept short and clear of the
+// gate's own hardware, which carries its own visual identity right below this.
+export const SATURN_APPROACH_TINT = { x: 0.010, z: 0.113, width: 0.055, length: 0.065 };
+
+// --- COMET SHOT PATH -------------------------------------------------------------------------
+// The comet's corridor already existed physically; nothing on the board said so. Firing the LEFT
+// flipper across the cross-table band and recording the first SOLID thing each shot touches:
+//
+//    6-10 deg  visionGatePost0/1     12-14 deg  saturnJaw
+//      16 deg  THE COMET             18-30 deg  the right orbit rail
+//
+// So there is exactly one heading whose first contact is the comet, bounded below by the Vision
+// Gate's posts and above by the right orbit lane's inner rail - a real lane between two real walls,
+// 16 degrees off up-table from the left flipper. That is the cross-table shot this pass makes
+// legible. (Shots at 10-14 and 18-26 degrees still reach the comet, but only after bouncing off
+// the jaw or the orbit rail first, which is why the fan's contact headings scattered from -31 to
+// +20 and the comet read as something you arrive at rather than aim for.)
+//
+// RETURN RAIL. A short, steep rail hugging the comet's lower-left, which does three jobs at once:
+// it is the lane's left wall in the stretch where Saturn would otherwise be it, it holds the comet
+// and Saturn apart, and it catches rebounds coming off the comet's underside heading down-left -
+// 4 of 18 measured strikes previously rebounded straight into Saturn - and turns them back down
+// the lane toward the right inlane.
+//
+// Clearances, against the ball's 27mm diameter and the 18/42mm gap rule:
+//   upper end (0.092, 0.186)  4.6mm off the comet's surface - sealed, so it is a wall rather than
+//                              a rail with a gap behind it
+//   lower end (0.082, 0.152)  32.8mm off the Saturn jaw's upper end - deliberately PASSABLE, so
+//                              the Saturn and comet corridors stay connected instead of the gap
+//                              between two rail ends becoming a pocket
+//   lower end to Saturn      38.0mm - passable
+//   slope 73.6 degrees, far above the 26.6 needed for a ball to shed off it rather than park
+//
+// At full power the 16-degree shot reaches the comet by touching THIS RAIL first and the comet
+// immediately after - it banks off the lane wall rather than arriving dead on the nose. Pulling
+// the rail 3mm back out of the line was measured and does give the direct contact back, at the
+// cost of the rebounds it exists for: drains after a comet strike go from 0 back to 2 and Saturn
+// returns from 2 to 3. A ball riding a corridor wall into the target at the end of it is the
+// corridor working, so the rebounds win and the rail stays where it is.
+export const COMET_RETURN_RAIL = { from: { x: 0.082, z: 0.152 }, to: { x: 0.092, z: 0.186 } };
+
+// Floor tint up the lane, laid along the 16-degree line itself rather than along the board's axis,
+// so the corridor is drawn where the shot actually goes. Same lane-tint idiom as the orbits, the
+// target bank and Saturn's approach.
+export const COMET_APPROACH_TINT = { x: 0.095, z: 0.120, width: 0.045, length: 0.090, angleRad: 16 * Math.PI / 180 };
+
+// NOT DONE, and measured rather than skipped: the comet takes 24% of seeded cluster exits, and
+// like Saturn they land on its crown (bearings -90..+30 hold 31 of 35). Saturn's answer was a
+// canopy, and the comet has nowhere to put one. It has 39.7mm to Saturn's canopy on its left and
+// 31.7mm to the right orbit rail on its right; a tent wide enough to cover the crown arc of a
+// 22mm-radius body ends 24mm from one and 16mm from the other, which seals both channels and puts
+// a downward-narrowing notch at each end - the exact shape that trapped 35 balls when Saturn's
+// first canopy did it. The comet sits in a 71mm-wide slot and a shield does not fit in it.
 
 // The old "satellite" object, re-themed as a comet now that Saturn itself is a real dedicated
 // piece (having both would be a confusing "two Saturns") - same role/size/position family,
 // just reskinned (new icy-cyan identity, see HEX_COMET) and nudged slightly right/down from
 // its old (0.16, 0.36) spot to sit clear of Saturn's new footprint and rings.
 export const COMET_RADIUS_M = 0.022;
-export const COMET_POS = { x: 0.17, z: 0.29 };
+// SHOT-CORRIDOR REFACTOR: (0.17, 0.29) -> (0.098, 0.150), into the RIGHT CORRIDOR. At x=0.17 the
+// comet was jammed against the right wall (4% of shots reached it, 3% hit it first, and 100% of
+// those drained afterwards) with a 34.7mm channel outboard - inside the trap band. It now sits in
+// the open right lane with 42.5mm to the right orbit rail's inner face and 45.4mm to Saturn's
+// edge: two real passages either side of it rather than one unusable one.
+// Trap-audit revision: at (0.098, 0.150) the comet sat mid-corridor and its uphill crease - the
+// wedge between a floor-resting sphere and the playfield - became the board's worst single
+// attractor, 10 of 242 seeded balls coming to rest at (0.098, 0.184). Saturn has the identical
+// crease and does not trap, because handlePhysicalHit()'s 'saturn' branch fires a radial kick on
+// contact and the comet's branch does not; rather than give the comet a kick it never had (that
+// would be a physics change), it moved off the corridor's middle.
+//
+// Fourth pass (see VISION_GATE_POS for the full reasoning): parking it against the right orbit
+// rail traded one trap for another - a round body alongside a long straight rail face makes a V
+// that always passes through the ball's diameter somewhere, and it caught 7 of 249 seeded balls.
+// Fifth pass: "against Saturn's shoulder" was wrong for the same reason the gate's was - two round
+// bodies 10mm apart are the tightest possible V, and that placement was the 22-ball cluster. The
+// comet now sits alone in the upper right corridor with every neighbour at least 40mm away:
+// Saturn 50.8mm, the right rail's inner face 40.2mm, both nearest pop bumpers 48.9mm. Solved as a
+// pair of inequalities rather than nudged - clearing Saturn's centre by 107mm and the rail's face
+// by 62mm leaves a window only about 8mm wide in x and 17mm in z, and this sits inside it.
+//
+// The residual, stated because it is the one thing the audit still sees: a lone sphere resting on
+// the playfield has an uphill crease, and a ball can balance in it. The comet is the board's only
+// round obstacle WITHOUT a kick on contact (Saturn and the bumpers all throw a resting ball off),
+// so its crease is the one that holds. At 253 seeded starts it catches 2, recovered by the shipped
+// anti-stuck in 0.58s. Giving the comet a kick would fix it outright and is a physics change, so
+// it is left alone and recorded here instead.
+// UPPER-TABLE CIRCULATION: down-table from 0.266 to 0.215. At 0.266 the comet sat inside the
+// staggered nest's footprint (36mm from the nearest pop, inside the 40mm any two round bodies need
+// between them) and, more to the point, it was BEHIND the nest from every approach - a ball coming
+// down the right side met a bumper first every time. At 0.215 it sits in the open right field just
+// below the nest, on the path a ball takes coming down from the top corridor or out of the right
+// orbit, which is what "approach the comet" needs to mean. Clearances: Saturn 45.8mm, nearest pop
+// 67.8mm, right orbit rail 46.7mm.
+export const COMET_POS = { x: 0.110, z: 0.215 };
 
 // Score-multiplier power-up orb (board redesign) - appears periodically in the open lane
 // between the bumper cluster and Saturn (naturally in the ball's travel path when it rolls
 // up-table), despawns if not hit in time. See updatePowerUp() in main()'s render loop.
 export const POWERUP_RADIUS_M = 0.016;
-export const POWERUP_POS = { x: 0, z: 0.22 }; // clear of both the boss bumper's decorative collar (below) and Saturn's collider (above)
+// SHOT-CORRIDOR REFACTOR: (0, 0.22) -> (0.075, 0.080). On the centre line it was sealed against
+// the old bumper at (0,0.16) by 24mm and against the Vision Gate by 0mm - three features stacked
+// on one column, and the measured consequence was that the power-up was reached 0 times in 174
+// shots. This constant's own comment always described the intent correctly ("naturally in the
+// ball's travel path"); the position just never matched it. It now sits low in the right corridor,
+// on the way to the comet and the right orbit, which IS a travelled path. It is a TRIGGER, not a
+// collider, so it blocks nothing.
+export const POWERUP_POS = { x: 0.075, z: 0.080 };
 export const POWERUP_SPAWN_INTERVAL_MS = 20000; // how long it stays hidden before reappearing
 export const POWERUP_ACTIVE_DURATION_MS = 7000; // how long it stays visible/hittable before despawning unhit
 export const POWERUP_MULTIPLIER = 2;
@@ -664,10 +994,46 @@ export const SLINGSHOT_KICK_UPTABLE_BIAS_MS = 210 * PX_TO_M; // ~0.198 m/s, unco
 export const SLINGSHOT_RESTITUTION = 0.45;
 
 export const REENTRY_LANE_RADIUS_M = 0.016;
+// SHOT-CORRIDOR REFACTOR: respaced from +/-0.14 to +/-0.115 so the two outer lanes sit between the
+// bumper row's outer pops and the orbit lanes' top exits rather than directly in line with the
+// rails. Z is unchanged (0.40); these are triggers with decorative flanking rails, so nothing here
+// is a collider and their mission-tied scoring is untouched.
+// UPPER-TABLE CIRCULATION: the three rollovers are no longer on one Z line. A ball released by an
+// orbit's top arc at z=0.409 crosses the board sideways and SAGS as it goes - 0.717 m/s^2 of
+// downhill gravity over a 0.2-0.4s crossing - so a flat row at 0.40 was only ever crossed at its
+// near end. Traced on a completed loop: the ball was at z=0.406 leaving the arc and z=0.305 by the
+// time it reached x=+0.044. Dropping the middle rollover 14mm into a shallow V follows that sag
+// from either direction, which is the only symmetric shape that can (the sag is monotonic in the
+// direction of travel, so it mirrors when the loop runs the other way).
+// UNDERUSED-ROUTE PASS: unchanged, and that is a measured decision rather than an omission.
+//
+// The interaction-density run (24 autoplayed balls) made this the one clearly underused major
+// route: 0.54 contacts per ball, against 4.42 for the target bank, 4.42 for the comet and 4.04 for
+// Saturn. Two minimal levers were built and measured against a deterministic 44-entry top-band
+// probe, and neither moved it:
+//
+//   ENTRANCE WIDTH   REENTRY_LANE_RADIUS_M 0.016 -> 0.022. This is a real widening, not just a
+//                    bigger trigger - the constant also drives each lane's guide RAILS, whose
+//                    centres sat 35.2mm apart against a 27mm ball, so the mouth was barely
+//                    passable. Result: lanes touched 25/44 -> 26/44, and per-ball re-entry
+//                    contacts 0.54 -> 0.50. Within noise.
+//   LANE HEIGHT      all three lowered 10mm, to catch balls that peak short of the band.
+//                    Result: 25/44. No change at all.
+//
+// The probe says why neither works: of upper-board entries that REACH the band, 57% already touch
+// a lane, so placement and width were never the problem. What is rare is reaching z 0.395 in the
+// first place - 39% of upper entries never climb that far - and that is a whole-board circulation
+// property, not an entrance, guide angle, obstacle position or exit angle. No minimal local change
+// fixes it, and the levers that would (moving the bank far enough down-table to clear the bumper
+// row, or enlarging the lanes past 53mm to cover the 83mm gaps) are exactly the buff this pass was
+// told not to apply.
+//
+// The orbits are lower still - 2.1% reach on a 4-angle band - and were deliberately left alone:
+// that is the board's premium shot and hard shots were to stay hard.
 export const REENTRY_LANES = [
-    { x: -0.14, z: 0.40 },
-    { x: 0, z: 0.40 },
-    { x: 0.14, z: 0.40 }
+    { x: -0.115, z: 0.398 },
+    { x: 0, z: 0.384 },
+    { x: 0.115, z: 0.398 }
 ]; // 3 lanes near the top wall, matching CONFIG.reentryLaneCount
 
 // ===================================
@@ -713,8 +1079,25 @@ export const REENTRY_LANES = [
 export const LANE_Z_TOP_M = -0.33; // ~0.0175m clear of the slingshot's own lower edge (~-0.3125)
 export const LANE_Z_BOTTOM_M = -0.40; // divider rail's far end - see block comment for the X-clearance reasoning
 export const LANE_DIVIDER_X_M = 0.145; // mirrored per side
-export const LANE_TRIGGER_Z_M = -0.365; // mid-lane, between LANE_Z_TOP_M and LANE_Z_BOTTOM_M
-export const INLANE_TRIGGER_X_M = 0.095; // mirrored - inboard of the divider, toward the flipper
+// LOWER-FLOW PASS: -0.365 -> -0.342. A rollover has to sit UP-LANE of the flipper so it fires when
+// a ball arrives, not while one rests on the bat. -0.365 is inside the flipper's own z span
+// (-0.4128..-0.3537), so once INLANE_TRIGGER_X_M moved onto the real return path the trigger ended
+// up underneath the resting ball and fired on 174 of 174 fan shots - a "there is a ball" sensor,
+// not a lane. -0.342 is above the bat's top edge and still below the divider's top at -0.33, so it
+// is a rollover the returning ball crosses on its way down.
+export const LANE_TRIGGER_Z_M = -0.342; // up-lane of the flipper's top edge, below the divider's top
+// LOWER-FLOW PASS: 0.095 -> 0.068. The inlane rollover was outboard of the path balls actually
+// take. 132 seeded descents put every returning ball across the flipper line between x -0.08 and
+// +0.08 - a 20mm histogram peaks at -0.02 (26 balls), +0.04 (22) and 0.00 (17) with NOTHING between
+// -0.08 and -0.22 - while this trigger's own span was 0.080..0.110. It sat just outboard of the
+// traffic and caught 6 of the 42 balls that crossed on its side.
+//
+// This board does not deliver an inlane ball down a channel and it structurally cannot: the config
+// block below records that the flipper-pivot-to-divider space is 28mm and any rail inside it
+// pinches the ball, which is why INLANE_GUIDE_BOTTOM_Z_M stops the guide above the pinch and the
+// ball drops onto the bat instead. So the rollover belongs where the ball crosses, which is over
+// the bat, not in a lane that cannot be built.
+export const INLANE_TRIGGER_X_M = 0.068; // mirrored - on the measured return path, over the flipper bat
 export const OUTLANE_TRIGGER_X_M = 0.185; // mirrored - outboard of the divider, toward the wall
 export const LANE_TRIGGER_WIDTH_M = 0.03;
 export const LANE_TRIGGER_DEPTH_M = 0.025;
@@ -812,10 +1195,189 @@ export const SIDE_LANES = [
 // inner edge) - both comfortably wider than the ball. Each orbit runs through its side's
 // corridor, alongside (not through) the existing target bank/comet/Saturn/bumper cluster -
 // nothing about this feature moves or removes any of that existing geometry.
-export const ORBIT_RAIL_BOTTOM_Z_M = 0.12; // just above the boss bumper's own footprint (z~0.16-0.03 clearance-wise, see BUMPER_CLUSTER)
-export const ORBIT_RAIL_TOP_Z_M = 0.37; // just below the reentry lanes (z=0.40), inside the upper table
-export const ORBIT_ENTRANCE_Z_M = 0.15; // inside the rail's guided span, not at its unguided tip
-export const ORBIT_COMPLETION_Z_M = 0.35; // ditto, near the rail's top end
+// ORBIT GEOMETRY, rebuilt as a real arc (user-requested: "recognizable repeatable shots rather
+// than generic side paths"). Everything below describes ONE side; the other is an exact mirror
+// through x=0, so left flipper -> right orbit and right flipper -> left orbit are the same shot.
+//
+// WHY AN ARC. The straight-rail version was measured, not guessed: 174 flipper shots produced 6
+// lane entries and 2 completions, and tracing single shots showed the ball entering the channel
+// and dying at z=+0.125. The cause is the entry angle. A shot that reaches the far wall arrives
+// at 33-40 degrees to it; a straight wall turns that into one hard impact (restitution 0.3 on the
+// perpendicular component) and then a second off the inner rail, and the ball ping-pongs its speed
+// away before it has climbed 200mm. Nothing about rail POSITION fixes that - only rail SHAPE does.
+//
+// THE SHAPE. The lane's outer guide is a circular arc TANGENT TO THE SIDE WALL at
+// ORBIT_ARC_TANGENT_Z_M, curving down and inboard from there through ORBIT_ARC_SWEEP_RAD. Tangency
+// is the whole point: at the top the guide IS the wall (no seam, no step for a ball riding it),
+// and at its lower end its surface runs at ORBIT_ARC_SWEEP_RAD from vertical - which is the angle
+// the incoming shot arrives at. A 38-degree shot meets a 38-degree surface at roughly zero
+// incidence and keeps its speed instead of spending it. The inner guide is CONCENTRIC with the
+// outer one, so the lane is a constant ORBIT_LANE_WIDTH_M wide the whole way round - it cannot
+// pinch, and there is no point along it where the ball is squeezed.
+//
+// THE MOUTH. The inner guide stops short of the outer one (ORBIT_INNER_SWEEP_RAD vs
+// ORBIT_ARC_SWEEP_RAD), so the lane opens out into a flare at the bottom rather than presenting a
+// slot the ball has to thread. Geometrically the entry window is the span of flipper angles that
+// clear the inner guide's lower tip but still meet the outer arc above its own lower end: about
+// 32-45 degrees, i.e. ~13 degrees wide. The straight-rail version's window was under 3.
+//
+// THE WEDGE BEHIND THE OUTER GUIDE narrows as it rises (76mm at the guide's lower tip, zero at the
+// tangency point). That orientation is deliberate and is the difference between a safe pocket and
+// a trap: gravity pulls a ball in this wedge DOWN, into the widening part, and out. The traps this
+// board's audit has caught were all the other way up - gaps that narrow downward, where gravity
+// holds the ball in.
+export const ORBIT_WALL_FACE_X_M = 0.2267; // leftWall/rightWall inner face, read off the live scene
+export const ORBIT_ARC_RADIUS_M = 0.36; // outer guide's face radius - see the block comment above
+export const ORBIT_LANE_WIDTH_M = 0.048; // 1.78 ball diameters, constant all the way round
+export const ORBIT_ARC_TANGENT_Z_M = 0.06; // where the outer guide meets the side wall, tangentially
+export const ORBIT_ARC_SWEEP_RAD = 38 * Math.PI / 180; // outer guide's sweep below tangency
+// Inner guide's sweep, measured rather than picked. At 30 degrees its lower tip reached
+// (-0.137, -0.096) - far enough inboard and low enough to stand in the middle of the board - and
+// the 174-shot fan showed the cost immediately: Saturn's hits fell 32 -> 13, the target bank's
+// 26 -> 20 and the median shot apex dropped from z=-0.036 to -0.149, because the guide was
+// intercepting centre-corridor shots on their way up. At 20 degrees the tip sits at
+// (-0.160, -0.047), out of that traffic. It also WIDENS the entry window rather than narrowing it:
+// the shot has 49mm more table to get outboard in before it has to clear the tip, so the minimum
+// entry angle drops from 32 to 31 degrees.
+export const ORBIT_INNER_SWEEP_RAD = 20 * Math.PI / 180; // inner guide stops here, leaving a flared mouth
+export const ORBIT_ENTRANCE_SWEEP_RAD = 34 * Math.PI / 180; // entrance rollover, on the lane's centre line
+// A GAP in the outer guide, sized and positioned from the shooter lane's own exit path.
+//
+// The shooter lane exits into the RIGHT-hand wall channel - the ball rests at x=0.1955 and rides
+// the wall up - and that channel is the same space the outer guide's wedge occupies. Measured, a
+// launch drove into the closing part of that wedge and stalled at z=-0.122 against z=+0.041 before
+// this pass, and the launch's region coverage fell from 6 of 9 to 2.
+//
+// A deflector across the wedge was tried first and was worse (z=-0.156): it turns the ball inboard
+// correctly, straight into the corner where it meets the guide, which is a V the ball then rattles
+// around in. The geometry does not admit a deflector - anything that closes the channel stops the
+// ball and anything that does not, pinches it.
+//
+// What does work is letting the ball THROUGH. The launched ball's centre crosses the outer guide's
+// face at sweep 24 degrees (cos = (0.1955 + 0.1333)/0.36), so the guide is built in two pieces with
+// a gap straddling that crossing. 8 degrees of arc is 50mm - comfortably more than the ball's 27mm
+// - and it costs the flipper shot nothing: the catching flank below the gap still does the initial
+// turn from 38 to 28 degrees, and the ball re-meets the guide above the gap at 8 degrees of
+// incidence, which is gentler than anything it met before this pass.
+export const ORBIT_OUTER_GAP_FROM_RAD = 17 * Math.PI / 180;
+export const ORBIT_OUTER_GAP_TO_RAD = 33 * Math.PI / 180;
+// ...and on the RIGHT the catching flank below that gap is omitted entirely, which is the one
+// asymmetry on this board and is forced by hardware, not chosen. The flank lives between z=-0.140
+// and -0.166 - exactly where the shooter lane's inner wall ends and where a launched ball is still
+// riding the side wall - and everything else was tried first, measured, and was worse:
+//   * flank present, no gap:      launch stalls at z=-0.106 (baseline reaches -0.036)
+//   * a deflector across the wedge: z=-0.156, worse - it turns the ball correctly and then into
+//                                   the corner where the deflector meets the guide
+//   * gap only (17-33 degrees):    z=-0.081, and 3 of 4 suite launches never clear the lane
+//   * gap plus a 30mm longer shooter lane: no better, and it spends the launch's own clearance
+//                                   margin (see LANE_WALL_Z_TOP_PX)
+// The right orbit keeps the arc, the constant-width lane, the flared mouth, the vertical section
+// and both rollovers; what it loses is the tangent flank, so its entry is a wall contact like the
+// pre-arc geometry rather than a glancing one. It is the same SHOT - the same lane, entered from
+// the left flipper at the same angles - taken at a slightly higher price.
+export const ORBIT_OUTER_FLANK_SIDES = ['left'];
+
+// Inner lip on the LOWER half of each orbit's top turn.
+//
+// Measured with a cluster-exit probe: 144 seeded exits (4 bumpers x 12 incoming directions x 3
+// speeds), each classified by the first scoring feature the ball reached afterwards. 24 of them
+// left the cluster sideways into the TOP of an orbit lane and rode it back down the outside of the
+// board - the one exit direction that reaches nothing on the way, because the lane is sealed from
+// the playfield along its whole length. The cause is structural: the top turn has an outer wall
+// (the top arc) but no inner one, so beside the cluster it is a 125mm-wide open mouth pointing
+// straight down the lane.
+//
+// The lip gives that mouth an inner edge for its lower half only. Above `toZ` the turn stays open
+// exactly as before, which is what preserves the "leave the turn early into the bumper nest"
+// behaviour the top arc was built outer-only for; this closes the part of the opening that faces
+// the cluster, not the part that faces the upper table.
+//
+// `inboard` leans the lip toward the middle of the board, turning the mouth into a lane instead of
+// just a wall. Only the right side can take that lean - on the left, bumper3 sits IN the turn at
+// z 0.321-0.361 (x -0.162..-0.122) and already walls it from there up, so the left lip only has to
+// close the 22mm slot between the vertical rail's top and the bumper's lower surface. A leaning
+// left lip would run through the bumper.
+//
+// Clearances, both against the ball's 27mm diameter and the 18/42mm gap rule (a gap to a flat face
+// is safe below 18mm or above 42mm; in between the ball half-enters and jams):
+//   right lip at z 0.360: face x 0.1575, top arc's inner face x ~0.207  -> 49mm of lane
+//   right lip at z 0.298: face x 0.1787, top arc's inner face x  0.2252 -> 47mm of lane
+//   right lip to bumper2 (0.073, 0.326, r 0.020):                          57mm  (>42, safe)
+//   left  lip top (-0.1712, 0.324) to bumper3's surface:                   14mm  (<18, safe)
+// Both lips start 2mm below ORBIT_RAIL_TOP_Z_M so they overlap the vertical section rather than
+// butting against it - a butt joint there would leave the same catchable seam the arcs avoid.
+export const ORBIT_TOP_LIPS = [
+    { side: 'left', toZ: 0.324, inboard: 0 },
+    { side: 'right', toZ: 0.360, inboard: 0.021 }
+];
+
+// Lane bridges - a decorative arch across each orbit lane, the piece a real machine uses to carry
+// a wireform or a plastic over a lane without standing in it.
+//
+// The previous depth pass declined arches on the grounds that after the corridor work almost
+// nothing on this board is a non-collision AREA. That was true and beside the point: an arch does
+// not clear the ball sideways, it clears it VERTICALLY. The ball's top sits at y 0.027 and
+// qa/ball-movement.js guards airborne frames at 0% - a ball that leaves the playfield plane is a
+// restitution bug this board tests for - so the plane the ball occupies is fixed and known, and
+// anything above it is over a path rather than in one.
+//
+//   ball top            y 0.027
+//   arch underside      y 0.037   (10mm of clearance)
+//   tallest post nearby y 0.030   (the lane dividers), so the arch reads as the highest hardware
+//
+// Neither leg stands in the lane. The span runs from the side wall's inner face to the orbit
+// rail's centre line and OVERLAPS both, so it is carried by two structures that are already there
+// and the lane's own 48mm clear width is untouched. No collider, on a piece the ball cannot reach
+// even if it had one.
+export const ORBIT_LANE_BRIDGE_Z_M = 0.150;   // mid-lane, clear of the entry arc below and the top arc above
+export const ORBIT_LANE_BRIDGE_Y_M = 0.040;   // span centre; 6mm tall, so the underside is at 0.037
+export const ORBIT_ARC_SEGMENTS = 6; // straight boxes per arc; the chord-to-arc error at 38/6 degrees is 0.3mm
+export const ORBIT_RAIL_TOP_Z_M = 0.30; // the vertical section's top - where the top arc takes over
+
+// UPPER-TABLE CIRCULATION: the orbit's TOP ARC, and the piece that turns the upper board from a
+// dead end into a loop.
+//
+// Before this, each lane ended at ORBIT_RAIL_TOP_Z_M and the ball ran on up the wall into topWall,
+// bounced, and came back down the lane it arrived in. Measured on the 174-shot fan, the re-entry
+// lanes - three scoring rollovers - were crossed 3 times, because nothing ever travelled across the
+// top of the board.
+//
+// The arc is TANGENT TO THE SIDE WALL where the vertical section ends, so a ball riding the lane
+// meets it at zero incidence, and it sweeps inboard through ORBIT_TOP_ARC_SWEEP_RAD - turning the
+// ball from straight up-table to mostly sideways and releasing it across the top at z~0.41. From
+// there its own momentum decides what happens, which is the point:
+//   * fast    - it crosses the whole top, over all three re-entry rollovers, meets the OPPOSITE
+//               arc's inboard face and is turned down the opposite lane. A completed loop.
+//   * medium  - it drops as it crosses (0.717 m/s^2 downhill; a 0.35s crossing falls 44mm) and
+//               lands in the bumper nest below.
+//   * slow    - it never clears the nest at all and rattles there.
+// One shot, three outcomes, chosen by how hard it was hit rather than by a branch in the geometry.
+//
+// This is an OUTER guide only - there is deliberately no inner rail on the turn. An inner rail
+// would make the arc a closed channel, which would both force the single "cross the top" outcome
+// and collide with the bumper nest (checked: at the radius that turns the ball usefully, an inner
+// rail passes within 5mm of two of the pops). Leaving the inboard side open is what lets a ball
+// leave the turn early into the nest.
+//
+// The void between the arc and the side wall is bounded by the arc, the wall and topWall, and its
+// only opening is the 15.7mm between the arc's upper end and topWall's inner face - under the
+// ball's 27mm diameter, so it is sealed and nothing can get in.
+export const ORBIT_TOP_ARC_RADIUS_M = 0.115;
+export const ORBIT_TOP_ARC_SWEEP_RAD = 72 * Math.PI / 180;
+export const ORBIT_TOP_ARC_SEGMENTS = 8; // 9 degrees per segment - 0.35mm of chord error
+// SHOT-FAN REVISION: the entrance rollover moved DOWN to z=0.06, into the wall channel below the
+// rail's bottom tip, because 0.17 sat above where a real shot can reach in that lane. Traced: a
+// 35deg shot enters the channel and peaks at (-0.205, +0.125) before rolling back - it was
+// genuinely IN the lane and still never crossed a trigger at 0.17. Entering an orbit should be the
+// easy half and completing it the skill; putting the entrance at the lane's mouth and leaving the
+// completion at 0.33 is what makes that split real rather than nominal.
+// Entrance/completion Z are derived from the arc rather than declared, so they cannot drift out of
+// the lane when the arc is retuned. See orbitArcPoint().
+// Completion sits in the vertical section, on the lane's centre line. It was pulled down to 0.24
+// while the straight rails were in place, because measured, no shot reached higher than z=+0.275
+// inside that lane and half of them died by +0.102 - the entry impact had already taken the speed.
+// With the arc entry preserving it instead, this goes back up to a real loop length.
+export const ORBIT_COMPLETION_Z_M = 0.26; // in the vertical section, below the rail's top at 0.30
 export const ORBIT_TRIGGER_WIDTH_M = 0.03;
 export const ORBIT_TRIGGER_DEPTH_M = 0.025;
 // How long a completion trigger has to fire after its matching entrance before the shot is
@@ -839,18 +1401,52 @@ export const ORBIT_COMPLETION_WINDOW_MS = 4000;
 // Side effect, checked and wanted: this also makes the four upper-table corridors symmetric -
 // Saturn's shoulders become 39.5mm/39.4mm (was 58.4/39.4), the boss-bumper lanes 43mm/43.3mm
 // (was 59.0/43.3), and the comet channel widens from 45.4mm to ~64mm.
+// SUPERSEDED, kept as the record of why the shape changed twice. The block above was written when
+// the target bank reached x=-0.214 and the comet x=0.192, and concluded a wall-hugging orbit did
+// not fit AT THOSE POSITIONS; both moved inboard in the shot-corridor pass, which freed the wall
+// channel. That pass then ran both rails straight and vertical at |x|=0.170 and measured 6 lane
+// entries and 2 completions across 174 flipper shots - better placed than the 75-94mm inboard
+// "orbits" it replaced, but still not a shot. The orbit-geometry pass above replaced the straight
+// rails with the tangent arc, which is what finally made them repeatable: 38 entries and 7
+// completions on the identical fan.
+//
+// Per-side identity only. Every coordinate is derived from the arc constants above via
+// orbitArcPoint(), mirrored by `mirror`, so the two orbits are guaranteed to be exact mirrors of
+// each other - which is what makes "left flipper -> right orbit, right flipper -> left orbit" the
+// same shot twice rather than two shots that happen to look alike.
+//
+// KNOWN SIDE EFFECT, called out rather than hidden: the shooter lane exits into the right-hand
+// channel (the ball rests at x=0.1955 and rides the wall up), so a strong launch can run the right
+// orbit lane and score a right orbit off the plunger. Nothing about the orbit's scoring rule
+// changed - the geometry put the plunger's exit path into the lane. The skill-shot lanes are
+// untouched at z=0.02, well below the outer guide's lower tip.
 export const ORBITS = [
-    // Left: rail runs alongside the mission target bank's inner (Saturn-facing) edge.
-    { side: 'left', railBottomX: -0.075, railTopX: -0.08, entranceX: -0.078, completionX: -0.08 },
-    // Right: near-mirror of the left (see the note just above), running inboard of the comet.
-    // Ball-trap fix (measured): the right rail moved 12mm outboard (0.077/0.082 -> 0.089/0.094).
-    // A ball rolling the right orbit lane used to dead-end against the vision gate's guard posts
-    // with the rail capping its outboard escape - see VISION_GATE_POS for the full measurement.
-    // The rail move alone does nothing (measured 25/30 balls still rested); it only works paired
-    // with the gate move. entranceX/completionX are deliberately NOT moved - they are scoring
-    // triggers and still sit inside the (now wider) lane.
-    { side: 'right', railBottomX: 0.089, railTopX: 0.094, entranceX: 0.08, completionX: 0.082 }
+    { side: 'left', mirror: -1 },
+    { side: 'right', mirror: 1 }
 ];
+
+// A point on one orbit's arc, for a given face/centre radius and sweep angle. sweep=0 is the
+// tangency point on the side wall; sweep grows downward and inboard. Larger radius = further
+// OUTBOARD (toward the wall), because the construction centre sits inboard of the whole arc - so
+// the outer guide's radius is the largest, the lane's centre line is one half-width inside it, and
+// the inner guide is a full lane-width inside it.
+export function orbitArcPoint(mirror, radius, sweepRad) {
+    const centerX = mirror * (ORBIT_WALL_FACE_X_M - ORBIT_ARC_RADIUS_M);
+    return {
+        x: centerX + mirror * radius * Math.cos(sweepRad),
+        z: ORBIT_ARC_TANGENT_Z_M - radius * Math.sin(sweepRad)
+    };
+}
+
+// The same construction for the TOP arc: sweep=0 is the tangency point on the side wall at the
+// vertical section's top, and sweep grows inboard and UP-table (the entry arc's grows downward).
+export function orbitTopArcPoint(mirror, radius, sweepRad) {
+    const centerX = mirror * (ORBIT_WALL_FACE_X_M - ORBIT_TOP_ARC_RADIUS_M);
+    return {
+        x: centerX + mirror * radius * Math.cos(sweepRad),
+        z: ORBIT_RAIL_TOP_Z_M + radius * Math.sin(sweepRad)
+    };
+}
 
 // ===================================
 // VISION GATE - SPIRITBALL's signature capture/portal target. A difficult mid/upper-
@@ -899,13 +1495,191 @@ export const ORBITS = [
 // This is ONE number. If the gate's new position reads wrong in playtest, move it back toward
 // 0.045 and re-run qa/ball-trap-audit.js - the trade is trap rate against gate placement, and
 // the table above is the exchange rate.
-export const VISION_GATE_POS = { x: 0.027, z: 0.235 };
-export const VISION_GATE_RADIUS_M = 0.015; // the actual capture trigger
+// SHOT-CORRIDOR REFACTOR: (0.027, 0.235) -> (-0.082, 0.242). The gate's edge-to-edge gap to the
+// power-up orb was 0mm and to Saturn 29mm; it was reached 0 times in the 174-shot fan. Moving it
+// off the centre column and onto Saturn's left shoulder gives it its own approach - the left-of-
+// centre lane - while keeping it a genuinely tight shot. Clearances: 25.0mm to Saturn (sealed, no
+// ball fits between them, so no pocket), 40.9mm to the boss bumper and 56mm to the left orbit
+// rail's inner face (both real lanes). Capture radius, collar radius, guard posts, sequence
+// timing and eject speed are all unchanged - only the position moves.
+// Trap-audit revision: at (-0.082, 0.242) the gate sat directly in the boss bumper's fall line
+// (boss at x=-0.045) with open board on both sides of its 3-post collar, and the outside V's
+// between adjacent posts - a pre-existing feature of any 3-post horseshoe, and the baseline
+// board's own worst cluster too - caught 7 seeded balls across three adjacent spots. Moved
+// outboard so the rail's inner face closes the uphill V on that side and the collar is no longer
+// under a bumper.
+//
+// Second trap-audit pass: -0.112 left a 26mm slot between the collar's outboard guard post and the
+// rail, and 26mm against a 27mm ball is the WORST case, not a safe one - the ball half-enters,
+// the solver lets it penetrate the last millimetre, and it jams. 5 of 258 seeds rested there. The
+// working rule this board needs is a margin, not a hair: every gap either <=18mm (the ball cannot
+// begin to enter) or >=42mm (a real lane).
+//
+// Third pass: -0.120 cleared that slot but left the collar's INBOARD guard post standing in
+// Saturn's deflection shadow - balls rolling down the left corridor glance off Saturn's upper-left
+// shoulder, fan out to the left, and 7 of 262 came to rest touching that post's uphill pole. A
+// lone post on a tilted plane always has that crease (the comet's is the same effect, and the
+// pre-refactor board caught balls on this gate's own post the same way); what decides whether it
+// matters is how much traffic crosses it. -0.132 tucks the whole collar against the orbit rail,
+// out of the deflection fan, and the cluster goes to zero. Remaining clearances: 6mm outboard to
+// the rail (sealed), 67.2mm inboard to Saturn's edge (the corridor's through-route).
+// Fourth trap-audit pass, after the rails were re-cut with a taper. A tapered rail's inner face is
+// a long straight wall, and a long straight wall alongside a round obstacle is the most effective
+// ball catcher on a board: the gap between them necessarily passes through the ball's own diameter
+// somewhere, and the ball parks at that point. At x=-0.104 the collar's outboard guard post made
+// exactly that V with the rail and caught 8 of 249 seeded balls at (-0.134, 0.240); the comet made
+// the mirror of it on the right (7 balls).
+//
+// The fix is the same on both sides and follows from the arithmetic rather than from nudging: the
+// left corridor is 97.6mm wide at this Z (rail inner face to Saturn's edge) and the collar is 49mm
+// of that, so the 48.6mm left over can be split 24/24 - two trap-band gaps - or pushed to one side
+// as 42/6. Pushed. The collar sits against Saturn's shoulder (25.2mm, sealed - nothing fits) with a
+// 42.3mm lane outboard of it, which is the corridor's own through-route.
+// Fifth trap-audit pass, and the one that resolved it by changing the arrangement rather than the
+// numbers. Two rules came out of the four passes before it, and they conflict inside the left
+// corridor:
+//   * a gap to a long straight wall (an orbit rail's inner face) must be <=18mm or >=42mm
+//   * a gap between two ROUND bodies must be >=40mm, full stop - "sealed" does not exist between
+//     two convex surfaces, because the gap opens away from the closest point and necessarily
+//     passes through the ball's diameter somewhere. Tucking the collar 10mm from Saturn produced
+//     the worst cluster of the whole exercise: 22 of 229 seeded balls in one V.
+// At z=0.225 the collar cannot satisfy both: clearing Saturn by 40mm needs x <= -0.102, clearing
+// the rail by 42mm needs x >= -0.078.
+//
+// So the gate moved to the CENTRE channel instead, which is where the shot-corridor brief wanted
+// it anyway ("CENTER: bumper cluster / Saturn / Vision Gate"). On the spine at z=0.060 its only
+// neighbour is Saturn, 45.5mm above the far guard post, and the centre corridor is now a genuine
+// two-outcome shot: the collar's mouth faces the flippers, so an accurate centre shot is captured
+// and a fast one threads past the 15mm throat and carries on to Saturn. It is also the most
+// reachable spot on the board, which the old (0.027, 0.235) position emphatically was not.
+export const VISION_GATE_POS = { x: 0, z: 0.060 };
+// SCOOP PASS. 0.015 -> 0.011. This is the capture trigger's own radius; the ball adds its 13.5mm
+// to it, so the zone that actually captures was 28.5mm - LARGER than the 20mm collar the three
+// guard posts stand on. A ball passing BESIDE the mouth at (+/-0.020, 0.040) is 28.3mm from the
+// trigger's centre and was captured without ever entering the scoop, which is why a 210-shot
+// angle/speed sweep found captures with the ball crossing the mouth at 0.16 m/s - a dribble paid
+// the same 4000 as a struck shot. At 0.011 the catch zone is 24.5mm, inside the collar, so the
+// ball has to be in the mouth rather than near it.
+//
+// Shrunk rather than moved: the gate's position has been through five trap-audit revisions (see
+// VISION_GATE_POS above) and is not worth disturbing. Not shrunk further, either - a small trigger
+// and a fast ball is how tunnelling starts, and qa/regression-suite.js's capture check plus the
+// board's own CCD test are what bound this.
+export const VISION_GATE_RADIUS_M = 0.011; // the actual capture trigger
+
+// NO PHYSICAL COLLAR CHEEKS, and this is a measured decision rather than an omission. Three
+// placements of a pair of flanking rails were built and swept:
+//
+//   below the mouth, flaring down/out   near misses reaching an inlane 14/34 -> 5/30
+//   above the mouth, short              whole-sweep drains 64% -> 70%
+//   above the mouth, long               captures 27 -> 29 (full-power row 7 -> 10), drains 76%
+//
+// None of them rejected a miss and one of them made the shot easier. The reason is structural:
+// this gate sits on the board's centre spine directly above the drain gap, so a miss returns down
+// the SAME line the shot went up. Any rail that channels one channels the other, and a channelled
+// return goes straight down the middle where a ball scattered off the bare round guard posts
+// sometimes reaches an inlane instead. The classic fix for a centre shot that drains - a post in
+// the flipper gap - is a change to how every shot on the board drains, not to this approach.
+//
+// What the gate keeps instead is its three round guard posts, which scatter rather than channel,
+// and the trigger change above, which is what makes a weak shot stop paying.
+
+// The approach itself, painted. The gate's own hardware (collar, throat, halo, beacon, callout)
+// all sits AT the mouth and says "there is a thing here"; nothing said where to shoot it from.
+// This is the lane, on the centre spine, running up to the mouth - the same floor-tint idiom the
+// orbits, the target bank, Saturn and the comet all use, so the board's five aimable shots are
+// marked the same way. Narrow on purpose: 38mm keeps it clear of skillShotLane0's insert at
+// x 0.020, and a wide bright strip on the centre line would read as an invitation to a shot whose
+// capture band is 4-8 degrees. Decorative only, height 0.001 at y 0.0012.
+export const VISION_GATE_APPROACH_TINT = { x: 0, z: 0.019, width: 0.038, length: 0.047 };
+
+// --- GUIDE POST AUDIT: NO POSTS ADDED ------------------------------------------------------
+// Audited for the five things a post is good for. The answer was none, and the working is here so
+// the next pass does not repeat it.
+//
+// DEAD CORNERS - none to plug. qa/ball-trap-audit.js on this board finds 26 resting balls in
+// total, and 23 of them are at (+/-0.111, -0.343): a ball on the flipper's upper edge, which is
+// the cradle an inlane is supposed to deliver, not a corner. The other 3 are balls balanced on a
+// bumper's uphill pole, which a post cannot fix and would make worse - two round bodies closer
+// than 2 x (ball radius + post radius) park a ball in the V between them, the measurement that
+// pushed the Vision Gate's far post out to 1.75 collar radii.
+//
+// LANE MOUTHS - already defined, by rails rather than posts: the two orbit rails and their top
+// lips, SATURN_CANOPY and SATURN_JAW, COMET_RETURN_RAIL, the Vision Gate's own three guard posts,
+// and the two lane dividers with their four posts. Nothing is left unmarked.
+//
+// Two candidates were built, measured and removed:
+//
+// SATURN'S LEFT CHEEK, a post at (-0.036, 0.148). Saturn's mouth has a hard right jaw and, on the
+// left, only the mission bank's inner plate fixture - which is DECORATIVE, so the art shows a
+// closed cheek 12.7mm off Saturn's surface while the physics has an open passage. The post closed
+// it at 5.3mm (sealed) and the trap audit stayed at zero clusters, so the geometry was sound. It
+// still came out: clean flipper hits on Saturn fell 6 -> 3 and cluster spill rose 21 -> 27.
+// Halving the shot to tidy a decorative/collider mismatch is the wrong way round.
+//
+// THE COMET / RIGHT ORBIT SPLIT, a post at (0.112, 0.055). Shots from the left flipper at 10-16
+// degrees reach the comet and 18-30 degrees hit the right orbit rail, and nothing marks the fork.
+// Arithmetic put the post 15.5mm clear of the ball's edge on the 16-degree line, 42.1mm off the
+// orbit rail's inner arc and 53.4mm off the Saturn jaw. Real trajectories curve: with it in place
+// the post became the FIRST solid contact for the 16-degree comet shot and for four orbit-bound
+// shots at 18-20 degrees. It was intercepting both of the corridors it was meant to separate - and
+// the fork is already defined anyway, by the orbit rail that forms one side of it.
+//
+// If a post is wanted later, the pattern is a plain cylinder collider with a decorative cap on
+// top, the way the Vision Gate's guard posts are built, and the clearance rules to check against
+// are: >=40mm centre-to-centre from any other round body, and to a flat rail face either <=18mm or
+// >=42mm. Arithmetic is necessary but not sufficient - measure the shots that pass nearby.
 export const VISION_GATE_COLLAR_RADIUS_M = 0.02; // ring radius the 3 guard posts sit on
 // Awarded once per successful capture - deliberately the single biggest configurable bonus on
 // the board (bigger than Saturn's 3000, just under a mission completion's 5000), matching a
 // signature feature's weight. Kept as its own named constant, not folded into MISSION_
 // COMPLETE_BONUS or SCORE_SATURN, specifically so it stays independently tunable.
+// --- RISK / REWARD AUDIT ----------------------------------------------------------------------
+// One fan, every feature measured the same way: 376 shots (2 flippers x 4 speeds x 47 angles at 3
+// degrees). `reach` is the share of the fan that gets there; `band` is how many distinct launch
+// angles do, which is the real accuracy cost; `miss` is the share of shots that came within 45mm
+// of it travelling up-table, did not reach it, and drained rather than returning to a lane.
+// The board's own baseline drain rate for an arbitrary shot is 64-66%, so `miss` is only bad above
+// that.
+//
+//   feature                reach  band   miss    class
+//   L ORBIT (completed)     2.1%     4    55%    RISKY
+//   R ORBIT (completed)     2.1%     4    46%    RISKY
+//   re-entry lane           2.4%     6    25%    RISKY
+//   VISION GATE             5.1%     8    55%    RISKY
+//   SATURN                  5.1%    14    52%    RISKY
+//   BOSS BUMPER             5.1%    13    40%    RISKY
+//   COMET                   8.5%    17    75%    MODERATE
+//   skill lane             10.1%    16    73%    MODERATE
+//   L orbit mouth          10.9%    23    84%    MODERATE
+//   TARGET BANK            11.7%    22    65%    MODERATE
+//   R orbit mouth          12.2%    22    67%    MODERATE
+//   pop bumper             13.0%    22    67%    MODERATE
+//   slingshot              43.1%    74    81%    SAFE
+//   inlane                 63.0%    77    86%    SAFE
+//
+// REWARD TRACKS ACCURACY, which was the thing to check. The three biggest awards need the three
+// narrowest bands: VISION GATE (4000) at 8 angles, SATURN (3000) at 14 and the BOSS BUMPER (1200)
+// at 13, against 22 for a pop bumper, 74 for a slingshot and 77 for the inlanes. Nothing
+// high-value is reachable by accident more easily than the basic furniture.
+//
+// FAILED SHOTS MOSTLY RETURN TO PLAY, and the premium shots are the best-behaved of the lot:
+// missing the boss drains 40% of the time, an orbit 46-55%, Saturn 52% and the Vision Gate 55% -
+// all BELOW the board's 64-66% baseline. Risk on this board is currently in the accuracy required,
+// not in a punitive miss, which is the right way round.
+//
+// ONE FINDING FAILS THE BRIEF: the LEFT ORBIT MOUTH at 84%, twenty points above baseline and
+// seventeen above its own mirror (R orbit mouth, 67%). A missed left-orbit shot drains far more
+// often than an average shot does. The asymmetry is the clue and it is already documented at
+// leftSlant in babylon-game.js: that wall runs unbroken from the left side wall down to x -0.095
+// and carries anything descending the left margin inboard, while the right side has the launch
+// lane wall and a working outlane instead. Three ways of opening it were built and measured in the
+// lower-flow pass and all three cost 3 of 5 orbit completions, so the fix is NOT to cut that wall
+// again - it is local geometry at the mouth itself, and it wants its own measured pass rather than
+// being bundled into an audit.
+//
+// No geometry changed for this audit.
+
 export const SCORE_VISION_GATE = 4000;
 // Total capture->eject duration. Short enough to stay "a beat," not a cutscene - about 3x a
 // mission-complete's own camera beat (500ms), the biggest existing moment on the board, since
@@ -948,7 +1722,9 @@ export const HEX_VISION_GATE = 0xaa00ff; // vivid violet - "third eye" adjacent 
 // straight into rightGuide's lower end cap and thrown back), while the identical launch from the
 // lane's centre reaches z=+0.30 to +0.41. 477 puts the rod on the lane's centre line, so a launch
 // goes UP the lane instead of into its inner wall. LANE_INNER_WALL_X_PX still tracks it, keeping
-// the same 30px ball-clearance invariant that constant's own comment describes.
+// the same 30px ball-clearance invariant that constant's own comment describes. (rightGuide, named
+// above, was removed by the orbit-geometry pass - see ORBIT_ARC_RADIUS_M - but the reasoning holds
+// and this value is now what keeps the launch inboard of the right orbit's upper guide section.)
 export const BALL_REST_X_PX = 477; // was 470, ported from resetBall()'s (CONFIG.width-70, CONFIG.height-220)
 export const BALL_REST_Z_PX = 740;
 // The ball's actual rest position in world space - used directly for its spawn/reset
@@ -1018,12 +1794,18 @@ export const PLUNGER_MAX_POWER_MS = 1600 * PX_TO_M; // ~1.51 m/s - comfortably u
 // but with that fixed the launch still never gave the player a ball to hit, and this is why.
 //
 // The cause is geometric, not a matter of force. rightGuide's lower end (a rotated bar; its two
-// lower vertices measure to ~(0.186, -0.020) and ~(0.173, -0.025)) sits directly above the
-// shooter lane's exit, and the ball leaves that lane at x=0.196 with a 0.0135 radius. At the old
+// lower vertices measure to ~(0.186, -0.020) and ~(0.173, -0.025)) sat directly above the shooter
+// lane's exit, and the ball leaves that lane at x=0.196 with a 0.0135 radius. At the old
 // -(0.1417 + power*0.08) the ball drifted inboard just far enough to clip that end, rode its
 // inboard face back OUTBOARD, and then ran the wall-hugging channel between the guide and
-// rightWall - the same channel ORBIT_RAIL_BOTTOM_Z_M's comment already rejects as "not a
-// reliable guided channel" - up to about z=0.10 and straight back down into the right outlane.
+// rightWall up to about z=0.10 and straight back down into the right outlane.
+//
+// rightGuide itself no longer exists - the orbit-geometry pass replaced both mid-table guides with
+// the orbit lanes' own inner guides (see ORBIT_ARC_RADIUS_M) - and the same pass deliberately omits
+// the right lane's outer catching flank precisely because this exit path runs through it. The
+// horizontal values below are still the measured ones and still matter: they are what puts the
+// launched ball inboard of the orbit's upper guide section rather than into the wedge behind it,
+// and the launch now runs the right lane to z=+0.297 instead of dying at z=-0.036.
 //
 // Measured on the real build, real Space hold-and-release, flipper reach taken from the bats'
 // own meshes at runtime (x +-0.150, z -0.433..-0.334), n=5-6 per cell. "reach" is the only

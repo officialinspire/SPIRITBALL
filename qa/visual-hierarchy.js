@@ -27,8 +27,12 @@ const OUT = process.env.OUT || require('os').tmpdir();
 const PORT = process.env.PORT || 8971;
 const TAG = 'qa';
 
-// Shot callouts = pure decoration. Bumper inserts (labelPlane★ / labelPlane◉) are gameplay markers
+// Shot callouts = pure decoration. Bumper inserts (labelPlane◈ / labelPlane◉) are gameplay markers
 // on the bumpers and are NOT in this list.
+// labelPlane◈ is the BOSS bumper's insert. It used to be labelPlane★, and the vision-quest retheme
+// moved it to a nested diamond so the star could belong to the comet callout alone - if this list
+// still said ★ the boss's insert would silently drop out of the marker set that assertion 4 below
+// checks was not dimmed along with the signage.
 // The split follows createLabelPlane()'s own discriminator, not a guess: a label that draws itself
 // a background chip is a named callout (decoration that names a shot and carries no state); every
 // chipless user is a gameplay marker sitting on its own lamp. The inlane/outlane flow arrows are
@@ -36,7 +40,7 @@ const TAG = 'qa';
 // and duly reported the game for not dimming them.
 const DECOR_LABELS = ['labelPlaneLORBIT','labelPlaneRORBIT','labelPlaneVISIONGATE','labelPlaneTARGETS',
                       'labelPlaneSKILLSHOT','labelPlaneKICKBACK'];
-const GAMEPLAY_LABELS = ['labelPlane★','labelPlane◉','labelPlane▲','labelPlane▼'];
+const GAMEPLAY_LABELS = ['labelPlane◈','labelPlane★','labelPlane◉','labelPlane▲','labelPlane▼'];
 
 function decodePng(file) {
   const buf = fs.readFileSync(file); let p = 8, w = 0, h = 0, ct = 0, idat = [];
@@ -76,8 +80,13 @@ const stat = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) =
     if (body) { body.setMotionType(BABYLON.PhysicsMotionType.ANIMATED); body.setLinearVelocity(BABYLON.Vector3.Zero()); }
   });
 
-  // (a) The ball at eight representative positions across the reachable playfield.
-  const spots = [[0,-0.20],[0,-0.05],[0,0.10],[0,0.25],[-0.12,0.00],[0.12,0.00],[-0.12,0.20],[0.12,0.20]];
+  // (a) The ball at eight representative positions across the reachable playfield. Re-picked for
+  // the shot-corridor layout, and checked against the live collider map rather than eyeballed:
+  // (0, 0.25) is now inside Saturn (z 0.160-0.250) and (0.12, 0.20) overlaps the comet, so those
+  // two spots returned zero visible ball pixels and the "measurable at most positions" guard
+  // tripped on a probe parked inside a feature. Every spot below clears the nearest collider by
+  // at least 8mm with the ball's own 13.5mm radius counted.
+  const spots = [[0,-0.20],[0,-0.05],[0,0.125],[0,0.285],[-0.12,0.00],[0.12,0.00],[-0.075,0.20],[0.13,0.24]];
   const ballReads = [];
   for (const [x, z] of spots) {
     const pt = await page.evaluate(({ x, z }) => {
@@ -207,10 +216,17 @@ const stat = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) =
     { markers: markers.map((m) => m.name + '=' + m.p90), brightestCallout });
 
   // Tier 8 is last, by a wide margin, and must stay there.
+  // p50, not p90. The skybox is sampled on a 6x6x6 grid of its bounding box and only 8 of those
+  // points survive the frontmost-pick test, so its "p90" is the near-MAX of 8 samples - and what
+  // that maximum actually measures is GlowLayer bloom spilling past the board's silhouette onto the
+  // sky right behind it, not the starfield's own brightness. Measured across four runs of an
+  // unchanged build it read 13.1, 30.5, 75.6 and 124.6 while the median sat at 10.3-10.8, so the
+  // check was a coin flip on where 8 points happened to land. The median answers the question the
+  // check is asking - is the starfield the dimmest tier - and is stable. p90 is still reported.
   const sky = by.skybox;
   check('the starfield stays the dimmest thing on screen',
-    !!sky && sky.p90 < ballMedian * 0.5 && sky.p90 < flipperP90 * 0.5,
-    { skybox: sky && sky.p90, ballMedian, flipperP90 });
+    !!sky && sky.p50 < ballMedian * 0.5 && sky.p50 < flipperP90 * 0.5,
+    { skyboxMedian: sky && sky.p50, skyboxP90bloomTail: sky && sky.p90, ballMedian, flipperP90 });
 
   console.log(`\n=== SUMMARY ===\nTOTAL: ${pass} passed, ${fail} failed`);
   fs.writeFileSync(`${OUT}/visual-hierarchy.json`, JSON.stringify({ ballReads, rows }, null, 1));

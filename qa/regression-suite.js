@@ -162,8 +162,22 @@ async function freshPage(browser) {
       const scoreEl = document.getElementById('hud-score');
       const readScore = () => parseInt(scoreEl.textContent, 10) || 0;
 
+      // Read the approach off the bumper's own position rather than hardcoding it. This used to
+      // be a literal (-0.08, 0.02) - bumper1's coordinates at the time - and when the shot-corridor
+      // refactor moved the cluster to the upper board the ball was launched at empty playfield.
+      // The suite still "passed" the first-contact check (the ball scored on something else on its
+      // way past) and then failed the cooldown-window precondition, which is a much more confusing
+      // way to report "the probe is aimed at nothing". Same geometry as before - 0.04m down-table
+      // of the bumper's centre, driven straight at it - just anchored to the real mesh.
+      mesh.computeWorldMatrix(true);
+      const bumperX = mesh.position.x, bumperZ = mesh.position.z;
+      // 0.028 down-table, not the original 0.04: the shot-corridor refactor put the mission target
+      // bank's top plate 55mm below this bumper in the same corridor, and a ball staged 40mm below
+      // the bumper overlaps that plate's trigger. It scored the target's 750 on the "second contact
+      // within cooldown" leg and reported the bumper's cooldown as broken. 0.028 clears the plate
+      // by 9.5mm and still leaves the ball 7.5mm from the bumper's surface - one step at 0.5 m/s.
       function approach() {
-        ball.mesh.position.set(-0.08, 0.02, 0.02);
+        ball.mesh.position.set(bumperX, 0.02, bumperZ - 0.028);
         ball.aggregate.body.setLinearVelocity(new BABYLON.Vector3(0, 0, 0.5));
         ball.aggregate.body.setAngularVelocity(BABYLON.Vector3.Zero());
       }
@@ -188,6 +202,13 @@ async function freshPage(browser) {
       approach();
       let secondBounceSpeed = 0;
       for (let i = 0; i < 12; i++) {
+        // Re-staged every step, not launched once. A ball allowed to fly after the bumper's kick
+        // travels ~100mm inside this 192ms window, and in the shot-corridor layout that carries it
+        // into the mission target bank further down the same corridor - so the "did the bumper
+        // score twice?" delta picked up the target's 750 and the cooldown looked broken. Pinning
+        // the ball against the bumper keeps the second contact on the same feature, which is what
+        // this leg is actually asserting about.
+        approach();
         dbg.updateHitCooldowns(16);
         dbg.updateBallPhysics(ball, 16);
         engine._step(16 / 1000);

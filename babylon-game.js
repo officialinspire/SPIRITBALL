@@ -69,7 +69,7 @@ import {
     STUCK_TIME_THRESHOLD_MS, STUCK_KICK_CENTERWARD_MS, STUCK_KICK_DOWNHILL_MS, STUCK_KICK_UP_MS,
     STUCK_KICK_ESCALATION_STEP, STUCK_KICK_ESCALATION_MAX,
     FLIPPER_LENGTH_M, FLIPPER_THICKNESS_M, FLIPPER_HEIGHT_M, FLIPPER_MASS_KG,
-    FLIPPER_GAP_HALF_M, FLIPPER_PIVOT_X_M, FLIPPER_Z_M, FLIPPER_PLAYFIELD_CLEARANCE_M, FLIPPER_SWEEP_RAD,
+    FLIPPER_PIVOT_X_M, FLIPPER_Z_M, FLIPPER_PLAYFIELD_CLEARANCE_M, FLIPPER_SWEEP_RAD,
     FLIPPER_LEFT_REST_RAD, FLIPPER_RIGHT_REST_RAD, FLIPPER_ACTIVATE_SPEED_RAD_S, FLIPPER_RETURN_SPEED_RAD_S,
     FLIPPER_RESTITUTION, FLIPPER_FRICTION, FLIPPER_CONTACT_VELOCITY_TRANSFER,
     BUMPER_RADIUS_M, BUMPER_CLUSTER, BUMPER_KICK_SPEED_MS, SPECIAL_EVENT_KICK_SPEED_MS, TARGET_RADIUS_M,
@@ -80,8 +80,15 @@ import {
     SLINGSHOT_KICK_SPEED_MS, SLINGSHOT_KICK_UPTABLE_BIAS_MS, SLINGSHOT_RESTITUTION, REENTRY_LANE_RADIUS_M, REENTRY_LANES,
     LANE_Z_TOP_M, LANE_Z_BOTTOM_M, LANE_DIVIDER_X_M, LANE_TRIGGER_Z_M, INLANE_GUIDE_BOTTOM_Z_M,
     INLANE_TRIGGER_X_M, OUTLANE_TRIGGER_X_M, LANE_TRIGGER_WIDTH_M, LANE_TRIGGER_DEPTH_M,
-    INLANE_GUIDE_TOP_X_M, INLANE_GUIDE_BOTTOM_X_M, SIDE_LANES, ORBIT_RAIL_BOTTOM_Z_M,
-    ORBIT_RAIL_TOP_Z_M, ORBIT_ENTRANCE_Z_M, ORBIT_COMPLETION_Z_M, ORBIT_TRIGGER_WIDTH_M,
+    INLANE_GUIDE_TOP_X_M, INLANE_GUIDE_BOTTOM_X_M, SIDE_LANES,
+    ORBIT_RAIL_TOP_Z_M, ORBIT_COMPLETION_Z_M, ORBIT_TRIGGER_WIDTH_M,
+    ORBIT_ARC_RADIUS_M, ORBIT_LANE_WIDTH_M, ORBIT_ARC_SWEEP_RAD, ORBIT_INNER_SWEEP_RAD,
+    ORBIT_ENTRANCE_SWEEP_RAD, ORBIT_ARC_SEGMENTS, orbitArcPoint, ORBIT_WALL_FACE_X_M,
+    ORBIT_TOP_ARC_RADIUS_M, ORBIT_TOP_ARC_SWEEP_RAD, ORBIT_TOP_ARC_SEGMENTS, orbitTopArcPoint,
+    ORBIT_TOP_LIPS, ORBIT_LANE_BRIDGE_Z_M, ORBIT_LANE_BRIDGE_Y_M,
+    SATURN_CANOPY, SATURN_JAW, SATURN_APPROACH_TINT,
+    COMET_RETURN_RAIL, COMET_APPROACH_TINT, VISION_GATE_APPROACH_TINT,
+    ORBIT_OUTER_GAP_FROM_RAD, ORBIT_OUTER_GAP_TO_RAD, ORBIT_OUTER_FLANK_SIDES,
     ORBIT_TRIGGER_DEPTH_M, ORBIT_COMPLETION_WINDOW_MS, ORBITS, VISION_GATE_POS,
     MISSION_CUE_MS, MISSION_SELECT_MESSAGE_MS,
     VISION_GATE_RADIUS_M, VISION_GATE_COLLAR_RADIUS_M, SCORE_VISION_GATE, VISION_GATE_SEQUENCE_MS,
@@ -1021,6 +1028,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             { name: 'topWall', x: 270, y: 15, w: 540, h: 30, rot: 0 },
             { name: 'leftWall', x: 15, y: 480, w: 30, h: 960, rot: 0 },
             { name: 'rightWall', x: 525, y: 480, w: 30, h: 960, rot: 0 },
+            // LOWER-FLOW PASS - leftSlant is UNCHANGED, and that is a measured decision.
+            //
+            // It runs an unbroken 180px from the left wall down to x=-0.095, which is to say it
+            // bridges straight over the left outlane. Measured, 132 seeded descents across the full
+            // board width: the right outlane trigger registers 9 times, the left registers 0, and
+            // not one ball crosses the flipper line outboard of the divider on that side. The left
+            // outlane does not exist as a lane.
+            //
+            // Three ways of opening it were built and measured on the 174-shot fan, and all three
+            // cost the same thing:
+            //   truncated to 85px (mirroring rightSlant)  left outlane 0 -> 18, orbit completions 5 -> 2
+            //   cut in two around a 50mm gap at x -0.20   left outlane 0 -> 19, orbit completions 5 -> 2
+            //   truncated to 109px, channel at the wall   outlane hits 3 -> 16, orbit completions 5 -> 2,
+            //                                             and orbit ENTRANCES 37 -> 29 as well
+            // The section of wall that blocks the outlane is the same section a ball travelling up
+            // the left rides on its way to the orbit mouth: it is the left orbit's deflector and
+            // the left outlane's lid at once, and the board does not have room for both. Every
+            // variant also dropped the p90 height a ball reaches while outboard of x 0.16 from
+            // 0.379 to about 0.18.
+            //
+            // Left as it is rather than trading the left orbit shot away without being asked. The
+            // exchange rate is above if that trade is wanted: about 18 left-outlane registrations
+            // and 15 points of lane-registration coverage for 3 of 5 orbit completions.
             { name: 'leftSlant', x: 90, y: 760, w: 180, h: 20, rot: -0.5 },
             // Ball-flow geometry pass (user-requested, measured): rightSlant SHORTENED from its
             // outer (wall-side) end, 180px -> 85px, centre walked back along its own axis so the
@@ -1066,8 +1096,22 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // diameters) while leaving that upper gap untouched. The guides keep their full
             // inward-redirect job for everything approaching between the tips - only their dead
             // bottom 43px, whose sole measured effect was rejecting up-table shots, is gone.
-            { name: 'leftGuide', x: 108, y: 430, w: 157, h: 15, rot: 1.2 },
-            { name: 'rightGuide', x: 432, y: 430, w: 157, h: 15, rot: -1.2 }
+            //
+            // ORBIT GEOMETRY PASS: leftGuide/rightGuide are GONE, replaced by the orbit lanes' own
+            // inner guides. They cannot coexist - measured against the live scene, leftGuide's
+            // lower tip reached x=-0.1865 at z=-0.024, which is 20mm INSIDE the new lane (its inner
+            // face is at -0.1668 there and the outer guide at -0.2169). Trimming the guide back to
+            // clear the lane leaves an 88mm stub running 19mm inboard of, and parallel to, the
+            // orbit's inner arc - a redundant second wall in a corridor that already has one.
+            //
+            // Their job was redirecting mid-table balls inward, and the arc inherits it with a
+            // longer reach: leftGuide's inboard face spanned z -0.024..+0.116, the orbit's inner
+            // guide plus its vertical section spans -0.096..+0.300. What genuinely changes is the
+            // X at which that deflection happens - the arc's inboard face sits ~29mm further
+            // outboard than the guide did at the same height - so balls in that 29mm band now fall
+            // to the outlane instead of being turned toward the flipper. That is a real trade and
+            // it is why the drain rate and the circulation suite were re-measured after this pass
+            // rather than assumed.
         ];
 
         const walls = wallDefs.map((def) => {
@@ -1781,6 +1825,26 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         backLight.diffuse = new BABYLON.Color3(0.6, 0.2, 1);
         backLight.intensity = 0.35;
         backLight.range = TABLE_LENGTH_M * 0.7;
+        // CLUTTER-PASS FINDING, recorded so the experiment is not run again. The brightest thing
+        // over the centre of the table - a broad violet-white pool washing the playfield art
+        // between the flippers and the Vision Gate - is THIS LAMP, not any of the decoration
+        // sitting in it. Found by elimination in the live scene: each candidate was hidden one at
+        // a time and the centre destination band (Vision Gate / Saturn approach / centre lane)
+        // re-measured off the real render. Zeroing this one light took that band from 3.85% of its
+        // pixels clipped to white and a mean luminance of 93 down to 1.40% and 66. Every piece of
+        // geometry in the same area - the gate's beacon, halo, rim ring, collar, throat and
+        // approach tint - measured very slightly BETTER when hidden, i.e. they were occluding the
+        // lit floor rather than lighting it.
+        //
+        // It is left alone, deliberately, on both scope and evidence. Scope: a clutter pass
+        // removes DECORATION that misreads, and this is the table's key light - the thing that
+        // lights the bumper cluster, the re-entry lanes and Saturn. Evidence: the pool is the
+        // DIFFUSE term, not a specular mirror-smear. Tinting `specular` down (Babylon defaults a
+        // light's specular to full white however its diffuse is set, so that was the obvious
+        // suspect) was tried and measured at no change at all - 3.97% -> 3.93%, inside run-to-run
+        // noise - so it was reverted rather than shipped. Anything that would actually move this
+        // number is a lighting rebalance across the whole board, which is its own pass and would
+        // have to be re-argued against qa/visual-hierarchy.js.
 
         return { ambient, flipperLight, backLight };
     }
@@ -3029,9 +3093,19 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // note is here so the next person to touch it knows the geometry they are drawing onto - and
     // so the bumperCap artwork spec in js/skins.js/SKINS.md is not mistakenly written to "match
     // the rings" that a player cannot actually see.
+    // MEASURED NEGATIVE, recorded so it is not attempted again: this face carries no readable
+    // motif at gameplay scale. A 'crown' variant was built for the chakra-nexus retheme - the
+    // twelve straight spokes below redrawn as twelve lotus petals for the BOSS bumper only - and
+    // then looked at on the real render. The boss's cap projects to roughly 30 x 15 pixels and the
+    // scene's lights blow it to a featureless white ellipse; neither the petals NOR the existing
+    // spokes resolve at all. The moulding here is worth keeping (it is what a close camera, a
+    // screenshot or a future skin sees) but nothing drawn on it can carry meaning during play.
+    // The one part of a bumper's cap that DOES read is the insert glyph sitting on it - measured
+    // at p90 255 by qa/visual-hierarchy.js - so that is where the boss's nexus mark went instead.
     function createBumperCapTexture(scene) {
         const size = 128;
-        const texture = new BABYLON.DynamicTexture('bumperCapTex', { width: size, height: size }, scene, true);
+        const texture = new BABYLON.DynamicTexture('bumperCapTex',
+            { width: size, height: size }, scene, true);
         const ctx = texture.getContext();
         const c = size / 2;
         ctx.fillStyle = '#f2f2f7';
@@ -3644,6 +3718,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // base, so the only part of the shaft a player can actually see is the part a base-weighted
         // gradient throws away. Brightness has to live where the shaft CLEARS the bumper, and the
         // fade has to happen above that, at the end that was previously a hard cut across the sky.
+        // Still 0.55 after the clutter pass shortened the shaft from 115mm to 38mm. The reason
+        // above (hold the brightness through the part that clears whatever occludes the base,
+        // fade above it) survives the change of scale - the curve is expressed as a FRACTION of
+        // the height, so a short shaft gets the same shape, just over a shorter run.
         const holdTo = 0.55;                  // fraction of the height (from the base) kept at full
         for (let y = 0; y < h; y++) {
             const t = y / (h - 1);            // 0 at top, 1 at base
@@ -4434,7 +4512,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         //
         // emissiveTexture.level is the scalar Babylon already multiplies the emissive sample by,
         // so this turns an existing dial down rather than adding anything.
-        if (!opts.transparent) texture.level = LABEL_SIGNAGE_EMISSIVE_LEVEL;
+        // opts.signage is the opt-in this comment asked for. The six shot glyphs below are
+        // transparent (no chip) but ARE decoration naming a shot, so they take the same dimming the
+        // worded callouts do - without it they would sit in the undimmed gameplay-marker tier and
+        // outrank the ball, which is the exact problem the measurement above was written about.
+        if (!opts.transparent || opts.signage) texture.level = LABEL_SIGNAGE_EMISSIVE_LEVEL;
 
         // Verified via Playwright screenshot (not assumed): a flat, playfield-level decal reads
         // as an edge-on sliver from this game's actual low, close, steeply-angled fixed camera
@@ -4454,6 +4536,42 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         plane.position.set(x, 0.03, z);
         plane.rotation.x = 0.4;
         return plane;
+    }
+
+    // The six shots' glyphs. A shot callout on this board used to be a WORD on a chip - eight of
+    // them across the playfield, which is signage doing the job geometry should. These replace the
+    // six that name a shot with a single symbol each, in that shot's own identity colour, at just
+    // over half the worded plate's size and with no background chip, so the playfield art behind
+    // them stays visible.
+    //
+    // Glyphs, not arrows painted on the lane floor, for a reason already measured and recorded in
+    // createLabelPlane(): from this game's low, steeply-angled fixed camera a flat playfield decal
+    // reads as an edge-on sliver. Direction has to be carried by an upright form, so each symbol is
+    // chosen to say the shot rather than point at it - a ring for the ringed planet, a star for the
+    // comet, a triangle for the third eye - and the two orbits get the only literally directional
+    // pair, pointing the way the ball goes round.
+    //
+    // Every glyph is from a Unicode block this build already renders elsewhere on the board
+    // (the bumper inserts use U+25C9 and U+2605, the lane markers U+25B2/U+25BC), so none of them
+    // can come out as a missing-glyph box.
+    const SHOT_GLYPH = {
+        orbitLeft: '\u25c0',   // solid left triangle - the way a left orbit carries the ball round
+        orbitRight: '\u25b6',  // its mirror
+        targets: '\u25c6',     // diamond - the drop-target bank's own plate shape
+        saturn: '\u25c9',      // ringed circle, which is what Saturn is
+        comet: '\u2605',       // star
+        visionGate: '\u25b2'   // upward triangle - the third eye, and the gate is a straight-up shot
+    };
+    // Sized from a screenshot, not guessed. createLabelPlane draws into a 128x48 texture and its
+    // plane inherits that 8:3 aspect, so a single centred glyph only ever occupies the middle
+    // fontSize/48 of the height and fontSize/128 of the width. At the first attempt - fontSize 30
+    // on a 0.028 plane - that worked out to about 7mm of visible symbol and the six of them were
+    // simply not there from the gameplay camera. fontSize 44 fills the texture's height, and a
+    // 0.055 plane puts each glyph at roughly 19mm square: smaller than the 50mm worded chip it
+    // replaces, and readable.
+    function createShotGlyph(scene, glyph, x, z, color) {
+        return createLabelPlane(scene, glyph, x, z, color,
+            { transparent: true, signage: true, fontSize: 44, planeSize: 0.055 });
     }
 
     // Lane visual-polish pass (user-requested - "raised guide rails... small depth/bevel details
@@ -4524,25 +4642,40 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // Returns the LENS, because that is the mesh the lamp system registers - registerLamp() reads
     // mesh.material, so the returned mesh must be the one carrying lampMat. Neither mesh ever gets
     // a collider; the lane's real trigger volume is built separately and is untouched by this.
-    function addPlayfieldInsert(scene, name, lampMat, collarMat, diameter, x, z) {
+    // baseY lifts the whole insert off the playfield. It defaults to 0, which is every existing
+    // caller: an insert set INTO the table, at the two measured heights above. The re-entry bank's
+    // three lane indicators pass the canopy's own top face instead - see their comment for the
+    // sightline measurement that put them up there.
+    // `domed` swaps the flat chamfered lens for a low dome of the same footprint. A flat lens is
+    // the right thing for an insert set into the playfield - the camera looks at it from about 16
+    // degrees, and flush is what flush looks like. It is the WRONG thing for a lamp mounted on a
+    // structure and read as a state, because at that angle a flat disc collapses to a few pixels
+    // of height: measured on a real 320px-wide frame, the re-entry bank's three 11mm lenses came
+    // out 6x2 PIXELS each. A dome of the same width keeps its height from every angle. See the
+    // re-entry indicator's own comment for the mobile audit that forced this.
+    function addPlayfieldInsert(scene, name, lampMat, collarMat, diameter, x, z, baseY, domed) {
+        const y0 = baseY || 0;
         const collar = BABYLON.MeshBuilder.CreateCylinder(name + 'Collar', {
             diameter: diameter * 1.45,
             height: INSERT_COLLAR_H_M,
             tessellation: 20
         }, scene);
-        collar.position.set(x, INSERT_COLLAR_Y_M, z);
+        collar.position.set(x, y0 + INSERT_COLLAR_Y_M, z);
         collar.material = collarMat;
 
         // diameterTop < diameterBottom gives the lens a chamfered edge, which is both what a
         // moulded insert actually looks like and a surface angled to catch the playfield lights -
         // a highlight that a perfectly flat disc could never pick up.
-        const lens = BABYLON.MeshBuilder.CreateCylinder(name, {
-            diameterTop: diameter * 0.84,
-            diameterBottom: diameter,
-            height: INSERT_LENS_H_M,
-            tessellation: 20
-        }, scene);
-        lens.position.set(x, INSERT_LENS_Y_M, z);
+        const lens = domed
+            ? BABYLON.MeshBuilder.CreateSphere(name, { diameter, segments: 10 }, scene)
+            : BABYLON.MeshBuilder.CreateCylinder(name, {
+                diameterTop: diameter * 0.84,
+                diameterBottom: diameter,
+                height: INSERT_LENS_H_M,
+                tessellation: 20
+            }, scene);
+        if (domed) lens.scaling.y = 0.62; // a moulded dome, not a ball sitting on the plastic
+        lens.position.set(x, y0 + INSERT_LENS_Y_M + (domed ? diameter * 0.2 : 0), z);
         lens.material = lampMat;
         return lens;
     }
@@ -4596,6 +4729,32 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // giving it a visible "landing pad" grounding presence instead of just floating over bare
     // playfield the way a primitive-only sphere does. Same paper-thin/no-physics/no-z-fight
     // treatment as addLaneFloorTint(), just circular.
+    // A feature COLLAR: the plinth a sphere is mounted on. Saturn and the comet were the last two
+    // objects on the board that met the playfield at nothing - a ball of light sitting on a flat
+    // painted glow, which is exactly the "objects placed on a flat image" read this pass is against.
+    // Two stacked pieces, the same stepped-bevel language every rail on the board already uses: a
+    // dark housing plinth with a thin polished ring on top.
+    //
+    // `maxRadius` is not a style choice, it is the constraint. A ball rolling into a sphere of
+    // radius R stops with its NEAR EDGE at sqrt((R+13.5)^2 - (R-13.5)^2) - 13.5 mm from the
+    // centre - 35.8mm for Saturn's 45mm sphere, 21.0mm for the comet's 22mm one - because the two
+    // spheres touch in 3D, well above the playfield. Anything drawn inside that radius is
+    // geometrically unreachable, so these collars cannot be in a ball path however the board is
+    // played. Neither piece gets a collider and neither feature's own collider is touched.
+    function addFeatureCollar(scene, name, plinthMat, ringMat, maxRadius, x, z) {
+        const plinth = BABYLON.MeshBuilder.CreateCylinder(name, {
+            diameter: maxRadius * 2, height: 0.005, tessellation: 24
+        }, scene);
+        plinth.position.set(x, 0.0025, z);
+        plinth.material = plinthMat;
+        const ring = BABYLON.MeshBuilder.CreateCylinder(name + 'Ring', {
+            diameter: maxRadius * 1.72, height: 0.0018, tessellation: 24
+        }, scene);
+        ring.position.set(x, 0.0059, z);
+        ring.material = ringMat;
+        return plinth;
+    }
+
     function addFeatureFloorGlow(scene, name, mat, diameter, x, z) {
         const glow = BABYLON.MeshBuilder.CreateCylinder(name, { diameter, height: 0.002, tessellation: 24 }, scene);
         glow.position.set(x, 0.002, z);
@@ -4624,24 +4783,121 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         housingMat.roughness = 0.35;
 
         // Shared bevel-cap material for addRailBevel() above - a touch glossier than housingMat
-        // and lifted by a faint cool cyan glint, so every guide rail's raised cap reads as one
-        // consistent polished-trim language across the whole board (dividers, inlane guides,
-        // orbit rails, reentry-lane flanking rails), independent of whichever lane-specific lamp
-        // color happens to be nearby. One instance, reused by every addRailBevel() call below.
+        // and lifted by a faint cool cyan glint, so guide rails' raised caps read as one
+        // consistent polished-trim language, independent of whichever lane-specific lamp colour
+        // happens to be nearby.
+        //
+        // Since the vision-quest retheme this is the NEUTRAL trim rather than the only one: it
+        // still dresses the whole lower table (lane dividers, inlane guides, decor posts and
+        // every other post's sleeve cap) while the structures along the six named shot routes take
+        // a re-anodised copy of it - see routeTrimMat directly below, which is built from this
+        // material's own numbers so the two stay one family.
         const railCapMat = new BABYLON.PBRMaterial('railCapMat', scene);
         railCapMat.albedoColor = new BABYLON.Color3(0.18, 0.19, 0.22);
         railCapMat.metallic = 0.85;
         railCapMat.roughness = 0.22;
         // Lighting/material hierarchy pass (user-requested - "RAILS/STRUCTURE: metallic or
-        // physical-material definition"): this one material is reused by EVERY guide-rail bevel
-        // cap on the entire board (dividers, inlane guides, orbit rails, reentry-lane rails,
-        // target-bank header) - dozens of small instances all sharing one emissive value, so its
-        // brightness has an outsized cumulative effect on how "glowy vs. structural" the whole
-        // table reads. Cut to a quarter of its old value (was a fairly noticeable cyan glint) so
+        // physical-material definition"): this material and the route trims cloned from it below
+        // dress EVERY guide-rail bevel cap on the board - dozens of small instances all sharing
+        // one emissive value, so its brightness has an outsized cumulative effect on how "glowy
+        // vs. structural" the whole table reads. Cut to a quarter of its old value (was a fairly noticeable cyan glint) so
         // its "polished trim" read comes from the already-glossy metallic/roughness (0.85/0.22)
         // catching direct light, the same way real machined trim does, rather than from the trim
         // itself glowing.
         railCapMat.emissiveColor = new BABYLON.Color3(0.02, 0.05, 0.065);
+
+        // --- ROUTE TRIM (vision-quest retheme, user-requested) -------------------------------
+        // The board's guide hardware was one undifferentiated grey: every rail body in
+        // housingMat, every polished cap in the single railCapMat above. That is correct for a
+        // machine and wrong for THIS machine - the guides on a vision-quest table are the energy
+        // channels the ball is carried along, and a channel that belongs to a specific vision
+        // should say so. So the structures along the six named routes keep railCapMat's exact
+        // physical response and only take their route's HUE:
+        //
+        //   orbits          cosmic circulation      orbit cyan
+        //   Saturn          celestial trial         Saturn's gold
+        //   comet           astral pursuit          the comet's icy cyan
+        //   re-entry lanes  return-to-body pathway  the re-entry lamps' green
+        //   Vision Gate     the portal / third eye  gate violet
+        //   target bank     the chakra plates       the bank's own callout chakra
+        //
+        // What is deliberately NOT keyed is the whole lower table - lane dividers, inlane guides,
+        // slingshots, decor posts all stay in the neutral railCapMat. That is the point, not an
+        // omission: coloured trim MEANS "this is a vision route", and it can only mean that if
+        // the hardware around the flippers does not have it. It also reads as the theme's own
+        // structure - the lower table is the body you flip from, the upper table is the vision,
+        // and the re-entry lanes are the lit green pathway back down between them.
+        //
+        // Brightness is held, not raised, and that is what keeps this restrained rather than
+        // psychedelic. railCapMat's own comment records why its glint was cut to a quarter: it is
+        // reused by dozens of small instances and its emissive has an outsized cumulative effect
+        // on how glowy the table reads. So routeTrimMat holds BOTH of railCapMat's measured
+        // levels exactly - the albedo is re-tinted at railCapMat's own perceptual luminance, and
+        // the emissive glint is re-hued at railCapMat's own emissive luminance. Metallic and
+        // roughness are copied outright. The hue is carried by the albedo under the scene's
+        // direct lights (metallic 0.85 means albedo tints the specular, which is what makes a
+        // gold trim read as gold); the emissive is far too faint to glow on its own and is
+        // re-hued only so its faint lift is not a cyan one on a gold rail.
+        const TRIM_ALBEDO_LUM = 0.2126 * 0.18 + 0.7152 * 0.19 + 0.0722 * 0.22;
+        const TRIM_EMISSIVE_LUM = 0.2126 * 0.02 + 0.7152 * 0.05 + 0.0722 * 0.065;
+        const atLuminance = (color, target) => {
+            const lum = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+            return lum > 1e-6 ? color.scale(target / lum) : color.clone();
+        };
+        // TRIM_TINT is how far the grey is pulled toward the route colour. 0.55 keeps enough of
+        // railCapMat's neutral in the mix that the cap still reads as machined trim that happens
+        // to be anodised in the route's colour rather than as painted plastic.
+        //
+        // It is NOT the lever it looks like, and that is worth knowing before reaching for it.
+        // Raising it to 0.85 was tried and measured pixel-for-pixel on the real render at the
+        // exact cap pixels a visibility probe confirmed are front-most: Saturn's jaw cap moved
+        // [129,103,39] -> [129,103,33], the bank header [163,62,139] -> [165,61,139], and the
+        // orbit rail caps did not move at all. The reason is these caps' own physical response -
+        // metallic 0.85 at roughness 0.22 means most of what reaches the camera is a specular
+        // reflection of the scene's lights, not the albedo, so past about half tint the hue is
+        // already doing everything it can. 0.85 was reverted as a change that bought nothing.
+        //
+        // The same physics is why some routes read much more strongly than others. Measured at the
+        // same pixel before and after, on caps a visibility probe confirmed are front-most:
+        //
+        //   Saturn's jaw       [ 93,103,107] -> [168,119, 75]   gold, unmistakable
+        //   target-bank header [ 88, 97,127] -> [163, 62,139]   magenta, unmistakable
+        //   re-entry canopy    [ 86,104,125] -> [ 63,110, 88]   green, unmistakable
+        //   orbit rail         [ 77,102,122] -> [ 70,102,124]   slight
+        //   comet return rail  [ 89,111,135] -> [ 92,114,131]   negligible
+        //
+        // The three that land are chromatically far from the board's violet key light and cyan
+        // wall bounce, so their albedo survives the specular. Orbit cyan and the comet's icy cyan
+        // are nearly the colour of the light itself. That is accepted rather than fought: both of
+        // those routes are ALREADY cyan-coded by their own lamps and floor tints, so their trim
+        // agrees with them rather than correcting them, and the only thing that would force the
+        // hue through is lifting their emissive - exactly the glow railCapMat's comment above
+        // records cutting on purpose.
+        //
+        // Two more caps are keyed and simply are not in shot from the fixed gameplay camera:
+        // Saturn's two canopy segments sit BEHIND the planet (0/27 sample points visible) and the
+        // re-entry dividers hang behind the top rail. They are keyed anyway - the cost is zero,
+        // they are the same structures, and an inconsistent rule ("this rail is Saturn's, that one
+        // isn't, because of where the camera happens to be") is worse than an invisible one.
+        const TRIM_TINT = 0.55;
+        const routeTrimMat = (name, color) => {
+            const mat = new BABYLON.PBRMaterial(name, scene);
+            const grey = new BABYLON.Color3(0.18, 0.19, 0.22);
+            mat.albedoColor = atLuminance(new BABYLON.Color3(
+                grey.r + (color.r - grey.r) * TRIM_TINT,
+                grey.g + (color.g - grey.g) * TRIM_TINT,
+                grey.b + (color.b - grey.b) * TRIM_TINT), TRIM_ALBEDO_LUM);
+            mat.metallic = 0.85;   // railCapMat's exact values - this is the same trim, re-anodised
+            mat.roughness = 0.22;
+            mat.emissiveColor = atLuminance(color, TRIM_EMISSIVE_LUM);
+            return mat;
+        };
+        const orbitTrimMat = routeTrimMat('orbitTrimMat', COLOR_ORBIT_LAMP);
+        const saturnTrimMat = routeTrimMat('saturnTrimMat', COLOR_SATURN);
+        const cometTrimMat = routeTrimMat('cometTrimMat', COLOR_COMET);
+        const reentryTrimMat = routeTrimMat('reentryTrimMat', COLOR_MISSION_ACTIVE);
+        const gateTrimMat = routeTrimMat('gateTrimMat', COLOR_VISION_GATE);
+        const targetTrimMat = routeTrimMat('targetTrimMat', COLOR_CHAKRA[1]);
 
         // Shared dark-plastic collar for every playfield insert (see addPlayfieldInsert above).
         // Deliberately NOT housingMat: that one is dark METAL (metallic 0.8) and every insert
@@ -4700,6 +4956,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const inlaneFloorMat = makeLaneFloorMat('inlaneFloorMat', COLOR_LANE_LAMP, 0.16);
         const outlaneFloorMat = makeLaneFloorMat('outlaneFloorMat', COLOR_OUTLANE_LAMP, 0.16);
         const orbitFloorMat = makeLaneFloorMat('orbitFloorMat', COLOR_ORBIT_LAMP, 0.14);
+        // The mission bank's approach lane. The three plates each carry their own chakra colour,
+        // so tinting the approach in any one of them would read as "this lane belongs to target N";
+        // COLOR_CHAKRA[1] is the bank's own callout colour (see the TARGETS label), which makes the
+        // strip read as the bank's lane rather than any single plate's.
+        const targetFloorMat = makeLaneFloorMat('targetFloorMat', COLOR_CHAKRA[1], 0.14);
+        // Saturn's approach lane, in Saturn's own gold rather than a lane colour, so the corridor
+        // reads as belonging to the planet at the end of it.
+        const saturnApproachMat = makeLaneFloorMat('saturnApproachMat', COLOR_SATURN, 0.14);
+        // The comet's lane, in the comet's own icy cyan so the two centre corridors read as
+        // belonging to different shots rather than as one wide bright area.
+        const cometApproachMat = makeLaneFloorMat('cometApproachMat', COLOR_COMET, 0.14);
+        const visionGateApproachMat = makeLaneFloorMat('visionGateApproachMat', COLOR_VISION_GATE, 0.14);
 
         // 4 distinct colors (CONFIG.colors.bumper1-4), matching the 2D game's per-bumper
         // identity, not one shared color - each bumper is its own emissive-glass PBR material so
@@ -4937,7 +5205,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // createLabelPlane()'s DynamicTexture/emissiveTexture pattern instead of a bespoke
             // one - see this block's own comment for why that keeps a future textured-skin pass
             // to a one-line change. The boss gets its own glyph, a second cue that costs nothing.
-            const insert = createLabelPlane(scene, isBoss ? '\u2605' : '\u25c9', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: isBoss ? 34 : 30, planeSize: radius * 1.5 });
+            //
+            // Vision-quest retheme: the satellites keep U+25C9, a ringed dot, which is a chakra
+            // wheel; the boss's is now U+25C8, a diamond nested inside a diamond - something with
+            // a CENTRE, for the one bumper in the cluster that is the centre. It replaces U+2605,
+            // a star, which was doing two unrelated jobs on the same board (SHOT_GLYPH.comet is
+            // also a star, for the astral-pursuit shot) - so this both themes the nexus and leaves
+            // the star to mean one thing. Same Geometric Shapes block as every other glyph here,
+            // for the missing-glyph-box reason SHOT_GLYPH's own comment records.
+            //
+            // The glyph is where the boss's mark HAD to go: it is the only part of a bumper that
+            // survives to the player at gameplay scale (qa/visual-hierarchy.js measures these
+            // inserts at p90 255, against a cap face that blows out to a featureless ellipse -
+            // see createBumperCapTexture()'s own comment).
+            const insert = createLabelPlane(scene, isBoss ? '\u25c8' : '\u25c9', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: isBoss ? 34 : 30, planeSize: radius * 1.5 });
             insert.position.y = radius * 2.05;
             // Hierarchy pass: pure decoration on a tier-3 fixture, so it is stepped down with the
             // rest of the bumper. Deliberately not quoting a measured number for this one - the
@@ -4953,6 +5234,28 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mesh.metadata = { kind: 'bumper', boss: isBoss, capMesh: cap, insertMesh: insert,
                               bodyMat: colorMat, lampMat: bumperLampMats[i % bumperLampMats.length] };
         });
+
+        // CHAKRA NEXUS - a MEASURED NEGATIVE, kept so the idea is not tried again. The cluster's
+        // gameplay fact is "one organ with a centre": BUMPER_CLUSTER[0] is the boss (bigger, worth
+        // SCORE_BOSS_BUMPER, its own message and pitch), the other three are satellites, and
+        // CHAKRA AWAKENING (MISSION_DEFS[0]) scores off all four as one target. The obvious way to
+        // draw that is three energy channels on the floor, one from each satellite into the boss,
+        // each in that satellite's own chakra colour.
+        //
+        // It was built exactly that way and then measured, by projecting a grid over each strip
+        // and asking the scene's own pick which mesh is front-most at those pixels: 2/27, 0/27 and
+        // 1/27 samples visible from the gameplay camera. Saturn stands directly in front of the
+        // cluster and each fixture's own lathe skirt covers the rest, so the cluster's FLOOR is
+        // very nearly not in shot at all - the parts of it a player sees are the domes, the lamp
+        // collars and the caps. Three meshes and three materials that render to about three
+        // pixels is the definition of what the clutter pass was for, so they were deleted rather
+        // than shipped.
+        //
+        // A second attempt put the mark on the boss's CAP FACE instead - see
+        // createBumperCapTexture()'s own comment for how that failed the same way, and for the
+        // measurement that finally located the one part of a bumper the player can actually read
+        // at gameplay scale: its insert glyph. That is where the nexus mark lives now (the boss's
+        // nested diamond against the satellites' chakra wheels, a few lines below).
 
         // CONFIG.colors.chakra (7 colors) - each mission target gets its own chakra color
         // (targets 0-2 use chakra[0-2]: violet, pink, yellow) instead of one shared color.
@@ -4983,8 +5286,38 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             return mat;
         });
 
+        // The bank's own local frame. Every plate and every piece of its fixture is placed and
+        // rotated in THIS frame rather than in world axes, so the whole bank re-aims by editing
+        // MISSION_TARGET_BANK's three positions and nothing else can fall out of alignment with
+        // anything else. Derived from the bank's endpoints with the same atan2(-dz, dx) rail
+        // convention the header rail below already used (see inlaneGuide's comment for where that
+        // formula comes from), verified against this Babylon build rather than assumed:
+        //   local +X -> ( dx, dz)/len   along the bank, index 0 -> index 2
+        //   local +Z -> (-dz, dx)/len   out of the bank's BACK (up-table), which is the side the
+        //                               slot wall, posts and header rail have always sat on
+        // so local -Z is the plate's face, and with the bank rising to the right it points
+        // down-table and slightly right - into the measured right-flipper approach.
+        const bankFirst = MISSION_TARGET_BANK[0];
+        const bankLast = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
+        const bankDX = bankLast.x - bankFirst.x;
+        const bankDZ = bankLast.z - bankFirst.z;
+        const bankSpan = Math.hypot(bankDX, bankDZ);
+        const bankRotationY = Math.atan2(-bankDZ, bankDX);
+        const bankCos = Math.cos(bankRotationY);
+        const bankSin = Math.sin(bankRotationY);
+        // (u along the bank, v out of its face) -> world x / z, about `pos`.
+        const bankX = (pos, u, v) => pos.x + u * bankCos + v * bankSin;
+        const bankZ = (pos, u, v) => pos.z - u * bankSin + v * bankCos;
+
         const missionTargetMeshes = [];
         const missionTargetLamps = [];
+        // Insert chains: 2-4 small embedded lamps leading along a route toward its feature. Each
+        // carries a `follows` id, so main()'s registration hands it to the lamp system as a shadow
+        // of the feature's OWN lamp - no new state, no new update hook, no new call site.
+        // Declared HERE, not down with orbitLampMeshes: the mission bank is built well before the
+        // orbit block and pushes into this, so a later `const` is a temporal-dead-zone throw that
+        // takes the whole scene build down with it.
+        const shotChainLamps = [];
         MISSION_TARGET_BANK.forEach((pos, i) => {
             const mesh = BABYLON.MeshBuilder.CreateBox('missionTarget' + i, {
                 width: TARGET_RADIUS_M * 2,
@@ -4992,6 +5325,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 depth: 0.008
             }, scene);
             mesh.position.set(pos.x, TARGET_RAISED_Y_M, pos.z);
+            // Square to the bank line, so all three faces present themselves to the same shot.
+            // The drop animation only ever touches position.y, so rotating here cannot affect it -
+            // and the trigger aggregate created below inherits this rotation, which is what keeps
+            // the detection volume flush with the face a player is aiming at.
+            mesh.rotation.y = bankRotationY;
             mesh.material = targetMats[i % targetMats.length];
             // Mission target face skin slot (visual-architecture pass, user-requested) - per-
             // target-index, matching this flag's own already-per-index material above. No-op
@@ -5057,7 +5395,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 height: 0.034,
                 depth: 0.003
             }, scene);
-            backPanel.position.set(pos.x, 0.017, pos.z + 0.0095);
+            backPanel.position.set(bankX(pos, 0, 0.0095), 0.017, bankZ(pos, 0, 0.0095));
+            backPanel.rotation.y = bankRotationY;
             backPanel.material = housingMat;
 
             // The two guide posts the plate runs between. Deep enough (0.020) to span from just in
@@ -5073,7 +5412,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     height: 0.032,
                     depth: 0.020
                 }, scene);
-                post.position.set(pos.x + side * 0.017, 0.016, pos.z + 0.001);
+                post.position.set(bankX(pos, side * 0.017, 0.001), 0.016, bankZ(pos, side * 0.017, 0.001));
+                post.rotation.y = bankRotationY;
                 post.material = railCapMat;
             });
 
@@ -5086,7 +5426,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 height: 0.0035,
                 depth: 0.005
             }, scene);
-            lip.position.set(pos.x, 0.00175, pos.z - 0.0070);
+            lip.position.set(bankX(pos, 0, -0.0070), 0.00175, bankZ(pos, 0, -0.0070));
+            lip.rotation.y = bankRotationY;
             lip.material = railCapMat;
 
             // Its own cloned material (not shared with the flag's targetMats[i] like before) so
@@ -5111,7 +5452,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 height: 0.028,
                 depth: 0.0012
             }, scene);
-            slotGlow.position.set(pos.x, 0.015, pos.z + 0.0065);
+            slotGlow.position.set(bankX(pos, 0, 0.0065), 0.015, bankZ(pos, 0, 0.0065));
+            slotGlow.rotation.y = bankRotationY;
             slotGlow.material = lampMat;
 
             // Indicator lamp, now in FRONT of the fixture rather than buried inside the plate's own
@@ -5121,8 +5463,24 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 diameter: TARGET_RADIUS_M * 0.85
             }, scene);
             lamp.scaling.y = 0.5;
-            lamp.position.set(pos.x, 0.0035, pos.z - 0.014);
+            lamp.position.set(bankX(pos, 0, -0.014), 0.0035, bankZ(pos, 0, -0.014));
             lamp.material = lampMat;
+            // Chakra dot on the bank's approach, 30mm down the plate's own face normal - one per
+            // target, in that target's chakra colour, shadowing that target's OWN lamp. So the
+            // chain is not decoration that happens to sit near the bank: it reads out which
+            // targets are still standing, pulsing with them while the bank invites a shot and
+            // going LOCKED with each plate as it drops.
+            const chainMat = new BABYLON.PBRMaterial('targetChainMat' + i, scene);
+            styleInsertLampMat(chainMat, COLOR_CHAKRA[i % COLOR_CHAKRA.length], insertLensTextures.ring);
+            const chainLens = addPlayfieldInsert(scene, 'targetChain' + i, chainMat, insertCollarMat,
+                0.011, bankX(pos, 0, -0.030), bankZ(pos, 0, -0.030));
+            shotChainLamps.push({
+                id: 'targetChain' + i,
+                mesh: chainLens,
+                color: COLOR_CHAKRA[i % COLOR_CHAKRA.length],
+                follows: 'missionTarget' + i
+            });
+
             missionTargetMeshes.push(mesh);
             missionTargetLamps.push(lamp);
         });
@@ -5138,14 +5496,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // convention every other angled wall/rail in this file uses (see inlaneGuide's own
         // comment for how that formula was derived) - purely decorative, no physics.
         {
-            const first = MISSION_TARGET_BANK[0];
-            const last = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
-            const dx = last.x - first.x;
-            const dz = last.z - first.z;
-            const bankLength = Math.sqrt(dx * dx + dz * dz) + TARGET_RADIUS_M * 3; // overhangs past the end targets, like a real mounting rail would
-            const bankRotationY = Math.atan2(-dz, dx);
-            const bankCenterX = (first.x + last.x) / 2;
-            const bankCenterZ = (first.z + last.z) / 2;
+            const bankLength = bankSpan + TARGET_RADIUS_M * 3; // overhangs past the end targets, like a real mounting rail would
+            const bankCenterX = (bankFirst.x + bankLast.x) / 2;
+            const bankCenterZ = (bankFirst.z + bankLast.z) / 2;
             const header = BABYLON.MeshBuilder.CreateBox('missionTargetHeader', {
                 width: bankLength,
                 height: 0.006,
@@ -5158,11 +5511,33 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // border and number the faces now carry. Moved just behind the new slot back walls
             // (which end at z +0.011) it reads as the rail the three housings mount to, which is
             // what it was always meant to be. Decorative only - no collider, no gameplay effect.
-            const bankHeaderZ = bankCenterZ + 0.014;
-            header.position.set(bankCenterX, 0.034, bankHeaderZ);
+            // The +14mm nudge is now taken along the bank's own BACK (local +Z) rather than along
+            // world +z, so on an angled bank the rail stays parallel to the plates and a fixed
+            // distance behind all three of them instead of drifting across their faces.
+            const bankCenter = { x: bankCenterX, z: bankCenterZ };
+            const headerX = bankX(bankCenter, 0, 0.014);
+            const headerZ = bankZ(bankCenter, 0, 0.014);
+            header.position.set(headerX, 0.034, headerZ);
             header.rotation.y = bankRotationY;
             header.material = housingMat;
-            addRailBevel(scene, 'missionTargetHeaderCap', railCapMat, bankLength, 0.01, bankCenterX, 0.037, bankHeaderZ, bankRotationY);
+            addRailBevel(scene, 'missionTargetHeaderCap', targetTrimMat, bankLength, 0.01, headerX, 0.037, headerZ, bankRotationY);
+
+            // Approach tint, painted down the bank's OWN face normal - which, because the bank is
+            // mounted square to the measured flipper approach, is the shot line itself. Same
+            // floor-tint idiom the orbit lanes use to make a corridor read as a route at a glance
+            // (see addLaneFloorTint), and the reason this bank needs one is that its approach is
+            // the widest piece of open playfield on the board: nothing between the flippers and
+            // z 0.107 marks where the shot is, so the bank read as a thing to bump into rather
+            // than a thing to aim at.
+            //
+            // Deliberately narrow. makeLaneFloorMat's own comment records what happens when these
+            // strips get large: at 50mm x 75mm this is smaller than the outlane's 55mm x 58mm, so
+            // it stays a floor tint under the bank's hardware instead of becoming the brightest
+            // thing in the lower half of the table. Decorative only - height 0.001 at y 0.0012,
+            // no collider, and nothing here is in any ball's way.
+            const approachV = -0.048; // just clear of the plates' front faces (v -0.004), running 75mm down-table
+            addLaneFloorTint(scene, 'missionTargetApproachTint', targetFloorMat, 0.05, 0.075,
+                bankX(bankCenter, 0, approachV), bankZ(bankCenter, 0, approachV), bankRotationY);
         }
 
         // ===================================
@@ -5368,6 +5743,58 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // doesn't visually compete with them.
         const saturnFloorMat = makeLaneFloorMat('saturnFloorMat', COLOR_SATURN_RING, 0.22);
         addFeatureFloorGlow(scene, 'saturnFloorGlow', saturnFloorMat, SATURN_RADIUS_M * 2.4, SATURN_POS.x, SATURN_POS.z);
+        // 30mm against the 35.8mm a ball's near edge can reach - 5.8mm of margin.
+        addFeatureCollar(scene, 'saturnCollar', housingMat, railCapMat, 0.030, SATURN_POS.x, SATURN_POS.z);
+
+        // --- Saturn's framing hardware -------------------------------------------------------
+        // The canopy over the crown and the mouth's right jaw. See SATURN_CANOPY for the two
+        // measured populations this separates and every clearance below is checked against, and
+        // SATURN_JAW for why only one cheek is built. Nothing here touches Saturn's own collider,
+        // kick, cooldown or score - it changes which ways a ball can REACH it, not what happens
+        // when it does.
+        //
+        // Shared by Saturn's framing, the comet's lane wall and the Vision Gate's scoop cheeks.
+        // Same rail convention as every other angled guide on this board: long axis along local X,
+        // then rotationY = atan2(-dz, dx). Each segment is stretched 4% past its chord so
+        // consecutive ones overlap rather than butting, for the same reason the orbit arcs are -
+        // a butt joint leaves a hairline seam and a seam catches a rolling ball.
+        const guideRail = (name, pa, pb, capMat) => {
+            const dx = pb.x - pa.x, dz = pb.z - pa.z;
+            const len = Math.hypot(dx, dz);
+            if (len < 1e-6) return;
+            const rotY = Math.atan2(-dz, dx);
+            const cx = (pa.x + pb.x) / 2, cz = (pa.z + pb.z) / 2;
+            const box = BABYLON.MeshBuilder.CreateBox(name, {
+                width: len * 1.04, height: 0.022, depth: 0.015
+            }, scene);
+            box.position.set(cx, 0.011, cz);
+            box.rotation.y = rotY;
+            box.material = housingMat;
+            box.metadata = { kind: 'wall' }; // reuses the generic wall shake/sound, same as the orbit rails
+            new BABYLON.PhysicsAggregate(box, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            addRailBevel(scene, name + 'Cap', capMat || railCapMat, len * 1.04, 0.015, cx, 0.022, cz, rotY);
+        };
+        for (let i = 0; i < SATURN_CANOPY.length - 1; i++) {
+            guideRail('saturnCanopy' + i, SATURN_CANOPY[i], SATURN_CANOPY[i + 1], saturnTrimMat);
+        }
+        guideRail('saturnJaw', SATURN_JAW.from, SATURN_JAW.to, saturnTrimMat);
+        // Approach tint - the corridor the shot runs up, painted so the mouth reads as a route
+        // rather than a gap between two obstacles. Decorative, height 0.001 at y 0.0012.
+        addLaneFloorTint(scene, 'saturnApproachTint', saturnApproachMat,
+            SATURN_APPROACH_TINT.width, SATURN_APPROACH_TINT.length,
+            SATURN_APPROACH_TINT.x, SATURN_APPROACH_TINT.z, 0);
+
+        // --- Comet lane ----------------------------------------------------------------------
+        // See COMET_RETURN_RAIL for the left-flipper band this lane was measured out of and every
+        // clearance the rail is checked against. Built with the same helper as Saturn's own
+        // framing directly above, so the two centre corridors are made of the same hardware.
+        guideRail('cometReturnRail', COMET_RETURN_RAIL.from, COMET_RETURN_RAIL.to, cometTrimMat);
+        // Laid along the 16-degree shot line rather than the board's axis. addLaneFloorTint's
+        // `depth` runs along the strip's local Z, and rotationY = the lane's own angle puts that
+        // local Z on the shot line - so the tint is drawn where the ball actually travels.
+        addLaneFloorTint(scene, 'cometApproachTint', cometApproachMat,
+            COMET_APPROACH_TINT.width, COMET_APPROACH_TINT.length,
+            COMET_APPROACH_TINT.x, COMET_APPROACH_TINT.z, COMET_APPROACH_TINT.angleRad);
 
         // ===================================
         // Comet (board redesign) - the old "satellite" object, re-themed now that Saturn is a
@@ -5497,6 +5924,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // than Saturn" design language (see the tail's own comment).
         const cometFloorMat = makeLaneFloorMat('cometFloorMat', COLOR_COMET, 0.18);
         addFeatureFloorGlow(scene, 'cometFloorGlow', cometFloorMat, COMET_RADIUS_M * 2.6, COMET_POS.x, COMET_POS.z);
+        // 16mm against the 21.0mm a ball's near edge can reach - 5.0mm of margin.
+        addFeatureCollar(scene, 'cometCollar', housingMat, railCapMat, 0.016, COMET_POS.x, COMET_POS.z);
 
         // ===================================
         // Score-multiplier power-up orb (board redesign) - hidden at load, toggled visible/
@@ -5569,6 +5998,47 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         slingshotRubberMat.metallic = 0.0;
         slingshotRubberMat.roughness = 0.8;
         slingshotRubberMat.emissiveColor = new BABYLON.Color3(0.08, 0.01, 0.08);
+
+        // Post rubber. The board's guard posts - the Vision Gate's three and the four on the lane
+        // dividers - are collision surfaces with restitution 0.5 and 0.4, which IS rubber
+        // behaviour; they were just drawn as bare metal, so the one part of the board a player
+        // reads as "this will kick the ball back" looked like the parts that do not.
+        //
+        // Its own instance rather than sharing slingshotRubberMat: that one is the slingshots'
+        // identity and gets tuned with them, and a future tweak there should not silently recolour
+        // every post on the table. Same family though - matte, unlit, a shade off black - so all
+        // the rubber on the board reads as one material.
+        const postRubberMat = new BABYLON.PBRMaterial('postRubberMat', scene);
+        postRubberMat.albedoColor = new BABYLON.Color3(0.19, 0.08, 0.17);
+        postRubberMat.metallic = 0.0;
+        postRubberMat.roughness = 0.82;
+        // Half the slingshot band's emissive. That one sits on a feature that flashes on every hit
+        // and needs headroom; a guard post does not glow, and under this scene's magenta key light
+        // the higher value rendered the four lane-divider posts - the objects nearest the camera -
+        // as saturated pink rather than matte rubber.
+        postRubberMat.emissiveColor = new BABYLON.Color3(0.03, 0.005, 0.03);
+
+        // One rubber-sleeved post. The sleeve is the COLLIDER MESH ITSELF, recoloured - not a ring
+        // added around it. A real post's rubber is what the ball touches, so drawing it outside the
+        // collider would put the visible rubber where the physics is not, which is the mismatch
+        // this pass exists to remove (see the slingshot band below for the same fix). The metal cap
+        // is decorative, has no collider, and is drawn INSET to 0.8 of the post's diameter. A real
+        // star post's cap overhangs its rubber, but overhanging here would again claim contact the
+        // collider does not have - and at full width in railCapMat, the board's brightest trim, the
+        // four lane-divider caps rendered as pale discs that pulled the eye to the quietest corner
+        // of the table (checked against the previous frame from the gameplay camera). Inset, they
+        // read as the cap on top of a sleeve, which is the point.
+        const dressPostAsRubber = (post, diameter, topY, capMat) => {
+            post.material = postRubberMat;
+            const cap = BABYLON.MeshBuilder.CreateCylinder(post.name + 'Cap', {
+                diameter: diameter * 0.8, height: 0.0025
+            }, scene);
+            cap.position.set(post.position.x, topY, post.position.z);
+            // Neutral trim by default - see routeTrimMat's own comment for why only the vision
+            // routes are keyed. The Vision Gate's three guard posts pass their own.
+            cap.material = capMat || railCapMat;
+            return cap;
+        };
 
         const slingshotPlasticTex = createSlingshotPlasticTexture(scene);
 
@@ -5685,8 +6155,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             ridge.position.set(0, 0.0325, 0.012); // rests on the collider's own 0.030 crown, never inside it
             ridge.material = ridgeMat;
 
-            // Rubber/contact edge: the band strung between the two posts, standing 3mm proud of
-            // the collider's striking face so the ball meets rubber first.
+            // Rubber/contact edge: the band strung between the two posts, now FLUSH with the
+            // collider's striking face rather than 3.25mm proud of it.
+            //
+            // The old comment here claimed the ball "meets rubber first". It did not: the collider
+            // box is depth SLINGSHOT_SIZE_M*0.5 centred on the rig, so its striking face is at
+            // local z -0.0125, and this band sat at -0.0140 with depth 0.0035 - outer face -0.01575,
+            // i.e. 3.25mm out in front of anything solid. The ball visibly sank a quarter of its
+            // radius into the rubber before the slingshot noticed. Moved to -0.01245 so the band's
+            // outer face lands 0.2mm proud of the collider face: enough to render in front of it
+            // without z-fighting, and a mismatch of 0.2mm against a 27mm ball rather than 3.25mm.
+            // The collider is untouched, so the kick, SLINGSHOT_RESTITUTION and the lower-playfield
+            // flow are exactly as they were.
             //
             // On the rig, NOT parented to the collider. Parenting it there was tried, because
             // snapSlingshot() stretches the collider on every kick and a rubber band riding that
@@ -5699,7 +6179,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 depth: 0.0035
             }, scene);
             rubber.parent = rig;
-            rubber.position.set(0, 0.019, -0.0140);
+            rubber.position.set(0, 0.019, -0.01245);
             rubber.material = slingshotRubberMat;
 
             // Referenced by snapSlingshot() (in main(), via the collider mesh's metadata below) so
@@ -5724,6 +6204,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // the centralized lamp system (setLaneLit() in main(), registered as lamp id
         // 'reentryLane'+i), the same emissive-only on/off convention every other lamp in this file
         // already uses.
+        // The re-entry canopy's own two heights, declared HERE rather than inside the canopy
+        // block below because the lane loop mounts each lane's indicator to the canopy's top face
+        // (see that indicator's comment) and the two must not be able to drift apart.
+        const REENTRY_CANOPY_Y = 0.048, REENTRY_CANOPY_FIN_BOTTOM_Y = 0.037;
+
         const reentryLaneMeshes = [];
         REENTRY_LANES.forEach((pos, i) => {
             const laneMat = new BABYLON.PBRMaterial('laneMat' + i, scene);
@@ -5760,6 +6245,61 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }, scene);
             mesh.position.set(pos.x, 0.01, pos.z);
             mesh.material = laneMat;
+            // Per-lane indicator, shadowing that lane's OWN lamp via the follower mechanism - so
+            // the three read out the bank's real lit/unlit state and nothing new is wired.
+            //
+            // SIGHTLINE PASS: these are mounted on the CANOPY'S TOP FACE, directly above their own
+            // lane, rather than sunk into the playfield 22mm down-table of it. The old placement
+            // put two of the three where the player cannot see them. Measured from the real
+            // gameplay camera, sampling each mesh's own world vertices and asking the scene which
+            // OPAQUE mesh is front-most at that pixel:
+            //
+            //   reentryChain0   72% of it behind bumper1Cap
+            //   reentryChain1  100% of it behind saturn  - completely invisible
+            //   reentryChain2    0% blocked
+            //
+            // The bank is the objective of a whole vision (RETURN TO BODY, "COMPLETE THE RE-ENTRY
+            // LANES") and two thirds of its readout was hidden behind other features. It cannot be
+            // fixed by moving the lanes: those are triggers, and this pass does not touch physics.
+            // It cannot be fixed by moving Saturn for the same reason.
+            //
+            // Height is the lever, because a point further UP the table projects HIGHER on screen
+            // and Saturn's silhouette ends at screen y 299. Projected and picked before building:
+            // the lane's own lamp at y 0.010 lands at screen y 327, deep inside Saturn; the canopy
+            // top at y 0.052 lands at 297, where the front-most mesh is the canopy itself. Going
+            // 2mm further up-table from there puts it behind topWallCrown instead, so the canopy's
+            // own top face is the one place on this bank that reads.
+            //
+            // It is also where a real machine puts them - the lamps for a top lane bank live in
+            // the plastic over the lanes, not on the floor in front of them - and mounting all
+            // three (not just the hidden one) keeps the bank reading as one banked feature, which
+            // is what the old placement was for. No collider, and at 52mm it is nowhere near the
+            // ball's 27mm crown.
+            const reChainMat = new BABYLON.PBRMaterial('reentryChainMat' + i, scene);
+            styleInsertLampMat(reChainMat, COLOR_MISSION_ACTIVE, insertLensTextures.ring);
+            //
+            // MOBILE AUDIT: this is a DOME at 14mm, not the 11mm flat lens the playfield inserts
+            // use, and both numbers come from measuring real phone-width frames (320/360/390/412
+            // CSS px) rather than from taste. As a flat lens on the canopy it rendered 6x2 PIXELS
+            // at 320 and 10x3 at 412 - the smallest thing on the board by an order of magnitude,
+            // and unreadable as three separate lit states on any phone. The cause is the camera's
+            // ~16-degree elevation: a horizontal disc's height collapses to about a quarter of its
+            // width, so widening it alone would have bought almost nothing. A dome keeps its
+            // height from every angle, which is why the fix is a shape change plus a small size
+            // bump rather than simply making it bigger.
+            //
+            // Nothing else about the indicator changes - same name, same material, same follower
+            // registration against the lane's own lamp, no collider, and at 52mm it is still
+            // nowhere near the ball's 27mm crown.
+            const reChainLens = addPlayfieldInsert(scene, 'reentryChain' + i, reChainMat,
+                insertCollarMat, 0.014, pos.x, pos.z, REENTRY_CANOPY_Y + 0.0038, true);
+            shotChainLamps.push({
+                id: 'reentryChain' + i,
+                mesh: reChainLens,
+                color: COLOR_MISSION_ACTIVE,
+                follows: 'reentryLane' + i
+            });
+
             reentryLaneMeshes.push(mesh);
             mesh.metadata = { kind: 'reentryLane', index: i };
             const aggregate = new BABYLON.PhysicsAggregate(mesh, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.3, friction: 0.5 }, scene);
@@ -5782,9 +6322,69 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // runs along Z (not the X-then-rotated convention every other rail below uses), so
                 // the cap is built the same "long along local X" way and then rotated 90 degrees
                 // to match, rather than swapping which of width/depth means "length" in the helper.
-                addRailBevel(scene, 'reentryLane' + i + 'RailCap' + side, railCapMat, REENTRY_LANE_RADIUS_M * 2.4, 0.004, railX, 0.023, pos.z, Math.PI / 2);
+                addRailBevel(scene, 'reentryLane' + i + 'RailCap' + side, reentryTrimMat, REENTRY_LANE_RADIUS_M * 2.4, 0.004, railX, 0.023, pos.z, Math.PI / 2);
             });
         });
+
+        // --- Re-entry canopy -------------------------------------------------------------------
+        // The three re-entry rollovers were three separate objects in a row. This is the one
+        // structure that makes them a single banked feature: a segmented arch carried across all
+        // three, with a fin hanging between each pair.
+        //
+        // It follows the lanes' OWN shape rather than a straight line - REENTRY_LANES already dips
+        // in the middle (z 0.398 / 0.384 / 0.398), so the canopy is genuinely curved and derived
+        // from the same three positions the triggers are, which is also why it cannot drift off
+        // them. Both ends run out to x +/-0.150, into the orbit top arcs, so the assembly is
+        // carried by structure already there instead of floating.
+        //
+        // BALL PASSAGES ARE FULLY OPEN, by construction rather than by care. The ball's top is at
+        // y 0.027 and qa/ball-movement.js guards airborne frames at 0%, so the plane the ball
+        // occupies is fixed: the canopy sits at y 0.048 and the dividers hang down only to y 0.037,
+        // 10mm clear of it. Nothing in this assembly reaches the playfield surface, none of it has
+        // a collider, and the lane triggers, their spacing and their scoring are untouched.
+        {
+            const CANOPY_Y = REENTRY_CANOPY_Y, CANOPY_FIN_BOTTOM_Y = REENTRY_CANOPY_FIN_BOTTOM_Y;
+            const pts = [{ x: -0.150, z: REENTRY_LANES[0].z }];
+            REENTRY_LANES.forEach((p, i) => {
+                if (i > 0) {
+                    const prev = REENTRY_LANES[i - 1];
+                    pts.push({ x: (prev.x + p.x) / 2, z: (prev.z + p.z) / 2 }); // midpoint keeps the curve smooth
+                }
+                pts.push({ x: p.x, z: p.z });
+            });
+            pts.push({ x: 0.150, z: REENTRY_LANES[REENTRY_LANES.length - 1].z });
+            for (let i = 0; i < pts.length - 1; i++) {
+                const a = pts[i], b = pts[i + 1];
+                const dx = b.x - a.x, dz = b.z - a.z;
+                const len = Math.hypot(dx, dz);
+                const rotY = Math.atan2(-dz, dx);
+                const cx = (a.x + b.x) / 2, cz = (a.z + b.z) / 2;
+                const seg = BABYLON.MeshBuilder.CreateBox('reentryCanopy' + i, {
+                    width: len * 1.04, height: 0.006, depth: 0.011
+                }, scene);
+                seg.position.set(cx, CANOPY_Y, cz);
+                seg.rotation.y = rotY;
+                seg.material = housingMat;
+                const cap = BABYLON.MeshBuilder.CreateBox('reentryCanopy' + i + 'Cap', {
+                    width: len * 0.9, height: 0.0016, depth: 0.007
+                }, scene);
+                cap.position.set(cx, CANOPY_Y + 0.0038, cz);
+                cap.rotation.y = rotY;
+                cap.material = reentryTrimMat;
+            }
+            // Dividers, hung from the canopy between adjacent lanes. They stop 10mm above the ball
+            // rather than reaching the playfield, so they divide the lanes to the eye without
+            // narrowing a single passage.
+            for (let i = 0; i < REENTRY_LANES.length - 1; i++) {
+                const a = REENTRY_LANES[i], b = REENTRY_LANES[i + 1];
+                const h = CANOPY_Y - CANOPY_FIN_BOTTOM_Y;
+                const fin = BABYLON.MeshBuilder.CreateBox('reentryDivider' + i, {
+                    width: 0.004, height: h, depth: 0.010
+                }, scene);
+                fin.position.set((a.x + b.x) / 2, CANOPY_FIN_BOTTOM_Y + h / 2, (a.z + b.z) / 2);
+                fin.material = reentryTrimMat;
+            }
+        }
 
         // Lower-table inlanes/outlanes - see SIDE_LANES' block comment (near its declaration) for
         // the full layout reasoning and the real-scene-measured geometry it's based on.
@@ -5823,7 +6423,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     height: 0.03
                 }, scene);
                 post.position.set(dividerX, 0.015, postZ);
-                post.material = housingMat;
+                // Rubber-sleeved: these are the two posts that separate the inlane from the
+                // outlane, and the ones a ball returning down the side actually strikes. Collider
+                // restitution here is 0.4, in the same band as the slingshot rubber's 0.45, so the
+                // sleeve is describing what the surface already does rather than restyling it.
+                dressPostAsRubber(post, 0.016, 0.0305);
                 post.metadata = { kind: 'wall' };
                 new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
             });
@@ -5996,72 +6600,188 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             skillShotLaneMeshes.push(trigger);
         });
 
-        // Upper-table LEFT ORBIT / RIGHT ORBIT skill shots - see ORBITS' block comment (near its
-        // declaration) for the full layout reasoning. Each side gets one visible guide rail
-        // (capped by end posts, same visual language as the inlane/outlane divider above) running
-        // alongside the existing mission-target-bank/comet, plus an entrance and a completion
-        // rollover trigger with their own lamp inserts.
+        // Upper-table LEFT ORBIT / RIGHT ORBIT shots - see ORBITS' block comment (near its
+        // declaration) for the full geometry and the measurements behind it. Each side is a curved
+        // channel: an outer guide that is TANGENT to the side wall at its top and sweeps down and
+        // inboard from there, a concentric inner guide a constant lane-width inside it, and a
+        // straight vertical section carrying the lane up the wall to the upper board.
+        //
+        // Both guides are built as a chain of short boxes along the arc rather than as one curved
+        // mesh, because Havok's static shapes here are boxes and a real curve would need a mesh
+        // collider. At ORBIT_ARC_SEGMENTS segments over ORBIT_ARC_SWEEP_RAD the chord-to-arc error
+        // is 0.3mm against a 27mm ball - two orders of magnitude under the thing it is guiding, so
+        // the ball reads it as a curve. Each box is stretched 4% past its chord so consecutive
+        // segments overlap: butted boxes would leave a hairline seam at every joint, and a seam is
+        // exactly the kind of edge that catches a rolling ball.
+        const ORBIT_RAIL_DEPTH_M = 0.015;
+        const ORBIT_RAIL_HALF_DEPTH_M = ORBIT_RAIL_DEPTH_M / 2;
         const orbitLampMeshes = [];
         ORBITS.forEach((orbitDef) => {
-            // Same empirically-derived rotation formula as the inlane guide above (see its own
-            // comment for how rotationY = atan2(-dz, dx) was verified against this exact Babylon
-            // build via mesh.getDirection(Axis.X), not assumed from documented convention).
-            const dx = orbitDef.railTopX - orbitDef.railBottomX;
-            const dz = ORBIT_RAIL_TOP_Z_M - ORBIT_RAIL_BOTTOM_Z_M;
-            const railLength = Math.sqrt(dx * dx + dz * dz);
-            const railRotationY = Math.atan2(-dz, dx);
-            const railCenterX = (orbitDef.railBottomX + orbitDef.railTopX) / 2;
-            const railCenterZ = (ORBIT_RAIL_BOTTOM_Z_M + ORBIT_RAIL_TOP_Z_M) / 2;
+            const mirror = orbitDef.mirror;
 
-            const rail = BABYLON.MeshBuilder.CreateBox('orbitRail' + orbitDef.side, {
-                width: railLength,
-                height: 0.022,
-                depth: 0.015
-            }, scene);
-            rail.position.set(railCenterX, 0.011, railCenterZ);
-            rail.rotation.y = railRotationY;
-            rail.material = housingMat;
-            rail.metadata = { kind: 'wall' }; // reuses the existing generic wall camera-shake/sound feedback, same as the inlane/outlane rails
-            new BABYLON.PhysicsAggregate(rail, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
-            // Already built with the "long axis along local X, then rotationY" convention
-            // addRailBevel() assumes, so railRotationY passes straight through unchanged.
-            addRailBevel(scene, 'orbitRail' + orbitDef.side + 'Cap', railCapMat, railLength, 0.015, railCenterX, 0.022, railCenterZ, railRotationY);
+            // One box spanning two points, using the same empirically-derived rotation convention
+            // as every other angled rail in this file (rotationY = atan2(-dz, dx), verified against
+            // this Babylon build via mesh.getDirection(Axis.X) rather than assumed).
+            const railBox = (name, pa, pb, solid) => {
+                const dx = pb.x - pa.x, dz = pb.z - pa.z;
+                const len = Math.hypot(dx, dz);
+                if (len < 1e-6) return;
+                const rotY = Math.atan2(-dz, dx);
+                const cx = (pa.x + pb.x) / 2, cz = (pa.z + pb.z) / 2;
+                const box = BABYLON.MeshBuilder.CreateBox(name, {
+                    width: len * (solid ? 1.04 : 1),
+                    height: 0.022,
+                    depth: ORBIT_RAIL_DEPTH_M
+                }, scene);
+                box.position.set(cx, 0.011, cz);
+                box.rotation.y = rotY;
+                box.material = housingMat;
+                box.metadata = { kind: 'wall' }; // reuses the existing generic wall camera-shake/sound feedback, same as the inlane/outlane rails
+                new BABYLON.PhysicsAggregate(box, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+                addRailBevel(scene, name + 'Cap', orbitTrimMat, len * 1.04, ORBIT_RAIL_DEPTH_M, cx, 0.022, cz, rotY);
+            };
+
+            // Walks one arc from `fromSweep` to `toSweep` at a fixed radius, emitting one box per
+            // segment. `radius` is the RAIL'S CENTRE line, not its face - the caller offsets by
+            // half the rail's depth so the face lands on the lane boundary it is meant to be.
+            const railArc = (name, radius, fromSweep, toSweep) => {
+                for (let i = 0; i < ORBIT_ARC_SEGMENTS; i++) {
+                    const a = fromSweep + (toSweep - fromSweep) * (i / ORBIT_ARC_SEGMENTS);
+                    const b = fromSweep + (toSweep - fromSweep) * ((i + 1) / ORBIT_ARC_SEGMENTS);
+                    railBox(name + i, orbitArcPoint(mirror, radius, a), orbitArcPoint(mirror, radius, b), true);
+                }
+            };
+
+            // OUTER guide. Its body sits OUTBOARD of its face (a larger radius is further from the
+            // construction centre, which is inboard of the whole arc), so at the tangency point the
+            // box overlaps the side wall it is tangent to - deliberately, so there is no seam there
+            // for a ball riding the wall to catch on. Overlapping static colliders are already the
+            // norm on this board (leftSlant/leftWall, every divider and its posts).
+            // Built in two pieces with a gap across the shooter lane's exit path - see
+            // ORBIT_OUTER_GAP_FROM_RAD for the measurement that put it there and the deflector that
+            // was tried and discarded first.
+            const outerRailRadius = ORBIT_ARC_RADIUS_M + ORBIT_RAIL_HALF_DEPTH_M;
+            railArc('orbitRail' + orbitDef.side + 'OuterUpper', outerRailRadius, 0, ORBIT_OUTER_GAP_FROM_RAD);
+            if (ORBIT_OUTER_FLANK_SIDES.includes(orbitDef.side)) {
+                railArc('orbitRail' + orbitDef.side + 'OuterLower', outerRailRadius, ORBIT_OUTER_GAP_TO_RAD, ORBIT_ARC_SWEEP_RAD);
+            }
+
+            // INNER guide, concentric, stopping short of the outer one so the lane's mouth flares.
+            const innerFaceRadius = ORBIT_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M;
+            const innerRailRadius = innerFaceRadius - ORBIT_RAIL_HALF_DEPTH_M;
+            railArc('orbitRail' + orbitDef.side + 'Inner',
+                innerRailRadius, 0, ORBIT_INNER_SWEEP_RAD);
+
+            // Straight vertical section, carrying the lane up the wall. It starts exactly where the
+            // inner arc's tangency point is, so guide and section are one continuous surface.
+            const innerTop = orbitArcPoint(mirror, innerRailRadius, 0);
+            railBox('orbitRail' + orbitDef.side + 'Upper',
+                { x: innerTop.x, z: innerTop.z }, { x: innerTop.x, z: ORBIT_RAIL_TOP_Z_M }, false);
+
+            // Lane bridge - see ORBIT_LANE_BRIDGE_Z_M for the vertical clearance this rests on.
+            // Spans wall face to rail centre line, overlapping both, so it is carried by structures
+            // already there and no leg stands in the lane. Decorative: no aggregate, and at y 0.040
+            // it is above the plane the ball is confined to anyway.
+            {
+                const railMidX = mirror * (ORBIT_WALL_FACE_X_M - ORBIT_LANE_WIDTH_M - ORBIT_RAIL_HALF_DEPTH_M);
+                const wallX = mirror * ORBIT_WALL_FACE_X_M;
+                const span = BABYLON.MeshBuilder.CreateBox('orbitLaneBridge' + orbitDef.side, {
+                    width: Math.abs(wallX - railMidX), height: 0.006, depth: 0.009
+                }, scene);
+                span.position.set((wallX + railMidX) / 2, ORBIT_LANE_BRIDGE_Y_M, ORBIT_LANE_BRIDGE_Z_M);
+                span.material = housingMat;
+                // Polished top face, the same stepped-bevel language every rail on the board uses.
+                const cap = BABYLON.MeshBuilder.CreateBox('orbitLaneBridge' + orbitDef.side + 'Cap', {
+                    width: Math.abs(wallX - railMidX) * 0.86, height: 0.0016, depth: 0.006
+                }, scene);
+                cap.position.set((wallX + railMidX) / 2, ORBIT_LANE_BRIDGE_Y_M + 0.0038, ORBIT_LANE_BRIDGE_Z_M);
+                cap.material = orbitTrimMat;
+            }
+
+            // Inner lip on the lower half of the top turn - see ORBIT_TOP_LIPS for the exit probe
+            // that put it here and every clearance it was checked against. Starts 2mm inside the
+            // vertical section so the two are one continuous face with no seam at the joint.
+            const topLip = ORBIT_TOP_LIPS.find((l) => l.side === orbitDef.side);
+            if (topLip) {
+                railBox('orbitTopLip' + orbitDef.side,
+                    { x: innerTop.x, z: ORBIT_RAIL_TOP_Z_M - 0.002 },
+                    { x: innerTop.x - mirror * topLip.inboard, z: topLip.toZ }, false);
+            }
 
             // Lane floor tint (visual-polish pass, user-requested) - see addLaneFloorTint()'s own
-            // comment. Offset a little toward the playfield center from the rail's own centerline
-            // (the ball's actual travel lane sits inboard of the rail, which marks only the
-            // corridor's outer/wall-side edge) rather than directly under the rail itself. The
-            // rail is only a few degrees off vertical here (dx is tiny next to dz - see ORBITS'
-            // own ~5cm-wide corridor sizing), so a fixed inward X offset reads correctly without
-            // needing the rail's exact perpendicular.
-            const orbitFloorInward = orbitDef.side === 'left' ? 1 : -1;
-            addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side, orbitFloorMat, 0.03, railLength - 0.05, railCenterX + orbitFloorInward * 0.018, railCenterZ, railRotationY);
-
-            // Only the TOP end gets a capping post, not the bottom - verified via Playwright that
-            // a post at the rail's bottom tip sits close enough to a realistic entry trajectory to
-            // actually block shots into the lane rather than just marking it (an early build had
-            // one there; a ball aimed at the entrance clipped it and got knocked back inboard
-            // before ever reaching the entrance trigger). The rail's own open bottom tip is the
-            // entrance's real visual cue, alongside the entrance trigger's lamp insert below.
-            [
-                { x: orbitDef.railTopX, z: ORBIT_RAIL_TOP_Z_M }
-            ].forEach((endPos, i) => {
-                const post = BABYLON.MeshBuilder.CreateCylinder('orbitRail' + orbitDef.side + 'Post' + i, {
-                    diameter: 0.016,
-                    height: 0.03
-                }, scene);
-                post.position.set(endPos.x, 0.015, endPos.z);
-                post.material = housingMat;
-                post.metadata = { kind: 'wall' };
-                new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
+            // comment. Painted on the lane's own CENTRE line so it follows the ball's path rather
+            // than either rail, which is what makes the corridor read as a route at a glance.
+            const laneRadius = ORBIT_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M / 2;
+            for (let i = 0; i < ORBIT_ARC_SEGMENTS; i++) {
+                const a = (ORBIT_ARC_SWEEP_RAD * i) / ORBIT_ARC_SEGMENTS;
+                const b = (ORBIT_ARC_SWEEP_RAD * (i + 1)) / ORBIT_ARC_SEGMENTS;
+                const pa = orbitArcPoint(mirror, laneRadius, a), pb = orbitArcPoint(mirror, laneRadius, b);
+                const dx = pb.x - pa.x, dz = pb.z - pa.z, len = Math.hypot(dx, dz);
+                addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side + i, orbitFloorMat,
+                    0.03, len * 1.04, (pa.x + pb.x) / 2, (pa.z + pb.z) / 2, Math.atan2(-dz, dx));
+            }
+            // Sequential dots up the lane, on the same centre line the floor tint is painted on
+            // and derived from the same arc the rails are built from, so they cannot drift out of
+            // the lane if it is ever retuned. They shadow the ENTRANCE lamp rather than the
+            // completion one: this chain is the way IN, and the entrance is the state that says
+            // whether that way is live.
+            [0.26, 0.46, 0.66].forEach((t, d) => {
+                const at = orbitArcPoint(mirror, laneRadius, ORBIT_ARC_SWEEP_RAD * t);
+                const chainMat = new BABYLON.PBRMaterial('orbitChainMat' + orbitDef.side + d, scene);
+                styleInsertLampMat(chainMat, COLOR_ORBIT_LAMP, insertLensTextures.cycle);
+                const lens = addPlayfieldInsert(scene, 'orbitChain' + orbitDef.side + d,
+                    chainMat, insertCollarMat, 0.011, at.x, at.z);
+                shotChainLamps.push({
+                    id: 'orbitChain' + orbitDef.side + d,
+                    mesh: lens,
+                    color: COLOR_ORBIT_LAMP,
+                    follows: 'orbitEntrance' + (orbitDef.side === 'left' ? 'Left' : 'Right')
+                });
             });
+
+            const laneTop = orbitArcPoint(mirror, laneRadius, 0);
+            addLaneFloorTint(scene, 'orbitFloorTint' + orbitDef.side + 'Upper', orbitFloorMat,
+                0.03, ORBIT_RAIL_TOP_Z_M - laneTop.z, laneTop.x, (laneTop.z + ORBIT_RAIL_TOP_Z_M) / 2, Math.PI / 2);
+
+            // TOP ARC - see ORBIT_TOP_ARC_RADIUS_M for what it is for. Tangent to the side wall where
+            // the vertical section ends, sweeping inboard and up, and OUTER-ONLY: the inboard side
+            // of the turn is deliberately left open so a ball can leave it early into the bumper
+            // nest instead of being committed to crossing the top.
+            //
+            // Same chain-of-boxes construction as the entry arc, at 9 degrees per segment. The rail
+            // body sits OUTBOARD of its face (a larger radius is further from the construction
+            // centre), so near the tangency point it overlaps the side wall - which is what leaves
+            // no seam there for a ball riding the wall to catch on.
+            for (let i = 0; i < ORBIT_TOP_ARC_SEGMENTS; i++) {
+                const a = (ORBIT_TOP_ARC_SWEEP_RAD * i) / ORBIT_TOP_ARC_SEGMENTS;
+                const b = (ORBIT_TOP_ARC_SWEEP_RAD * (i + 1)) / ORBIT_TOP_ARC_SEGMENTS;
+                railBox('orbitTopArc' + orbitDef.side + i,
+                    orbitTopArcPoint(mirror, ORBIT_TOP_ARC_RADIUS_M + ORBIT_RAIL_HALF_DEPTH_M, a),
+                    orbitTopArcPoint(mirror, ORBIT_TOP_ARC_RADIUS_M + ORBIT_RAIL_HALF_DEPTH_M, b), true);
+            }
+            // Floor tint along the turn, on the ball's own side of the arc rather than under it, so
+            // the corridor reads as a route across the top the way the lanes below it do.
+            for (let i = 0; i < ORBIT_TOP_ARC_SEGMENTS; i++) {
+                const a = (ORBIT_TOP_ARC_SWEEP_RAD * i) / ORBIT_TOP_ARC_SEGMENTS;
+                const b = (ORBIT_TOP_ARC_SWEEP_RAD * (i + 1)) / ORBIT_TOP_ARC_SEGMENTS;
+                const pa = orbitTopArcPoint(mirror, ORBIT_TOP_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M / 2, a);
+                const pb = orbitTopArcPoint(mirror, ORBIT_TOP_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M / 2, b);
+                const dx = pb.x - pa.x, dz = pb.z - pa.z, len = Math.hypot(dx, dz);
+                addLaneFloorTint(scene, 'orbitTopTint' + orbitDef.side + i, orbitFloorMat,
+                    0.03, len * 1.04, (pa.x + pb.x) / 2, (pa.z + pb.z) / 2, Math.atan2(-dz, dx));
+            }
 
             // Entrance/completion rollover triggers, each with its own indicator lamp insert -
             // same invisible-trigger/always-visible-lamp split as the inlane/outlane rollovers,
             // colored with the orbits' own distinct HEX_ORBIT_LAMP identity (see its comment).
+            // Both rollovers sit on the lane's own centre line, derived from the same arc the rails
+            // are built from - so they cannot drift out of the lane when the arc is retuned, which
+            // is exactly how the previous straight-rail version ended up with a completion trigger
+            // above anything a real shot could reach.
+            const entrancePos = orbitArcPoint(mirror, laneRadius, ORBIT_ENTRANCE_SWEEP_RAD);
             [
-                { kind: 'orbitEntrance', x: orbitDef.entranceX, z: ORBIT_ENTRANCE_Z_M, debugColor: new BABYLON.Color3(0.3, 0.8, 1) },
-                { kind: 'orbitCompletion', x: orbitDef.completionX, z: ORBIT_COMPLETION_Z_M, debugColor: new BABYLON.Color3(1, 0.9, 0.2) }
+                { kind: 'orbitEntrance', x: entrancePos.x, z: entrancePos.z, debugColor: new BABYLON.Color3(0.3, 0.8, 1) },
+                { kind: 'orbitCompletion', x: laneTop.x, z: ORBIT_COMPLETION_Z_M, debugColor: new BABYLON.Color3(1, 0.9, 0.2) }
             ].forEach((triggerDef) => {
                 const lampMat = new BABYLON.PBRMaterial(triggerDef.kind + 'LampMat' + orbitDef.side, scene);
                 // Up-table arrow on both orbit inserts: an orbit is a shot you drive UP the lane,
@@ -6176,7 +6896,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // it is set into, which a single ring can only ever say is "a circle drawn on the floor".
         // Deliberately the DIMMEST lit element here (0.13 against the rim's 0.4) - it is structure,
         // not signal, and the emissive hierarchy this pass establishes runs
-        // throat 0.07 < collar 0.13 < rim 0.40 < halo 0.30(spectral) < beacon 0.55.
+        // throat 0.07 < collar 0.13 < beacon 0.26 < halo 0.30(spectral) < rim 0.40. The beacon
+        // used to top that list at 0.55; the clutter pass moved it down to 0.26 (see its own
+        // comment below), which puts the RIM - the ring that actually draws the mouth's edge -
+        // back at the top where a scoop shot wants it.
         // Tessellation 16, not the 28 this started at. A torus costs tessellation-squared
         // triangles and these render about 20px across: measured, 28 cost 1682 triangles to draw
         // a shape whose polygonal edges are sub-pixel either way. 16 is ~550 for the same picture.
@@ -6229,37 +6952,50 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             halo.material = haloMat;
         }
 
-        // Vertical light beacon - a thin, tall emissive-only spire standing up from the gate,
-        // reading clearly against the open dark sky above the table instead of competing with
-        // the crowded playfield at the gate's own height. Same material/color-cycle target as the
-        // ring (see startVisionGateCapture()) - between the two, the gate is identifiable from
-        // across the whole board, not just up close.
-        // Reworked from a flat-topped solid cylinder into a tapered shaft that fades out. The old
-        // one measured (board-graphics audit) as a 7x130px hard-edged bar punching through Saturn
-        // and 50px above the top rail into empty starfield - a beam of light that ends in a
-        // straight cut across the sky reads as a missing polygon, not as light.
+        // Marker glow - a short, thin emissive-only flare standing out of the gate's mouth, so
+        // the gate reads as lit from across the board without anything of it standing in front
+        // of the board. Same material/color-cycle target as the ring (see
+        // startVisionGateCapture()).
         //
-        // Three changes, all presentation: the height comes down 0.16 -> 0.115 so the shaft stays
-        // over the board instead of running off the top of the frame; diameterTop narrows to a
-        // near-point so it tapers; and createGateBeaconTexture()'s vertical gradient carries the
-        // brightness AND the alpha, so it actually dissolves at its far end. backFaceCulling off
-        // because a translucent shaft seen from outside should show its far wall through its near
-        // one - that is what gives a volumetric beam its density.
+        // CLUTTER PASS - this used to be a 115mm SPIRE, and from the gameplay camera it was the
+        // worst piece of decoration on the table: a bloomed violet-white column standing from the
+        // gate's mouth up through Saturn, i.e. straight across the two biggest destinations on
+        // the board, in the exact place a player has to watch the ball.
+        //
+        // Measured on Saturn's face, on the beacon's own screen axis (a 12x65px strip). Luminance
+        // could not see it - the shaft and the gold planet behind it sit at the same brightness -
+        // so it is measured on colour instead, as how far each pixel's red and blue run ahead of
+        // its green: mean violet cast 55.1 -> 4.8, and the share of that strip reading violet
+        // rather than gold 59.1% -> 15.9%. Saturn's ring texture, its banding and its terminator
+        // are all legible again where the beam used to cross them.
+        //
+        // Note for anyone measuring this area later: the broad bright pool that remains over the
+        // CENTRE of the table is not this mesh and never was - it is backLight's diffuse pool, and
+        // buildLighting() carries the elimination data that proves it.
+        //
+        // It is also the SEVENTH marker on this one feature (throat, rim ring, collar, halo,
+        // approach floor tint, the triangle glyph and the insert chain all point at the gate
+        // already), so shortening it costs the player nothing they were not already told. Height
+        // 0.115 -> 0.038 and emissive 0.62 -> 0.26 keeps a lit plume at the mouth - the thing that
+        // says "this hole is powered" - and stops it being a column across the board. Geometry
+        // below is otherwise unchanged: still tapered, still fading out through
+        // createGateBeaconTexture()'s gradient, still backFaceCulling off so a translucent shaft
+        // shows its far wall through its near one.
         const beacon = BABYLON.MeshBuilder.CreateCylinder('visionGateBeacon', {
             diameterTop: 0.0016,
-            diameterBottom: 0.0092,
-            height: 0.115,
+            diameterBottom: 0.0075,
+            height: 0.038,
             tessellation: 14
         }, scene);
-        beacon.position.set(VISION_GATE_POS.x, 0.0575, VISION_GATE_POS.z);
+        beacon.position.set(VISION_GATE_POS.x, 0.019, VISION_GATE_POS.z);
         const beaconMat = new BABYLON.PBRMaterial('visionGateBeaconMat', scene);
         beaconMat.albedoColor = new BABYLON.Color3(0, 0, 0); // unlit: this is light, not a surface
         beaconMat.metallic = 0;
         beaconMat.roughness = 1;
-        beaconMat.emissiveColor = COLOR_VISION_GATE.scale(0.62);
+        beaconMat.emissiveColor = COLOR_VISION_GATE.scale(0.26); // 0.62 -> 0.26, clutter pass - see the block above
         beaconMat.emissiveTexture = createGateBeaconTexture(scene);
         beaconMat.opacityTexture = beaconMat.emissiveTexture; // same curve drives the fade-out
-        beaconMat.alpha = 0.72;
+        beaconMat.alpha = 0.45; // 0.72 -> 0.45, clutter pass - a marker glow, not a solid shaft
         beaconMat.backFaceCulling = false;
         beacon.material = beaconMat;
         ring.material = visionGateMat;
@@ -6270,20 +7006,44 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // near-miss clips one and bounces away instead of sailing through untouched. Feedback
         // reuses the existing generic 'wall' handling, same as every other guide rail/post added
         // in earlier features.
+        //
+        // Trap fix, measured (qa/ball-trap-audit.js): the far post used to sit at exactly one
+        // collar radius up-table, putting it 28.3mm from each side post. A ball cannot pass
+        // through a 28.3mm centre-to-centre gap between two 9mm posts (19.3mm of daylight), so it
+        // came to rest OUTSIDE the horseshoe, touching both and held there by the tilt - the board
+        // caught 8 of 262 seeded balls in that single V, and the pre-refactor board had the same
+        // pocket at its own gate (2 balls, its worst cluster). The threshold is geometric, not a
+        // tuning value: a ball rests stably in the outside V of two posts whenever their centres
+        // are closer than 2 x (ball radius + post radius) = 36mm. Pushing the far post to 1.75
+        // radii opens that pair to 40.3mm, past the threshold with margin, so a ball rolls between
+        // them instead of parking on them. The side posts and the capture trigger are untouched,
+        // and 1.75 (not more) is what keeps the far post clear of the bumper row above it.
+        const GATE_FAR_POST_RADII = 1.75;
         [
             { x: VISION_GATE_POS.x - VISION_GATE_COLLAR_RADIUS_M, z: VISION_GATE_POS.z },
             { x: VISION_GATE_POS.x + VISION_GATE_COLLAR_RADIUS_M, z: VISION_GATE_POS.z },
-            { x: VISION_GATE_POS.x, z: VISION_GATE_POS.z + VISION_GATE_COLLAR_RADIUS_M }
+            { x: VISION_GATE_POS.x, z: VISION_GATE_POS.z + VISION_GATE_COLLAR_RADIUS_M * GATE_FAR_POST_RADII }
         ].forEach((postPos, i) => {
             const post = BABYLON.MeshBuilder.CreateCylinder('visionGatePost' + i, {
                 diameter: 0.009,
                 height: 0.026
             }, scene);
             post.position.set(postPos.x, 0.013, postPos.z);
-            post.material = housingMat;
+            // Rubber-sleeved. These three ARE the scoop's collar - the surfaces that decide whether
+            // a shot is captured or thrown back - and the previous commit's measurements lean on
+            // them scattering a miss back toward an inlane. Restitution 0.5, the liveliest of the
+            // board's rubber, which is what that scattering is. Drawn as rubber so the collar reads
+            // as the thing it is.
+            dressPostAsRubber(post, 0.009, 0.0265, gateTrimMat);
             post.metadata = { kind: 'wall' };
             new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.5, friction: 0.4 }, scene);
         });
+
+        // The lane the shot runs up - see VISION_GATE_APPROACH_TINT. Uses the gate's own violet so
+        // the corridor and the collar at the end of it read as one shot.
+        addLaneFloorTint(scene, 'visionGateApproachTint', visionGateApproachMat,
+            VISION_GATE_APPROACH_TINT.width, VISION_GATE_APPROACH_TINT.length,
+            VISION_GATE_APPROACH_TINT.x, VISION_GATE_APPROACH_TINT.z, 0);
 
         // The actual capture trigger - centered at the ball's own resting height (not the well's
         // sunken visual depth) so its overlap volume genuinely intersects the ball's collision
@@ -6435,48 +7195,65 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // flanking each slingshot's outer edge, each a housing-colored post with a thin
         // matte-rubber ring at its base. Purely cosmetic - unlike every OTHER post in this file,
         // these get no PhysicsAggregate at all.
-        const rubberMat = new BABYLON.PBRMaterial('rubberRingMat', scene);
-        rubberMat.albedoColor = new BABYLON.Color3(0.05, 0.05, 0.06);
-        rubberMat.metallic = 0;
-        rubberMat.roughness = 0.9; // matte rubber, not chrome like housingMat
+        // These three were the last rubber on the board that was not real. Each was an 8mm shaft
+        // wearing a 16mm rubber ring - the shape a player reads as "this kicks the ball back" - and
+        // the file's own comment said so out loud: "Purely cosmetic - unlike every OTHER post in
+        // this file, these get no PhysicsAggregate at all". One of them is at (0, -0.31), on the
+        // centre spine, and its comment calls it the center post between the flippers. A ball
+        // headed down the middle went straight through all three.
+        //
+        // That is the mismatch this pass exists to remove, so they are now what they look like: a
+        // rubber SLEEVE, at exactly the diameter the ring already occupied (0.016 centreline +
+        // 0.0025 tube = 0.0185 outer), with a cylinder collider on that same surface. Nothing about
+        // the footprint a player already sees has changed - only whether the ball agrees with it.
+        //
+        // Restitution 0.45 is SLINGSHOT_RESTITUTION, i.e. the value the board's other struck rubber
+        // already uses, chosen over the guard posts' 0.5 precisely to keep these quiet: a lone post
+        // on the centre spine is the last place that wants a lively bounce.
+        // The CENTRE one is gone rather than made real, and that is the interesting half of this.
+        // It stood at (0, -0.31): on the spine, 75mm up-table of the flipper tips. Decorative it was
+        // harmless. Physical it is a wall across the shooting lane - a cross-table shot from either
+        // flipper crosses x 0 at about z -0.30, which is exactly where it stood. Measured on the
+        // 174-shot fan with it solid: the median shot's apex collapsed from z -0.098 to -0.262,
+        // orbit entrances fell 35 -> 27, mission targets 21 -> 18 and bumpers 24 -> 21. It was
+        // catching the shots, not the drains.
+        //
+        // So it could not be made honest by giving it physics, and leaving it drawn would have kept
+        // the one piece of fake rubber this pass exists to remove. A post that cannot be real on
+        // the centre spine should not be drawn there, so it is deleted. The two flanking posts stay
+        // and are now solid: they sit on the slingshots' outer corners, out of every shot line, and
+        // rounding those square corners is a real job.
+        const DECOR_POST_SLEEVE_M = 0.0185;
         [
-            { x: 0, z: FLIPPER_Z_M + 0.05 }, // center post between the flippers
-            { x: SLINGSHOTS[0].x - 0.03, z: SLINGSHOTS[0].z }, // flanking the left slingshot
-            { x: SLINGSHOTS[1].x + 0.03, z: SLINGSHOTS[1].z } // flanking the right slingshot
+            { x: SLINGSHOTS[0].x - 0.03, z: SLINGSHOTS[0].z }, // caps the left slingshot's outer corner
+            { x: SLINGSHOTS[1].x + 0.03, z: SLINGSHOTS[1].z } // caps the right slingshot's outer corner
         ].forEach((def, i) => {
             const post = BABYLON.MeshBuilder.CreateCylinder('decorPost' + i, {
-                diameter: 0.008,
+                diameter: DECOR_POST_SLEEVE_M,
                 height: 0.024,
-                tessellation: 8
+                tessellation: 12
             }, scene);
             post.position.set(def.x, 0.012, def.z);
-            post.material = housingMat;
-
-            const ring = BABYLON.MeshBuilder.CreateTorus('decorRing' + i, {
-                diameter: 0.016,
-                thickness: 0.0025,
-                tessellation: 8
-            }, scene);
-            ring.rotation.x = Math.PI / 2;
-            ring.position.set(def.x, 0.014, def.z);
-            ring.material = rubberMat;
+            post.metadata = { kind: 'wall' }; // generic wall shake/sound, same as every other post
+            new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER,
+                { mass: 0, restitution: SLINGSHOT_RESTITUTION, friction: 0.4 }, scene);
+            dressPostAsRubber(post, DECOR_POST_SLEEVE_M, 0.0245);
         });
 
-        // 5. Visible lane guides - small angled decorative fins at each flipper's outer edge,
-        // aiming the eye up the lane the same way a real machine's flipper-base guide plastic
-        // does. The actual guide walls/rails elsewhere (inlane guides, orbit rails, launch lane
-        // wall) already handle real deflection; this is a purely visual cue at the one spot on
-        // the table without any guide accent yet.
-        [-1, 1].forEach((mirror) => {
-            const fin = BABYLON.MeshBuilder.CreateBox('flipperGuideFin' + mirror, {
-                width: 0.002,
-                height: 0.02,
-                depth: 0.06
-            }, scene);
-            fin.position.set(mirror * (FLIPPER_GAP_HALF_M + 0.09), 0.011, FLIPPER_Z_M - 0.01);
-            fin.rotation.y = mirror * 0.35;
-            fin.material = housingMat;
-        });
+        // 5. REMOVED in the clutter pass - a pair of decorative "lane guide" fins that used to
+        // stand at each flipper's outer edge. Each was a 2 x 20 x 60mm blade at y 0.011, i.e. a
+        // 60mm-long wall standing right through the ball's contact band (the ball spans y 0 to
+        // 0.027) with NO collider behind it, parked in the busiest traffic on the table. That is
+        // this pass's "appears to be collidable when it is not" case in its purest form: a ball
+        // fed down the return lane passed straight through something the player had every reason
+        // to read as a guide.
+        //
+        // It was also, by its own original comment, "a purely visual cue at the one spot on the
+        // table without any guide accent yet" - and that stopped being true. The lower-flow
+        // redesign since then gave this exact area real inlane guides, real lane dividers with
+        // lit caps, rubber-sleeved decor posts and lit lane floor tints, all of which are
+        // physical and all of which point the same way. The fins were duplicating a guide that
+        // now exists for real, in the one place where a fake one costs the most.
 
         // 6. Playfield inserts/lamps - flush glowing insert plates at each flipper's base, the
         // one classic pinball light location this table didn't have yet (every other lamp so far
@@ -6514,12 +7291,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // each shot's own lamp/trigger geometry so nothing visually overlaps.
         // Table-composition pass (user-requested - "immediate readability... inserts/lights
         // communicating important areas"): this label's original position (SKILL_SHOT_Z_M+0.05 =
-        // z=0.07, at the lane's own x=0.08) sits almost exactly on top of BUMPER_CLUSTER[2]
-        // (x=0.08, z=0.06) - confirmed via screenshot the bumper's own raised cap (added in a
-        // later visual-upgrade pass, after this label was first placed) now visually occludes
-        // half the text from this game's fixed low camera angle. Pulled forward (away from the
-        // bumper cluster, toward the camera) and lifted slightly - same "read against open space,
-        // not crowded geometry" fix as visionGateBeacon's own comment below.
+        // z=0.07, at the lane's own x=0.08) sat almost exactly on top of what was then
+        // BUMPER_CLUSTER[2] at (0.08, 0.06) - confirmed via screenshot, the bumper's raised cap
+        // occluded half the text from this game's fixed low camera angle. Pulled forward (toward
+        // the camera) and lifted slightly - same "read against open space, not crowded geometry"
+        // fix as visionGateBeacon's own comment below.
+        //
+        // The shot-corridor refactor has since moved that whole cluster to a row at z=0.325, so
+        // the bumper this dodged is no longer there. The position is KEPT anyway: pulled forward
+        // it now sits at the mouth of the right corridor, ahead of the power-up orb's new spot at
+        // (0.075, 0.080), which is exactly where a "SKILL SHOT" callout wants to be read from.
         const skillShotLabel = createLabelPlane(scene, 'SKILL SHOT', SKILL_SHOT_LANES[1].x, SKILL_SHOT_Z_M - 0.06, '#ff3366');
         skillShotLabel.position.y = 0.05;
         createLabelPlane(scene, 'KICKBACK', kickbackMirror * OUTLANE_TRIGGER_X_M, LANE_Z_BOTTOM_M - 0.03, '#ff5500');
@@ -6540,7 +7321,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // Side-specific text (not a shared 'ORBIT' label for both) - doubles as telling the
             // two orbits apart at a glance and keeps each label's mesh/texture name unique.
             const orbitLabel = orbitDef.side === 'left' ? 'L ORBIT' : 'R ORBIT';
-            createLabelPlane(scene, orbitLabel, orbitDef.entranceX, ORBIT_ENTRANCE_Z_M - 0.04, '#33ccff');
+            // Placed IN the lane rather than below its mouth. At the mouth (z=-0.17) the label sits
+            // close to this game's fixed low camera and renders large and bright - measured at p90
+            // 170 against the flippers' 128, which breaks the board's own hierarchy rule that
+            // signage must never outshine the hardware (qa/visual-hierarchy.js). Moving it 190mm
+            // further up-table costs nothing in legibility and puts it back under that bar, and it
+            // reads better anyway: the name sits on the route, not in front of it.
+            const labelAt = orbitArcPoint(orbitDef.mirror, ORBIT_ARC_RADIUS_M - ORBIT_LANE_WIDTH_M / 2, 8 * Math.PI / 180);
+            createShotGlyph(scene, orbitDef.side === 'left' ? SHOT_GLYPH.orbitLeft : SHOT_GLYPH.orbitRight,
+                labelAt.x, labelAt.z, '#33ccff');
         });
         // Table-composition pass (user-requested) - the original placement (pulled TOWARD the
         // bumper cluster, z = gate_z - 0.045) sat only ~0.03m from the boss bumper's own center,
@@ -6556,7 +7345,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // Saturn and the bumper cluster sit near the table's own centerline (x~=0); pushing the
         // label sideways (+X, away from centerline) instead of fore/aft clears both without
         // reopening the original bumper-cap problem this same line already solved once.
-        const visionGateLabel = createLabelPlane(scene, 'VISION GATE', VISION_GATE_POS.x + 0.05, VISION_GATE_POS.z, '#cc66ff');
+        // SHOT-CORRIDOR REFACTOR: both obstacles this offset was dodging have moved - the bumper
+        // cluster is now a row up at z=0.325 and Saturn dropped to z=0.205 - and the gate itself
+        // moved to the left corridor. Re-solved against the new positions rather than kept: a
+        // sideways offset from the gate now lands either inside Saturn's ring radius (0.079m) or
+        // on the mission target bank that shares the gate's approach, so the label moves DOWN the
+        // gate's own lane instead, into open mid-table where nothing overlaps it and it reads as a
+        // callout for the shot rather than a tag on the hole. Down-table, not up: the gate ended up
+        // on the centre line at z=0.060 and an up-table offset put the text behind the collar's own
+        // raised beacon.
+        const visionGateLabel = createShotGlyph(scene, SHOT_GLYPH.visionGate, VISION_GATE_POS.x, VISION_GATE_POS.z - 0.075, '#cc66ff');
         visionGateLabel.position.y = 0.045;
 
         // 8. Physical backing around the backglass - a frame border plus a receding cabinet
@@ -6665,7 +7463,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const pathCount = 8;
             for (let i = 0; i < pathCount; i++) {
                 const t = i / (pathCount - 1);
-                const z = -0.03 + t * (-0.24); // -0.03 (just under the bumper cluster) down to -0.27 (just above the lower zone threshold)
+                const z = -0.03 + t * (-0.24); // -0.03 down to -0.27 (just above the lower zone threshold). Was described as "just under the bumper cluster"; since the shot-corridor refactor moved the cluster up to z=0.325 these dots mark the open centre corridor's approach instead - the same run of floor, now genuinely a travel lane rather than the apron under an obstacle.
                 const x = (Math.random() - 0.5) * 0.05;
                 const dot = addConstellationDot('centerPathDot' + i, x, z, 0.005 + Math.random() * 0.005);
                 dot.material = pathMat;
@@ -6678,8 +7476,38 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // L ORBIT/R ORBIT/SKILL SHOT above, placed just outside the bank's own nearest (lowest)
         // target so it doesn't overlap the header rail or any flag.
         {
-            const nearestTarget = MISSION_TARGET_BANK[MISSION_TARGET_BANK.length - 1];
-            createLabelPlane(scene, 'TARGETS', nearestTarget.x - 0.055, nearestTarget.z - 0.03, '#ff66cc');
+            // SHOT-CORRIDOR REFACTOR: the old -0.055 X offset pushed the label outboard of the
+            // bank, which is now where the left orbit rail runs. Moved to just BELOW the bank -
+            // same "outside the bank, clear of the header rail and flags" intent, on the axis that
+            // still has room in the left corridor.
+            //
+            // BANK-AS-A-SHOT PASS: taken off the bank's CENTRE and down its own face normal rather
+            // than off whichever entry happens to be last. The old form assumed index 2 was the
+            // bank's nearest plate, which was true of a bank running down-table and is not true of
+            // one running across it - on this layout it would have hung the label off the far end.
+            // Hung off the bank's OUTERMOST plate, and a long way down its face: screenshots from
+            // the gameplay camera put the label IN the plate row at both -0.05 off the bank centre
+            // (it landed between plates 1 and 2) and -0.045 off plate 0 (it read as a fourth plate
+            // at the row's left end), because 45mm of z is only a few pixels at this camera's
+            // angle. At -0.070 it clears the row, and sits in open playfield outboard of the
+            // approach tint and well left of the Vision Gate.
+            const bankOuter = MISSION_TARGET_BANK[0];
+            createShotGlyph(scene, SHOT_GLYPH.targets, bankX(bankOuter, 0, -0.070), bankZ(bankOuter, 0, -0.070), '#ff66cc');
+        }
+
+        // Saturn callout. The board's biggest scoring object was the only major feature with no
+        // signage at all - L ORBIT, R ORBIT, SKILL SHOT, VISION GATE and TARGETS all name
+        // themselves and Saturn did not, which is half of what "obvious" means for a premium shot.
+        // Placed beside the mouth's right jaw rather than below it: the corridor under Saturn is
+        // only ~65mm of clear playfield between the Vision Gate's upper post and Saturn's
+        // underside, and a label in it would sit on the approach tint and under the VISION GATE
+        // callout already there. Out to the right it has open board to itself.
+        {
+            createShotGlyph(scene, SHOT_GLYPH.saturn, SATURN_JAW.to.x + 0.030, SATURN_JAW.to.z + 0.020, '#ffb347');
+            // COMET, up its own lane and outboard of the tint, where the only thing nearby is the
+            // right orbit rail. Kept above the SATURN callout in z so the two read as labels on two
+            // different corridors rather than as one row of text across the middle of the board.
+            createShotGlyph(scene, SHOT_GLYPH.comet, 0.138, 0.168, '#66e0ff');
         }
 
         // Returned so main() can attach Stage 8's chakra-sparkle particle systems, animate
@@ -6689,7 +7517,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // register every lamp mesh (sideLaneLampMeshes/orbitLampMeshes: {id, mesh} pairs, the rest:
         // plain mesh arrays/refs) against the centralized lamp system (see createLampSystem()).
         return {
-            missionTargetMeshes, missionTargetLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
+            missionTargetMeshes, missionTargetLamps, shotChainLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
             sideLaneLampMeshes, orbitLampMeshes, debugTriggerMeshes,
             kickbackLampMesh, ballSaveLampMesh, saturnRings, saturnRim, cometTailMeshes, powerUpMesh, visionGateMesh: ring,
             visionGateHalo: halo, visionGateCollarMesh: collar, visionGateThroat: throat, visionGateBeacon: beacon
@@ -6746,6 +7574,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     const LAMP_REDUCED_MOTION_PERIOD_SCALE = 2.5;
 
     function createLampSystem() {
+        // leader id -> follower ids. Only written at registration, so the per-frame cost of the
+        // whole chain feature is one Map.get() inside setLampMode/flashLamp, which are event-time
+        // calls rather than per-frame ones. A follower in OFF/ON/LOCKED is a static material like
+        // any other lamp - updateLamps() touches it and changes nothing - so the chains add no
+        // continuous animation and nothing that scales with the fidelity tier.
+        const followers = new Map();
         const lamps = new Map();
         const scratch = new BABYLON.Color3(); // reused every frame - values only ever copied OUT of it, never held onto
 
@@ -6780,6 +7614,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 flashColor: null
             };
             lamps.set(id, lamp);
+            // opts.follows makes this lamp a SHADOW of another one: every setLampMode/flashLamp on
+            // the leader is replayed onto it. That is how the insert chains get their idle/active/
+            // hit behaviour without a single new piece of state or a single new call site - they
+            // are literally showing the feature's own lamp, one step further down the approach.
+            if (opts.follows) {
+                if (!followers.has(opts.follows)) followers.set(opts.follows, []);
+                followers.get(opts.follows).push(id);
+            }
             applyMode(lamp);
         }
 
@@ -6790,6 +7632,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const lamp = lamps.get(id);
             lamp.mode = mode;
             if (mode !== LAMP_MODE.BLINK && mode !== LAMP_MODE.PULSE) applyMode(lamp);
+            const chain = followers.get(id);
+            if (chain) chain.forEach((followerId) => setLampMode(followerId, mode));
         }
 
         // One-shot brief brightening on top of whatever persistent mode is already set (hit
@@ -6801,6 +7645,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             const lamp = lamps.get(id);
             lamp.flashColor = color || null;
             lamp.flashUntilMs = performance.now() + durationMs;
+            const chain = followers.get(id);
+            if (chain) chain.forEach((followerId) => flashLamp(followerId, durationMs, color));
         }
 
         // Called once per frame from the render loop. Cheap: every lamp gets one flash-expiry
@@ -6971,6 +7817,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         });
         obstacles.skillShotLampMeshes.forEach((mesh, i) => {
             lampSystem.registerLamp('skillShot' + i, mesh, COLOR_SKILL_SHOT_LAMP, LAMP_MODE.OFF);
+        });
+        // Insert chains. Registered LAST so every leader already exists, and with `follows` so the
+        // lamp system replays the leader's mode and flashes onto them - see createLampSystem().
+        obstacles.shotChainLamps.forEach((c) => {
+            lampSystem.registerLamp(c.id, c.mesh, c.color, LAMP_MODE.OFF, { follows: c.follows });
         });
         lampSystem.registerLamp('ballSave', obstacles.ballSaveLampMesh, COLOR_BALL_SAVE_LAMP, LAMP_MODE.OFF);
         lampSystem.registerLamp('kickback', obstacles.kickbackLampMesh, COLOR_KICKBACK_LAMP, LAMP_MODE.OFF);
@@ -8712,6 +9563,81 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // is a deliberate avoidance rather than an inconsistency: pulseMesh() scales the mesh, and
         // the comet is the one objective element carrying a physics body with an explicit collision
         // radius. Scaling it would be a mechanics change on a pass that is not allowed one.
+        // --- STATE-BASED ROUTE LIGHTING (user-requested) --------------------------------------
+        //
+        // Real controlled inserts, not nightclub lighting: while a vision is running, the route it
+        // asks for is held a step brighter, and it is held - one material write when the vision
+        // starts, one when it ends, nothing per frame, no blink, no pulse, no timer.
+        //
+        // It only ever RAISES the active route. Nothing is dimmed to make the emphasis read, so the
+        // rest of the board stays exactly as legible as it is with no vision running - which is the
+        // "do not darken unrelated gameplay" line, satisfied by construction rather than by taste.
+        //
+        // WHICH SURFACE EACH ROUTE USES was chosen by measuring what actually changes on screen,
+        // not by picking the nearest mesh:
+        //
+        //   bumper / CHAKRA AWAKENING   bumperBaseMat, the lathe skirt ringing every pop bumper at
+        //                               the playfield. Shared by all four, which is exactly what
+        //                               this vision means ("hit the pop bumpers", all of them), and
+        //                               a lit ring at the base of a pop bumper is what a real
+        //                               machine's insert under that fixture looks like. Its
+        //                               emissive is black at rest, so this lights something that
+        //                               was genuinely unlit rather than nudging something already
+        //                               glowing.
+        //   comet / ASTRAL PURSUIT      cometApproachMat, the lane floor tint the shot runs up.
+        //                               This one needs its ALPHA raised as well as its emissive,
+        //                               and that is a measured correction rather than a flourish:
+        //                               makeLaneFloorMat's third argument is the strip's alpha, not
+        //                               an emissive scale, so this tint sits at 14% opacity. Lifting
+        //                               only its emissive moved the rendered lane 1.05x - nothing.
+        //                               Raising both makes the corridor itself read.
+        //   lane / RETURN TO BODY       reentryTrimMat, the trim along the whole re-entry assembly
+        //                               - canopy caps, hanging dividers and the lane flanking rails
+        //                               - so the assembly reads as one lit feature, which is what
+        //                               "the re-entry lane assembly" means.
+        //
+        // WHAT IS DELIBERATELY NOT TOUCHED, and why each would be a bug:
+        //   - the bumpers' own bodies and lamp collars: pulseMesh/pulseBumperLamp save and restore
+        //     those on a 90ms timer, and two independent save/restore pairs on one material do not
+        //     compose (see cueMissionObjective's own comment for the exact failure).
+        //   - bumperCapMat and the comet's body: the 620ms selection CUE lifts those. This runs
+        //     BEFORE the cue in startMission, deliberately, so the cue snapshots the emphasised
+        //     value as its rest and settles back to it rather than undoing the emphasis.
+        //   - the re-entry lane lamps and their canopy domes: those are lamp-system state carrying
+        //     which lanes are still needed. Writing them here would overwrite real information.
+        //
+        // Every material below is written by this function and nothing else at runtime, which is
+        // what makes a plain save/restore safe here.
+        const ROUTE_EMPHASIS = {
+            bumper: [{ mat: 'bumperBaseMat', to: new BABYLON.Color3(0.10, 0.07, 0.13) }],
+            comet: [{ mat: 'cometApproachMat', to: COLOR_COMET.scale(0.34), alpha: 0.30 }],
+            lane: [{ mat: 'reentryTrimMat', to: COLOR_MISSION_ACTIVE.scale(0.22) }]
+        };
+        const routeEmphasisRest = new Map();   // material -> its true rest emissive (and alpha)
+        let emphasisedRoute = null;
+        function setRouteEmphasis(type) {
+            if (emphasisedRoute === type) return;
+            // Release whatever is held first, so switching visions can never leave two routes lit.
+            routeEmphasisRest.forEach((rest, mat) => {
+                mat.emissiveColor.copyFrom(rest.emissive);
+                if (rest.alpha !== undefined) mat.alpha = rest.alpha;
+            });
+            routeEmphasisRest.clear();
+            emphasisedRoute = type;
+            const plan = type ? ROUTE_EMPHASIS[type] : null;
+            if (!plan) return;
+            plan.forEach((step) => {
+                const mat = scene.getMaterialByName(step.mat);
+                if (!mat || !mat.emissiveColor) return;
+                routeEmphasisRest.set(mat, {
+                    emissive: mat.emissiveColor.clone(),
+                    alpha: step.alpha !== undefined ? mat.alpha : undefined
+                });
+                mat.emissiveColor.copyFrom(step.to);
+                if (step.alpha !== undefined) mat.alpha = step.alpha;
+            });
+        }
+
         function cueMissionObjective(index) {
             const type = MISSION_DEFS[index].type;
             if (type === 'lane') {
@@ -8819,6 +9745,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 'VISION: ' + MISSION_DEFS[index].name + ': ' + MISSION_DEFS[index].objective,
                 MISSION_SELECT_MESSAGE_MS
             );
+            // Hold this vision's route a step brighter for as long as it runs (see
+            // ROUTE_EMPHASIS). Before the cue on purpose: the cue's own lift snapshots whatever it
+            // finds as the rest value, so setting the emphasis first makes the 620ms flash settle
+            // back to the emphasised level instead of undoing it.
+            setRouteEmphasis(MISSION_DEFS[index].type);
             // Light the objective's own hardware, once, so the text above has something on the
             // table to point at. Runs last so it lands with the message rather than before it.
             cueMissionObjective(index);
@@ -8842,6 +9773,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.state = 'idle';
             mission.selectedIndex = null;
             mission.progress = 0;
+            setRouteEmphasis(null); // the vision is over - its route goes back to the rest level
+
             syncMissionTargetLamps(); // back to inviting the next vision
             // Bug fix (playtest audit): at the top rank (index RANK_NAMES.length - 1), mission.rank
             // was already capped by this same Math.min() below, but the message still read
@@ -9013,14 +9946,40 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         //
         // The shared cap material is deliberately excluded - flashing that one instance would
         // light up all four caps at once. Same reason the cap was already excluded before.
+        // Re-entrancy guard, same shape and same reason as liftEmissive()'s liftPending above -
+        // which documents this exact hazard for the mission cue and was the reason that cue was
+        // moved off these materials in the first place. This function had the unguarded version:
+        // it snapshotted whatever emissive it found, so a second pulse landing inside the first
+        // one's 90ms window captured the ALREADY-LIFTED value as its rest, and the later restore
+        // wrote the lifted value back permanently - the bumper stayed bright until something else
+        // happened to overwrite it.
+        //
+        // It survived because the cluster's old diamond geometry made a re-pulse inside 90ms
+        // essentially unreachable: isOnCooldown() gates this call at COOLDOWN_BUMPER_MS = 300ms per
+        // MESH, and the nearest other bumper was 160mm away. The shot-corridor refactor puts the
+        // four bumpers in a row 40mm apart edge to edge, which is what a pop-bumper nest is for -
+        // and a ball in a nest produces exactly the overlapping-contact pattern this could not
+        // survive. Caught by qa/skin-bumper-cap.js's revert check.
+        //
+        // Two details that matter: the lift is taken from REST (rest.scale(2.1)), never from the
+        // current value, so a re-pulse is 2.1x rather than 4.4x; and a re-pulse re-arms the timer
+        // rather than adding a second one, so there is always exactly one pending restore holding
+        // the one true rest value.
+        const bumperPulsePending = new Map(); // material -> { rest: Color3, timer }
         function pulseBumperLamp(meta) {
             const targets = [meta.bodyMat, meta.lampMat].filter((m) => m && m.emissiveColor);
             if (!targets.length) return;
-            const saved = targets.map((m) => m.emissiveColor.clone());
-            targets.forEach((m) => { m.emissiveColor = m.emissiveColor.scale(2.1); });
-            setTimeout(() => {
-                targets.forEach((m, k) => { if (m.emissiveColor) m.emissiveColor.copyFrom(saved[k]); });
-            }, 90);
+            targets.forEach((m) => {
+                const existing = bumperPulsePending.get(m);
+                const rest = existing ? existing.rest : m.emissiveColor.clone();
+                if (existing) clearTimeout(existing.timer);
+                m.emissiveColor = rest.scale(2.1);
+                const timer = setTimeout(() => {
+                    bumperPulsePending.delete(m);
+                    if (m.emissiveColor) m.emissiveColor.copyFrom(rest);
+                }, 90);
+                bumperPulsePending.set(m, { rest, timer });
+            });
         }
 
         // Physical hits: comet/slingshots already bounce the ball via restitution (set in
@@ -10534,6 +11493,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mission.selectedIndex = null;
             mission.progress = 0;
             mission.required = 0;
+            setRouteEmphasis(null); // a new game cannot inherit the last one's lit route
             syncMissionTargetLamps();
             mission.rank = 0;
             backglass.state.rank = RANK_NAMES[0];

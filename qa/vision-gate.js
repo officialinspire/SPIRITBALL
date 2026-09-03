@@ -9,7 +9,7 @@
 //   - every mechanic the polish pass was told to preserve - capture freezes the ball (ANIMATED),
 //     scoring fires, the eject returns it to DYNAMIC with the configured speed away from the gate,
 //     and the sequence still runs for VISION_GATE_SEQUENCE_MS;
-//   - the presentation hierarchy the pass established - throat < collar < halo < rim < beacon at
+//   - the presentation hierarchy the pass established - throat < collar < beacon < halo < rim at
 //     rest, and the gate becoming dramatically brighter ONLY during capture;
 //   - that idle costs no particles, which is the "no constant particle spam" line;
 //   - that reduced motion removes the spectral colour drift outright (a photosensitivity concern)
@@ -111,8 +111,27 @@ async function boot(browser, { reducedMotion } = {}) {
     lv('visionGateThroat') < lv('visionGateCollar'), { throat: lv('visionGateThroat'), collar: lv('visionGateCollar') });
   check('collar sits below the rim ring (housing reads dimmer than the mouth)',
     lv('visionGateCollar') < lv('visionGateRing'), { collar: lv('visionGateCollar'), rim: lv('visionGateRing') });
-  check('the beacon is the brightest element (it is the gate\'s long-range marker)',
-    lv('visionGateBeacon') > lv('visionGateRing'), { beacon: lv('visionGateBeacon'), rim: lv('visionGateRing') });
+  // The RIM is the brightest, not the beacon, and that reversal is deliberate - this assertion
+  // used to read the other way round.
+  //
+  // The beacon was a 115mm shaft at emissive 0.62, and from the real gameplay camera it was the
+  // worst piece of decoration on the table: a bloomed violet-white column standing out of the
+  // gate's own mouth and straight up through Saturn, i.e. across the two biggest destinations on
+  // the board, in the exact place a player has to watch the ball. The clutter pass cut it to 38mm
+  // at 0.26. Measured on Saturn's face along the beacon's own screen axis (a 12x65px strip), on
+  // colour rather than luminance because the shaft and the gold planet sit at the same brightness:
+  // mean violet cast 55.1 -> 4.8, and the share of that strip reading violet rather than gold
+  // 59.1% -> 15.9%.
+  //
+  // So the gate's long-range marker is now the RIM RING - the ring that actually draws the mouth's
+  // edge, which is what a scoop shot wants at the top of its hierarchy - and the beacon is a
+  // marker glow at the mouth that says "this hole is powered". What is still asserted is that the
+  // beacon is LIT and sits above the structural pieces; what is no longer asserted is that it
+  // out-shines the mouth it stands in.
+  check('the rim ring is the brightest element (it draws the mouth a scoop shot aims at)',
+    lv('visionGateRing') > lv('visionGateBeacon'), { rim: lv('visionGateRing'), beacon: lv('visionGateBeacon') });
+  check('the beacon is still lit, and above the structural collar',
+    lv('visionGateBeacon') > lv('visionGateCollar'), { beacon: lv('visionGateBeacon'), collar: lv('visionGateCollar') });
 
   console.log('\n=== NO CONSTANT PARTICLE SPAM WHILE IDLE ===');
   check('no gate particle system is running at rest', idle.gateParticleSystems.length === 0, idle.gateParticleSystems);
