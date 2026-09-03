@@ -3093,9 +3093,19 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // note is here so the next person to touch it knows the geometry they are drawing onto - and
     // so the bumperCap artwork spec in js/skins.js/SKINS.md is not mistakenly written to "match
     // the rings" that a player cannot actually see.
+    // MEASURED NEGATIVE, recorded so it is not attempted again: this face carries no readable
+    // motif at gameplay scale. A 'crown' variant was built for the chakra-nexus retheme - the
+    // twelve straight spokes below redrawn as twelve lotus petals for the BOSS bumper only - and
+    // then looked at on the real render. The boss's cap projects to roughly 30 x 15 pixels and the
+    // scene's lights blow it to a featureless white ellipse; neither the petals NOR the existing
+    // spokes resolve at all. The moulding here is worth keeping (it is what a close camera, a
+    // screenshot or a future skin sees) but nothing drawn on it can carry meaning during play.
+    // The one part of a bumper's cap that DOES read is the insert glyph sitting on it - measured
+    // at p90 255 by qa/visual-hierarchy.js - so that is where the boss's nexus mark went instead.
     function createBumperCapTexture(scene) {
         const size = 128;
-        const texture = new BABYLON.DynamicTexture('bumperCapTex', { width: size, height: size }, scene, true);
+        const texture = new BABYLON.DynamicTexture('bumperCapTex',
+            { width: size, height: size }, scene, true);
         const ctx = texture.getContext();
         const c = size / 2;
         ctx.fillStyle = '#f2f2f7';
@@ -4758,24 +4768,121 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         housingMat.roughness = 0.35;
 
         // Shared bevel-cap material for addRailBevel() above - a touch glossier than housingMat
-        // and lifted by a faint cool cyan glint, so every guide rail's raised cap reads as one
-        // consistent polished-trim language across the whole board (dividers, inlane guides,
-        // orbit rails, reentry-lane flanking rails), independent of whichever lane-specific lamp
-        // color happens to be nearby. One instance, reused by every addRailBevel() call below.
+        // and lifted by a faint cool cyan glint, so guide rails' raised caps read as one
+        // consistent polished-trim language, independent of whichever lane-specific lamp colour
+        // happens to be nearby.
+        //
+        // Since the vision-quest retheme this is the NEUTRAL trim rather than the only one: it
+        // still dresses the whole lower table (lane dividers, inlane guides, decor posts and
+        // every other post's sleeve cap) while the structures along the six named shot routes take
+        // a re-anodised copy of it - see routeTrimMat directly below, which is built from this
+        // material's own numbers so the two stay one family.
         const railCapMat = new BABYLON.PBRMaterial('railCapMat', scene);
         railCapMat.albedoColor = new BABYLON.Color3(0.18, 0.19, 0.22);
         railCapMat.metallic = 0.85;
         railCapMat.roughness = 0.22;
         // Lighting/material hierarchy pass (user-requested - "RAILS/STRUCTURE: metallic or
-        // physical-material definition"): this one material is reused by EVERY guide-rail bevel
-        // cap on the entire board (dividers, inlane guides, orbit rails, reentry-lane rails,
-        // target-bank header) - dozens of small instances all sharing one emissive value, so its
-        // brightness has an outsized cumulative effect on how "glowy vs. structural" the whole
-        // table reads. Cut to a quarter of its old value (was a fairly noticeable cyan glint) so
+        // physical-material definition"): this material and the route trims cloned from it below
+        // dress EVERY guide-rail bevel cap on the board - dozens of small instances all sharing
+        // one emissive value, so its brightness has an outsized cumulative effect on how "glowy
+        // vs. structural" the whole table reads. Cut to a quarter of its old value (was a fairly noticeable cyan glint) so
         // its "polished trim" read comes from the already-glossy metallic/roughness (0.85/0.22)
         // catching direct light, the same way real machined trim does, rather than from the trim
         // itself glowing.
         railCapMat.emissiveColor = new BABYLON.Color3(0.02, 0.05, 0.065);
+
+        // --- ROUTE TRIM (vision-quest retheme, user-requested) -------------------------------
+        // The board's guide hardware was one undifferentiated grey: every rail body in
+        // housingMat, every polished cap in the single railCapMat above. That is correct for a
+        // machine and wrong for THIS machine - the guides on a vision-quest table are the energy
+        // channels the ball is carried along, and a channel that belongs to a specific vision
+        // should say so. So the structures along the six named routes keep railCapMat's exact
+        // physical response and only take their route's HUE:
+        //
+        //   orbits          cosmic circulation      orbit cyan
+        //   Saturn          celestial trial         Saturn's gold
+        //   comet           astral pursuit          the comet's icy cyan
+        //   re-entry lanes  return-to-body pathway  the re-entry lamps' green
+        //   Vision Gate     the portal / third eye  gate violet
+        //   target bank     the chakra plates       the bank's own callout chakra
+        //
+        // What is deliberately NOT keyed is the whole lower table - lane dividers, inlane guides,
+        // slingshots, decor posts all stay in the neutral railCapMat. That is the point, not an
+        // omission: coloured trim MEANS "this is a vision route", and it can only mean that if
+        // the hardware around the flippers does not have it. It also reads as the theme's own
+        // structure - the lower table is the body you flip from, the upper table is the vision,
+        // and the re-entry lanes are the lit green pathway back down between them.
+        //
+        // Brightness is held, not raised, and that is what keeps this restrained rather than
+        // psychedelic. railCapMat's own comment records why its glint was cut to a quarter: it is
+        // reused by dozens of small instances and its emissive has an outsized cumulative effect
+        // on how glowy the table reads. So routeTrimMat holds BOTH of railCapMat's measured
+        // levels exactly - the albedo is re-tinted at railCapMat's own perceptual luminance, and
+        // the emissive glint is re-hued at railCapMat's own emissive luminance. Metallic and
+        // roughness are copied outright. The hue is carried by the albedo under the scene's
+        // direct lights (metallic 0.85 means albedo tints the specular, which is what makes a
+        // gold trim read as gold); the emissive is far too faint to glow on its own and is
+        // re-hued only so its faint lift is not a cyan one on a gold rail.
+        const TRIM_ALBEDO_LUM = 0.2126 * 0.18 + 0.7152 * 0.19 + 0.0722 * 0.22;
+        const TRIM_EMISSIVE_LUM = 0.2126 * 0.02 + 0.7152 * 0.05 + 0.0722 * 0.065;
+        const atLuminance = (color, target) => {
+            const lum = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+            return lum > 1e-6 ? color.scale(target / lum) : color.clone();
+        };
+        // TRIM_TINT is how far the grey is pulled toward the route colour. 0.55 keeps enough of
+        // railCapMat's neutral in the mix that the cap still reads as machined trim that happens
+        // to be anodised in the route's colour rather than as painted plastic.
+        //
+        // It is NOT the lever it looks like, and that is worth knowing before reaching for it.
+        // Raising it to 0.85 was tried and measured pixel-for-pixel on the real render at the
+        // exact cap pixels a visibility probe confirmed are front-most: Saturn's jaw cap moved
+        // [129,103,39] -> [129,103,33], the bank header [163,62,139] -> [165,61,139], and the
+        // orbit rail caps did not move at all. The reason is these caps' own physical response -
+        // metallic 0.85 at roughness 0.22 means most of what reaches the camera is a specular
+        // reflection of the scene's lights, not the albedo, so past about half tint the hue is
+        // already doing everything it can. 0.85 was reverted as a change that bought nothing.
+        //
+        // The same physics is why some routes read much more strongly than others. Measured at the
+        // same pixel before and after, on caps a visibility probe confirmed are front-most:
+        //
+        //   Saturn's jaw       [ 93,103,107] -> [168,119, 75]   gold, unmistakable
+        //   target-bank header [ 88, 97,127] -> [163, 62,139]   magenta, unmistakable
+        //   re-entry canopy    [ 86,104,125] -> [ 63,110, 88]   green, unmistakable
+        //   orbit rail         [ 77,102,122] -> [ 70,102,124]   slight
+        //   comet return rail  [ 89,111,135] -> [ 92,114,131]   negligible
+        //
+        // The three that land are chromatically far from the board's violet key light and cyan
+        // wall bounce, so their albedo survives the specular. Orbit cyan and the comet's icy cyan
+        // are nearly the colour of the light itself. That is accepted rather than fought: both of
+        // those routes are ALREADY cyan-coded by their own lamps and floor tints, so their trim
+        // agrees with them rather than correcting them, and the only thing that would force the
+        // hue through is lifting their emissive - exactly the glow railCapMat's comment above
+        // records cutting on purpose.
+        //
+        // Two more caps are keyed and simply are not in shot from the fixed gameplay camera:
+        // Saturn's two canopy segments sit BEHIND the planet (0/27 sample points visible) and the
+        // re-entry dividers hang behind the top rail. They are keyed anyway - the cost is zero,
+        // they are the same structures, and an inconsistent rule ("this rail is Saturn's, that one
+        // isn't, because of where the camera happens to be") is worse than an invisible one.
+        const TRIM_TINT = 0.55;
+        const routeTrimMat = (name, color) => {
+            const mat = new BABYLON.PBRMaterial(name, scene);
+            const grey = new BABYLON.Color3(0.18, 0.19, 0.22);
+            mat.albedoColor = atLuminance(new BABYLON.Color3(
+                grey.r + (color.r - grey.r) * TRIM_TINT,
+                grey.g + (color.g - grey.g) * TRIM_TINT,
+                grey.b + (color.b - grey.b) * TRIM_TINT), TRIM_ALBEDO_LUM);
+            mat.metallic = 0.85;   // railCapMat's exact values - this is the same trim, re-anodised
+            mat.roughness = 0.22;
+            mat.emissiveColor = atLuminance(color, TRIM_EMISSIVE_LUM);
+            return mat;
+        };
+        const orbitTrimMat = routeTrimMat('orbitTrimMat', COLOR_ORBIT_LAMP);
+        const saturnTrimMat = routeTrimMat('saturnTrimMat', COLOR_SATURN);
+        const cometTrimMat = routeTrimMat('cometTrimMat', COLOR_COMET);
+        const reentryTrimMat = routeTrimMat('reentryTrimMat', COLOR_MISSION_ACTIVE);
+        const gateTrimMat = routeTrimMat('gateTrimMat', COLOR_VISION_GATE);
+        const targetTrimMat = routeTrimMat('targetTrimMat', COLOR_CHAKRA[1]);
 
         // Shared dark-plastic collar for every playfield insert (see addPlayfieldInsert above).
         // Deliberately NOT housingMat: that one is dark METAL (metallic 0.8) and every insert
@@ -5083,7 +5190,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // createLabelPlane()'s DynamicTexture/emissiveTexture pattern instead of a bespoke
             // one - see this block's own comment for why that keeps a future textured-skin pass
             // to a one-line change. The boss gets its own glyph, a second cue that costs nothing.
-            const insert = createLabelPlane(scene, isBoss ? '\u2605' : '\u25c9', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: isBoss ? 34 : 30, planeSize: radius * 1.5 });
+            //
+            // Vision-quest retheme: the satellites keep U+25C9, a ringed dot, which is a chakra
+            // wheel; the boss's is now U+25C8, a diamond nested inside a diamond - something with
+            // a CENTRE, for the one bumper in the cluster that is the centre. It replaces U+2605,
+            // a star, which was doing two unrelated jobs on the same board (SHOT_GLYPH.comet is
+            // also a star, for the astral-pursuit shot) - so this both themes the nexus and leaves
+            // the star to mean one thing. Same Geometric Shapes block as every other glyph here,
+            // for the missing-glyph-box reason SHOT_GLYPH's own comment records.
+            //
+            // The glyph is where the boss's mark HAD to go: it is the only part of a bumper that
+            // survives to the player at gameplay scale (qa/visual-hierarchy.js measures these
+            // inserts at p90 255, against a cap face that blows out to a featureless ellipse -
+            // see createBumperCapTexture()'s own comment).
+            const insert = createLabelPlane(scene, isBoss ? '\u25c8' : '\u25c9', pos.x, pos.z, cssColor(HEX_BUMPERS[i % HEX_BUMPERS.length]), { transparent: true, fontSize: isBoss ? 34 : 30, planeSize: radius * 1.5 });
             insert.position.y = radius * 2.05;
             // Hierarchy pass: pure decoration on a tier-3 fixture, so it is stepped down with the
             // rest of the bumper. Deliberately not quoting a measured number for this one - the
@@ -5099,6 +5219,28 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             mesh.metadata = { kind: 'bumper', boss: isBoss, capMesh: cap, insertMesh: insert,
                               bodyMat: colorMat, lampMat: bumperLampMats[i % bumperLampMats.length] };
         });
+
+        // CHAKRA NEXUS - a MEASURED NEGATIVE, kept so the idea is not tried again. The cluster's
+        // gameplay fact is "one organ with a centre": BUMPER_CLUSTER[0] is the boss (bigger, worth
+        // SCORE_BOSS_BUMPER, its own message and pitch), the other three are satellites, and
+        // CHAKRA AWAKENING (MISSION_DEFS[0]) scores off all four as one target. The obvious way to
+        // draw that is three energy channels on the floor, one from each satellite into the boss,
+        // each in that satellite's own chakra colour.
+        //
+        // It was built exactly that way and then measured, by projecting a grid over each strip
+        // and asking the scene's own pick which mesh is front-most at those pixels: 2/27, 0/27 and
+        // 1/27 samples visible from the gameplay camera. Saturn stands directly in front of the
+        // cluster and each fixture's own lathe skirt covers the rest, so the cluster's FLOOR is
+        // very nearly not in shot at all - the parts of it a player sees are the domes, the lamp
+        // collars and the caps. Three meshes and three materials that render to about three
+        // pixels is the definition of what the clutter pass was for, so they were deleted rather
+        // than shipped.
+        //
+        // A second attempt put the mark on the boss's CAP FACE instead - see
+        // createBumperCapTexture()'s own comment for how that failed the same way, and for the
+        // measurement that finally located the one part of a bumper the player can actually read
+        // at gameplay scale: its insert glyph. That is where the nexus mark lives now (the boss's
+        // nested diamond against the satellites' chakra wheels, a few lines below).
 
         // CONFIG.colors.chakra (7 colors) - each mission target gets its own chakra color
         // (targets 0-2 use chakra[0-2]: violet, pink, yellow) instead of one shared color.
@@ -5363,7 +5505,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             header.position.set(headerX, 0.034, headerZ);
             header.rotation.y = bankRotationY;
             header.material = housingMat;
-            addRailBevel(scene, 'missionTargetHeaderCap', railCapMat, bankLength, 0.01, headerX, 0.037, headerZ, bankRotationY);
+            addRailBevel(scene, 'missionTargetHeaderCap', targetTrimMat, bankLength, 0.01, headerX, 0.037, headerZ, bankRotationY);
 
             // Approach tint, painted down the bank's OWN face normal - which, because the bank is
             // mounted square to the measured flipper approach, is the shot line itself. Same
@@ -5601,7 +5743,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // then rotationY = atan2(-dz, dx). Each segment is stretched 4% past its chord so
         // consecutive ones overlap rather than butting, for the same reason the orbit arcs are -
         // a butt joint leaves a hairline seam and a seam catches a rolling ball.
-        const guideRail = (name, pa, pb) => {
+        const guideRail = (name, pa, pb, capMat) => {
             const dx = pb.x - pa.x, dz = pb.z - pa.z;
             const len = Math.hypot(dx, dz);
             if (len < 1e-6) return;
@@ -5615,12 +5757,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             box.material = housingMat;
             box.metadata = { kind: 'wall' }; // reuses the generic wall shake/sound, same as the orbit rails
             new BABYLON.PhysicsAggregate(box, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
-            addRailBevel(scene, name + 'Cap', railCapMat, len * 1.04, 0.015, cx, 0.022, cz, rotY);
+            addRailBevel(scene, name + 'Cap', capMat || railCapMat, len * 1.04, 0.015, cx, 0.022, cz, rotY);
         };
         for (let i = 0; i < SATURN_CANOPY.length - 1; i++) {
-            guideRail('saturnCanopy' + i, SATURN_CANOPY[i], SATURN_CANOPY[i + 1]);
+            guideRail('saturnCanopy' + i, SATURN_CANOPY[i], SATURN_CANOPY[i + 1], saturnTrimMat);
         }
-        guideRail('saturnJaw', SATURN_JAW.from, SATURN_JAW.to);
+        guideRail('saturnJaw', SATURN_JAW.from, SATURN_JAW.to, saturnTrimMat);
         // Approach tint - the corridor the shot runs up, painted so the mouth reads as a route
         // rather than a gap between two obstacles. Decorative, height 0.001 at y 0.0012.
         addLaneFloorTint(scene, 'saturnApproachTint', saturnApproachMat,
@@ -5631,7 +5773,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // See COMET_RETURN_RAIL for the left-flipper band this lane was measured out of and every
         // clearance the rail is checked against. Built with the same helper as Saturn's own
         // framing directly above, so the two centre corridors are made of the same hardware.
-        guideRail('cometReturnRail', COMET_RETURN_RAIL.from, COMET_RETURN_RAIL.to);
+        guideRail('cometReturnRail', COMET_RETURN_RAIL.from, COMET_RETURN_RAIL.to, cometTrimMat);
         // Laid along the 16-degree shot line rather than the board's axis. addLaneFloorTint's
         // `depth` runs along the strip's local Z, and rotationY = the lane's own angle puts that
         // local Z on the shot line - so the tint is drawn where the ball actually travels.
@@ -5871,13 +6013,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // four lane-divider caps rendered as pale discs that pulled the eye to the quietest corner
         // of the table (checked against the previous frame from the gameplay camera). Inset, they
         // read as the cap on top of a sleeve, which is the point.
-        const dressPostAsRubber = (post, diameter, topY) => {
+        const dressPostAsRubber = (post, diameter, topY, capMat) => {
             post.material = postRubberMat;
             const cap = BABYLON.MeshBuilder.CreateCylinder(post.name + 'Cap', {
                 diameter: diameter * 0.8, height: 0.0025
             }, scene);
             cap.position.set(post.position.x, topY, post.position.z);
-            cap.material = railCapMat;
+            // Neutral trim by default - see routeTrimMat's own comment for why only the vision
+            // routes are keyed. The Vision Gate's three guard posts pass their own.
+            cap.material = capMat || railCapMat;
             return cap;
         };
 
@@ -6118,7 +6262,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // runs along Z (not the X-then-rotated convention every other rail below uses), so
                 // the cap is built the same "long along local X" way and then rotated 90 degrees
                 // to match, rather than swapping which of width/depth means "length" in the helper.
-                addRailBevel(scene, 'reentryLane' + i + 'RailCap' + side, railCapMat, REENTRY_LANE_RADIUS_M * 2.4, 0.004, railX, 0.023, pos.z, Math.PI / 2);
+                addRailBevel(scene, 'reentryLane' + i + 'RailCap' + side, reentryTrimMat, REENTRY_LANE_RADIUS_M * 2.4, 0.004, railX, 0.023, pos.z, Math.PI / 2);
             });
         });
 
@@ -6166,7 +6310,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 }, scene);
                 cap.position.set(cx, CANOPY_Y + 0.0038, cz);
                 cap.rotation.y = rotY;
-                cap.material = railCapMat;
+                cap.material = reentryTrimMat;
             }
             // Dividers, hung from the canopy between adjacent lanes. They stop 10mm above the ball
             // rather than reaching the playfield, so they divide the lanes to the eye without
@@ -6178,7 +6322,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     width: 0.004, height: h, depth: 0.010
                 }, scene);
                 fin.position.set((a.x + b.x) / 2, CANOPY_FIN_BOTTOM_Y + h / 2, (a.z + b.z) / 2);
-                fin.material = railCapMat;
+                fin.material = reentryTrimMat;
             }
         }
 
@@ -6434,7 +6578,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 box.material = housingMat;
                 box.metadata = { kind: 'wall' }; // reuses the existing generic wall camera-shake/sound feedback, same as the inlane/outlane rails
                 new BABYLON.PhysicsAggregate(box, BABYLON.PhysicsShapeType.BOX, { mass: 0, restitution: 0.4, friction: 0.5 }, scene);
-                addRailBevel(scene, name + 'Cap', railCapMat, len * 1.04, ORBIT_RAIL_DEPTH_M, cx, 0.022, cz, rotY);
+                addRailBevel(scene, name + 'Cap', orbitTrimMat, len * 1.04, ORBIT_RAIL_DEPTH_M, cx, 0.022, cz, rotY);
             };
 
             // Walks one arc from `fromSweep` to `toSweep` at a fixed radius, emitting one box per
@@ -6491,7 +6635,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     width: Math.abs(wallX - railMidX) * 0.86, height: 0.0016, depth: 0.006
                 }, scene);
                 cap.position.set((wallX + railMidX) / 2, ORBIT_LANE_BRIDGE_Y_M + 0.0038, ORBIT_LANE_BRIDGE_Z_M);
-                cap.material = railCapMat;
+                cap.material = orbitTrimMat;
             }
 
             // Inner lip on the lower half of the top turn - see ORBIT_TOP_LIPS for the exit probe
@@ -6830,7 +6974,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // them scattering a miss back toward an inlane. Restitution 0.5, the liveliest of the
             // board's rubber, which is what that scattering is. Drawn as rubber so the collar reads
             // as the thing it is.
-            dressPostAsRubber(post, 0.009, 0.0265);
+            dressPostAsRubber(post, 0.009, 0.0265, gateTrimMat);
             post.metadata = { kind: 'wall' };
             new BABYLON.PhysicsAggregate(post, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, restitution: 0.5, friction: 0.4 }, scene);
         });

@@ -27,8 +27,12 @@ const OUT = process.env.OUT || require('os').tmpdir();
 const PORT = process.env.PORT || 8971;
 const TAG = 'qa';
 
-// Shot callouts = pure decoration. Bumper inserts (labelPlane★ / labelPlane◉) are gameplay markers
+// Shot callouts = pure decoration. Bumper inserts (labelPlane◈ / labelPlane◉) are gameplay markers
 // on the bumpers and are NOT in this list.
+// labelPlane◈ is the BOSS bumper's insert. It used to be labelPlane★, and the vision-quest retheme
+// moved it to a nested diamond so the star could belong to the comet callout alone - if this list
+// still said ★ the boss's insert would silently drop out of the marker set that assertion 4 below
+// checks was not dimmed along with the signage.
 // The split follows createLabelPlane()'s own discriminator, not a guess: a label that draws itself
 // a background chip is a named callout (decoration that names a shot and carries no state); every
 // chipless user is a gameplay marker sitting on its own lamp. The inlane/outlane flow arrows are
@@ -36,7 +40,7 @@ const TAG = 'qa';
 // and duly reported the game for not dimming them.
 const DECOR_LABELS = ['labelPlaneLORBIT','labelPlaneRORBIT','labelPlaneVISIONGATE','labelPlaneTARGETS',
                       'labelPlaneSKILLSHOT','labelPlaneKICKBACK'];
-const GAMEPLAY_LABELS = ['labelPlane★','labelPlane◉','labelPlane▲','labelPlane▼'];
+const GAMEPLAY_LABELS = ['labelPlane◈','labelPlane★','labelPlane◉','labelPlane▲','labelPlane▼'];
 
 function decodePng(file) {
   const buf = fs.readFileSync(file); let p = 8, w = 0, h = 0, ct = 0, idat = [];
