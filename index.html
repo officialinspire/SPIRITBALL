@@ -1183,6 +1183,28 @@
             user-select: none;
         }
 
+        /* Touch layouts draw #mobile-controls - the two flipper arrows and the LAUNCH button -
+           across the bottom of the screen BEHIND this overlay. They are inert while the title
+           screen is up, but they are clearly visible through its graded scrim, and the bottom of
+           the action block was landing straight on the launch button's label: measured at
+           320x568 the launch button's top edge is y=456 with the block running to y=544, and at
+           390x844 it is y=730 against y=810. Reserving the controls' own height as bottom padding
+           lifts the whole block clear in one move, rather than nudging whichever element happens
+           to be last today.
+
+           The floor is set from the two real cases: 4vh + 92px covers 390 and up (125.8px there,
+           against 114px of controls), and the flat 116px covers 320, where 4vh is only 22.7px.
+
+           Same three-selector platform split every other touch/desktop rule on this screen uses -
+           the media query is the pre-JS guess, [data-touch-controls] is the game's own answer once
+           updateMobileControlsVisibility() has decided, and "off" must actively undo the query in
+           case a desktop browser reports a coarse pointer. */
+        @media (hover: none) and (pointer: coarse) {
+            #menu-overlay { padding-bottom: max(calc(4vh + 92px), 116px); }
+        }
+        html[data-touch-controls="on"] #menu-overlay { padding-bottom: max(calc(4vh + 92px), 116px); }
+        html[data-touch-controls="off"] #menu-overlay { padding-bottom: max(4vh, 24px); }
+
         #menu-overlay .title-actions {
             width: 100%;
             max-width: 640px;
@@ -1505,6 +1527,58 @@
         html[data-touch-controls="off"] #menu-overlay .title-hint span.hint-desktop { display: block; }
         html[data-touch-controls="off"] #menu-overlay .title-hint span.hint-touch { display: none; }
 
+        /* ===== SETTINGS button + INSPIRE wordmark (Phase 4) ===============================
+           Both live inside .title-actions rather than as new children of #menu-overlay, which is
+           justify-content: space-between with exactly two children - a third child would silently
+           become the middle of that distribution and pull the marquee and the action block apart.
+           Inside the bottom block they simply stack under the CTA, which is where they belong. */
+        #menu-overlay .title-settings-btn {
+            /* Overrides .screen-overlay button's 240px floor and its 16px/30px padding: this is a
+               secondary control on a screen with one primary action, and it should not read as a
+               second START. min-height carries the touch target the smaller type gives up. */
+            min-width: 0;
+            min-height: 44px;
+            padding: 0 26px;
+            margin: clamp(10px, 2.2vh, 16px) 0 0;
+            border-radius: 999px;
+            font-size: clamp(11px, 3vw, 13px);
+            letter-spacing: 0.24em;
+            text-indent: 0.24em;       /* pays back the trailing letter-space so it stays centred */
+            color: var(--glyph-gold);
+            text-shadow: var(--carve-gold);
+        }
+        #menu-overlay .title-settings-btn:hover,
+        #menu-overlay .title-settings-btn:focus-visible {
+            color: #f2e0be;
+        }
+
+        #menu-overlay .title-brand {
+            display: block;
+            /* Sized by width; height follows the intrinsic 600x181 ratio, so the mark is never
+               stretched at any viewport. */
+            width: clamp(96px, 26vw, 156px);
+            height: auto;
+            margin: clamp(16px, 3.4vh, 26px) auto 0;
+            /* The home indicator / gesture bar sits over the bottom of a full-screen overlay on
+               iOS; this keeps the mark clear of it without adding space anywhere it is not
+               needed. #menu-overlay's own bottom padding is the floor underneath it. */
+            margin-bottom: env(safe-area-inset-bottom, 0px);
+            /* Branding, not an interface element: it sits back from the CTA above it rather than
+               competing with it for the eye. */
+            opacity: 0.55;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        /* Narrow phones: the mark gives up size before the hint line above it gives up a row. */
+        @media (max-width: 360px) {
+            #menu-overlay .title-brand { width: 92px; margin-top: 12px; }
+        }
+        /* Short viewports have no room for decoration under the hint - the CTA and the control
+           hints are the content, so the mark shrinks rather than pushing them into a scroll. */
+        @media (max-height: 620px) {
+            #menu-overlay .title-brand { width: 84px; margin-top: 10px; opacity: 0.45; }
+        }
+
         /* Shortest supported viewports (iPhone SE and similar in landscape-ish crops): the marquee
            gives up its rule and some tracking before anything is allowed to scroll or collide. */
         /* Narrowest widths: the hint gives up tracking before it gives up a second line. */
@@ -1535,8 +1609,16 @@
            with a large, unbalanced block of empty space below their buttons on most screens.
            Centered here instead; #gameover-overlay keeps the original top-anchored treatment
            below, since its longer and more variable content still needs to start from the top
-           and scroll on short viewports. */
-        #pause-overlay, #controls-overlay {
+           and scroll on short viewports.
+
+           #controls-overlay LEFT this pair in Phase 4. The premise above - "short, fixed-height
+           content that always fits a single screen" - stopped being true of it the moment the
+           audio settings were added: the card grew ~250px and now overflows a 320x568 phone and a
+           1280x600 desktop window. It takes #gameover-overlay's treatment instead (auto block
+           margins on the card, see the very next rule), which centres identically while there is
+           room and top-anchors instead of clipping when there is not. #pause-overlay is unchanged
+           - its content really is fixed-height. */
+        #pause-overlay {
             justify-content: center;
         }
 
@@ -2372,6 +2454,180 @@
             #pause-overlay h1 { font-size: 24px; }
         }
 
+        /* ==========================================================================
+           SETTINGS PANEL (Phase 4). Everything here is drawn from the tablet tokens already in
+           :root - stone, carved edge, ivory glyph, violet light from inside, gold as the single
+           accent. No new palette, no new font, no library, and no external face: the sliders are
+           native <input type="range"> with their tracks and thumbs repainted, so every keyboard
+           interaction and AT announcement is the platform's, not a reimplementation.
+           ========================================================================== */
+        /* The settings block makes this card ~250px taller than the bare controls reference was,
+           which is enough to overflow a 320x568 phone and a 1280x600 desktop window. A CENTRED
+           flex item taller than its scroll container has its top pushed above the scroll origin
+           and left unreachable - measured at -49px on the phone and -63px on the short desktop,
+           i.e. the heading was cut off and no amount of scrolling brought it back. Auto margins
+           are the fix, and they only work with the overlay's justify-content:center REMOVED (see
+           the rule that drops #controls-overlay from that pair): negative free space makes auto
+           margins resolve to zero and hands the distribution straight back to justify-content. */
+        #controls-overlay .overlay-card { margin: auto; }
+
+        .settings-block {
+            margin: 4px 0 22px 0;
+            text-align: left;
+            /* A cut recess in the card's face, the same device the pause panel's rows use, so
+               the audio controls read as an inset instrument rather than a form pasted on. */
+            border-top: 1px solid var(--tablet-edge);
+            border-bottom: 1px solid var(--tablet-edge);
+            padding: 16px 0 18px;
+        }
+        .settings-heading {
+            font-family: var(--mystic-ui-font);
+            font-size: clamp(10px, 2.6vw, 12px);
+            font-weight: 600;
+            letter-spacing: 0.28em;
+            text-indent: 0.28em;
+            text-transform: uppercase;
+            color: var(--glyph-gold);
+            text-shadow: var(--carve);
+            margin: 0 0 14px 0;
+        }
+        /* The mute button keeps #mute-toggle-btn's identity and inherits .screen-overlay button,
+           so only what makes it a full-width row inside the block is restated here. */
+        #controls-overlay .settings-toggle {
+            display: block;
+            width: 100%;
+            min-width: 0;
+            min-height: 48px;          /* comfortably past the 44px touch floor */
+            margin: 0 0 18px 0;
+            padding: 12px 18px;
+            font-size: clamp(13px, 3.4vw, 16px);
+            letter-spacing: 0.12em;
+        }
+        /* Pressed = muted. Stated in the same carved language as everything else - a dimmer
+           glyph and a recessed face - rather than a second colour. */
+        #controls-overlay .settings-toggle[aria-pressed="true"] {
+            color: var(--glyph-muted);
+            box-shadow:
+                inset 0 2px 5px rgba(0, 0, 0, 0.8),
+                inset 0 -1px 0 rgba(238, 224, 255, 0.07),
+                0 0 0 1px rgba(0, 0, 0, 0.5);
+        }
+
+        .settings-row + .settings-row { margin-top: 16px; }
+        .settings-row-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .settings-label {
+            font-family: var(--mystic-ui-font);
+            font-size: clamp(11px, 3vw, 13px);
+            font-weight: 600;
+            letter-spacing: 0.16em;
+            color: var(--glyph-primary);
+            text-shadow: var(--carve);
+            cursor: pointer;           /* it is a real <label for> - clicking it takes the slider */
+        }
+        .settings-value {
+            /* SCORE role: the same tabular figures every other number on this machine is set in,
+               so the readout does not jitter its own width as the player drags. */
+            font-family: var(--mystic-score-font);
+            font-variant-numeric: tabular-nums;
+            font-size: clamp(13px, 3.4vw, 15px);
+            color: var(--glyph-gold);
+            text-shadow: var(--carve-gold);
+            min-width: 3ch;
+            text-align: right;
+        }
+
+        /* --- the range itself ---------------------------------------------------------------
+           height carries the 44px touch target; the visible track is 6px drawn inside it, which
+           is why the thumb needs its own negative margin to sit centred on the track rather than
+           on the box. */
+        .settings-range {
+            -webkit-appearance: none;
+            appearance: none;
+            display: block;
+            width: 100%;
+            height: 44px;
+            margin: 2px 0 0;
+            padding: 0;
+            background: transparent;
+            cursor: pointer;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .settings-range::-webkit-slider-runnable-track {
+            height: 6px;
+            border-radius: 3px;
+            background:
+                linear-gradient(180deg, rgba(0, 0, 0, 0.7) 0%, rgba(90, 50, 150, 0.22) 100%),
+                var(--tablet-stone);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.85),
+                0 0 0 1px var(--tablet-edge);
+        }
+        .settings-range::-moz-range-track {
+            height: 6px;
+            border-radius: 3px;
+            background:
+                linear-gradient(180deg, rgba(0, 0, 0, 0.7) 0%, rgba(90, 50, 150, 0.22) 100%),
+                var(--tablet-stone);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.85),
+                0 0 0 1px var(--tablet-edge);
+        }
+        /* Firefox only: the filled portion. Chromium has no equivalent pseudo-element, so the
+           track there is uniform - a difference in decoration, never in what the control does. */
+        .settings-range::-moz-range-progress {
+            height: 6px;
+            border-radius: 3px;
+            background: linear-gradient(90deg, rgba(158, 112, 255, 0.45), rgba(216, 184, 122, 0.7));
+        }
+        .settings-range::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            margin-top: -7px;          /* (20 - 6) / 2, so it rides the track's centreline */
+            border-radius: 50%;
+            border: 1px solid var(--tablet-edge-strong);
+            background:
+                radial-gradient(circle at 50% 34%, #fdf7ff 0%, var(--glyph-gold) 46%, #6a4a1f 100%);
+            box-shadow:
+                0 0 0 1px rgba(0, 0, 0, 0.7),
+                0 0 10px rgba(158, 112, 255, 0.35);   /* restrained: light on the stone, not neon */
+        }
+        .settings-range::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 1px solid var(--tablet-edge-strong);
+            background:
+                radial-gradient(circle at 50% 34%, #fdf7ff 0%, var(--glyph-gold) 46%, #6a4a1f 100%);
+            box-shadow:
+                0 0 0 1px rgba(0, 0, 0, 0.7),
+                0 0 10px rgba(158, 112, 255, 0.35);
+        }
+        /* Keyboard focus must be as visible here as on the buttons - the sliders are the one
+           place a player will actually use arrow keys. Drawn around the whole 44px box so it is
+           unmistakable, not a ring on a 20px thumb. */
+        .settings-range:focus { outline: none; }
+        .settings-range:focus-visible {
+            outline: 2px solid rgba(255, 248, 235, 0.95);
+            outline-offset: -4px;
+            border-radius: 8px;
+        }
+        .settings-range:focus-visible::-webkit-slider-thumb {
+            box-shadow:
+                0 0 0 1px rgba(0, 0, 0, 0.7),
+                0 0 14px rgba(158, 112, 255, 0.6);
+        }
+        @media (prefers-reduced-motion: no-preference) {
+            .settings-range::-webkit-slider-thumb { transition: box-shadow 140ms ease-out; }
+        }
+
         #controls-rows { margin: 12px 0 24px 0; }
         .control-row { margin-bottom: 20px; }
         .control-row .key {
@@ -3037,11 +3293,26 @@
                      repeating the verb. -->
                 <span class="start-anywhere sa-touch">anywhere on screen</span>
             </button>
+            <!-- The one control on this screen that is NOT "start the game". It stops its own
+                 click from reaching the overlay's click-anywhere handler (see babylon-game.js) -
+                 without that, opening settings would also dismiss the title screen underneath it.
+                 Deliberately secondary in weight: a title screen has one primary action. -->
+            <button type="button" class="title-settings-btn" id="menu-settings-btn">SETTINGS</button>
             <p class="title-hint">
                 <span class="hint-desktop">&#8592; &#8594; FLIPPERS &nbsp;&middot;&nbsp; SPACE LAUNCH &nbsp;&middot;&nbsp; ESC PAUSE</span>
                 <span class="hint-touch">&#9664; &#9654; BUTTONS FLIP &nbsp;&middot;&nbsp; HOLD &#9889; TO LAUNCH</span>
-                <span class="hint-sound">SOUND &#8594; PAUSE &#8594; CONTROLS</span>
+                <!-- Was "SOUND -> PAUSE -> CONTROLS", which described the only route to the sound
+                     toggle when the pause panel was the only way in. There is a button for it on
+                     this screen now, so the line names that instead of a stale path. -->
+                <span class="hint-sound">SOUND &amp; CONTROLS &#8594; SETTINGS</span>
             </p>
+            <!-- INSPIRE wordmark. Decorative branding and nothing else: no link, no handler, no
+                 role - a click on it is a click on the title screen, which starts the game like a
+                 click anywhere else does. The alt text is the words in the mark, which is what a
+                 wordmark's alt text is for; `width`/`height` are the real intrinsic pixels so the
+                 box is reserved before the file loads and the bottom block cannot shift. -->
+            <img class="title-brand" id="menu-logo" src="./logo.png" alt="INSPIRE"
+                 width="600" height="181" decoding="async">
         </div>
     </div>
 
@@ -3103,14 +3374,45 @@
     </div>
 
     <div id="controls-overlay" class="screen-overlay" role="dialog" aria-modal="true" aria-labelledby="controls-overlay-heading">
+        <!-- ONE panel, two doors. This screen is reached from the pause menu (as CONTROLS) and
+             from the title screen (as SETTINGS), and it is deliberately the same card rather than
+             a second screen that would have to be kept in sync: the controls reference and the
+             audio settings are both "how the machine is set up for me". babylon-game.js tracks
+             which door was used in controlsReturnTo and retitles the heading to match, and BACK
+             goes back the way the player came. -->
         <div class="overlay-card">
             <h1 id="controls-overlay-heading">CONTROLS</h1>
             <div id="controls-rows"></div>
-            <!-- Mute control (improvement-prompts/04-*.md) - the natural home for this per that
-                 prompt's own instruction, matching where the 2D game's Sound/Music toggle used to
-                 live before it was removed for being non-functional (archive/release-prompts/04-*.md)
-                 and this screen took its place. -->
-            <button id="mute-toggle-btn">🔊 SOUND: ON</button>
+            <!-- Audio settings (improvement-prompts/04-*.md's mute toggle, now with the two
+                 volumes the Phase 1 controller already carried but nothing exposed). Native
+                 <input type="range"> throughout: keyboard support (arrows / Home / End / Page
+                 Up/Down), the correct AT role and value announcements, and the platform's own
+                 drag behaviour all come free and cannot drift from what the CSS draws. -->
+            <section class="settings-block" aria-labelledby="settings-audio-heading">
+                <h2 class="settings-heading" id="settings-audio-heading">AUDIO</h2>
+                <!-- id preserved: this is the same button and the same handler it has always
+                     been, now carrying aria-pressed so its state is announced rather than only
+                     drawn in its own label text. -->
+                <button type="button" id="mute-toggle-btn" class="settings-toggle" aria-pressed="false">🔊 SOUND: ON</button>
+                <div class="settings-row">
+                    <div class="settings-row-head">
+                        <label class="settings-label" for="music-volume">MUSIC VOLUME</label>
+                        <!-- aria-hidden: the range announces its own value, so exposing this too
+                             would read the number twice. It is here to be SEEN. -->
+                        <output class="settings-value" id="music-volume-value" aria-hidden="true">55</output>
+                    </div>
+                    <input class="settings-range" type="range" id="music-volume" name="music-volume"
+                           min="0" max="100" step="1" value="55">
+                </div>
+                <div class="settings-row">
+                    <div class="settings-row-head">
+                        <label class="settings-label" for="sfx-volume">SFX VOLUME</label>
+                        <output class="settings-value" id="sfx-volume-value" aria-hidden="true">100</output>
+                    </div>
+                    <input class="settings-range" type="range" id="sfx-volume" name="sfx-volume"
+                           min="0" max="100" step="1" value="100">
+                </div>
+            </section>
             <button id="controls-back-btn">◄ BACK</button>
         </div>
     </div>

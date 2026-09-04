@@ -331,6 +331,54 @@ async function playToGameOver(page) {
     await context.close();
   }
 
+  // ------------------------------------------------------- settings panel (Phase 4)
+  console.log('\n=== SETTINGS KEEPS THE SCENE IT WAS OPENED OVER ===');
+  {
+    // The panel is one card behind two doors, and the two doors sit over two different scenes.
+    // Opening it must not change what is playing by either route - a settings screen that stops
+    // the music to talk about the music is the specific failure here.
+    const { context, page, musicRequests } = await newPage(browser);
+    await unlockByKey(page);
+    await waitUntil(page, settledAt('cosmicDrift', 1));
+
+    await page.click('#menu-settings-btn');
+    await page.waitForTimeout(600);
+    const inSettings = await state(page);
+    check('settings from the menu keeps the menu track at full gain',
+      inSettings.key === 'cosmicDrift' && inSettings.scene === 'menu'
+      && Math.abs(inSettings.trackGain - 1) < 0.02, inSettings);
+    check('and started nothing new', inSettings.cachedBuffers === 1 && musicRequests.length === 1,
+      { s: inSettings, req: musicRequests.length });
+
+    await page.click('#controls-back-btn');
+    await page.waitForTimeout(600);
+    const backAtMenu = await state(page);
+    check('BACK to the menu restores the menu scene', backAtMenu.key === 'cosmicDrift'
+      && backAtMenu.scene === 'menu' && Math.abs(backAtMenu.trackGain - 1) < 0.02, backAtMenu);
+
+    // Now the other door, over the ducked gameplay track.
+    await page.keyboard.press('Space');
+    await waitUntil(page, settledAt('multiverseVelocity', 1));
+    await page.click('#pause-btn');
+    await waitUntil(page, settledAt('multiverseVelocity', 0.35));
+    await page.click('#pause-controls-btn');
+    await page.waitForTimeout(600);
+    const fromPause = await state(page);
+    check('settings from pause keeps the gameplay track ducked, not stopped or restarted',
+      fromPause.key === 'multiverseVelocity' && fromPause.scene === 'paused'
+      && Math.abs(fromPause.trackGain - 0.35) < 0.03, fromPause);
+    await page.click('#controls-back-btn');
+    await page.waitForTimeout(600);
+    const backAtPause = await state(page);
+    check('BACK to pause is still the ducked gameplay scene',
+      backAtPause.key === 'multiverseVelocity' && backAtPause.scene === 'paused'
+      && Math.abs(backAtPause.trackGain - 0.35) < 0.03, backAtPause);
+    check('the whole settings detour created no new source or fetch',
+      backAtPause.cachedBuffers === 2 && musicRequests.length === 2,
+      { s: backAtPause, req: musicRequests.length });
+    await context.close();
+  }
+
   // ------------------------------------------------------- declared fade lengths
   console.log('\n=== TRANSITION LENGTHS ===');
   {

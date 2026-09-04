@@ -748,6 +748,18 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             || startupPhase === PHASE.INTRO;
     }
 
+    // Settings/controls panel (Phase 4). Which door it was entered by, and therefore where BACK
+    // goes; null means it is closed. Written by openControlsScreen()/closeControlsScreen() inside
+    // main().
+    //
+    // Declared HERE, at module scope, rather than beside those functions. The input handlers that
+    // consult it are registered early in main() but the panel's own block is ~3500 lines further
+    // down, and main() awaits Havok in between - a key pressed during that window would hit a
+    // `let` in its temporal dead zone and throw straight into showFatalError(). The startup phase
+    // is declared up here for the same reason.
+    let controlsReturnTo = null;
+    function isControlsUp() { return controlsReturnTo !== null; }
+
     // ?dev=1 skips gate+intro and lands on the menu, which is exactly the flow every existing
     // automated test was written against - qa/menu-interaction.js and friends open ?dev=1 and
     // expect the title screen immediately. ?dev=1&intro=1 opts a dev/QA session back into the
@@ -8607,6 +8619,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // full-screen overlay and nothing behind it may respond. The overlays block the
             // pointer; only this blocks the keyboard.
             if (startupBlocksInput()) return;
+            // Phase 4: the player is inside the settings panel, where Left/Right belong to a
+            // focused slider. Only the PRESS is gated - the keyup below stays unconditional on
+            // purpose (see its own comment): a flipper stuck up is worse than a stray no-op.
+            if (isControlsUp()) return;
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             // Optional "lane change" mechanic (rotateLaneLamps()) - checked on the off->on edge,
             // BEFORE activateFlipper() flips flipper.active to true, same guard activateFlipper()
@@ -9010,6 +9026,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         let suppressNextLaunchRelease = false;
         window.addEventListener('keydown', (e) => {
             if (e.code !== 'Space') return;
+            // Phase 4, and deliberately BEFORE the preventDefault below. Space on the settings
+            // panel belongs to whatever button has focus there, and preventDefault on a Space
+            // keydown is exactly what cancels a native button's activation - gating after it
+            // would leave SOUND and BACK un-pressable by keyboard.
+            if (isControlsUp()) return;
             e.preventDefault(); // stop the page from scrolling on spacebar
             // Phase gate: the gate's own button and the intro's Space handler own this key until
             // the menu exists. Without this, the starting gesture would fall through here and
@@ -9058,6 +9079,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         });
         window.addEventListener('keyup', (e) => {
             if (e.code !== 'Space') return;
+            // Pairs with the keydown gate: that one blocked the press, so there is no charge this
+            // could strand, and an ungated release here would launch off a press that never
+            // happened (handleLaunchRelease deliberately needs no matching press).
+            if (isControlsUp()) return;
             if (startupBlocksInput()) return; // see the keydown gate above
             if (suppressNextLaunchRelease) {
                 suppressNextLaunchRelease = false;
@@ -11646,6 +11671,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         let menuUp = false;
         const pauseOverlay = document.getElementById('pause-overlay');
         const controlsOverlay = document.getElementById('controls-overlay');
+        const controlsHeading = document.getElementById('controls-overlay-heading');
         const gameOverOverlay = document.getElementById('gameover-overlay');
         const pauseBtn = document.getElementById('pause-btn');
 
@@ -11938,6 +11964,22 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             endAttractMode();
         });
 
+        // SETTINGS, the one control on the title screen that is not "start". The overlay's
+        // click-anywhere listener directly above is the whole reason both calls are here:
+        // without stopPropagation this button's click would bubble straight into it and start the
+        // game underneath the panel it just opened, and without preventDefault a keyboard
+        // activation would also deliver a Space keyup to the launch handler. Exactly the boundary
+        // the intro's Skip button had to draw for the same reason (Phase 2).
+        const menuSettingsBtn = document.getElementById('menu-settings-btn');
+        if (menuSettingsBtn) {
+            menuSettingsBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+            menuSettingsBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openControlsScreen('menu');
+            });
+        }
+
         // --- Controls reference content, platform-aware (archive/release-prompts/04-*.md's content -
         // this already-replaced the old non-functional sound/music toggle with a real controls
         // reference; that decision carries over unchanged, just re-rendered as DOM). ---
@@ -12021,7 +12063,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             setAudioScene('gameplay');
             scene.physicsEnabled = true;
             pauseOverlay.style.display = 'none';
-            controlsOverlay.style.display = 'none';
+            closeControlsScreen();
             // Run any drain outcome (game over or ball reset) that was deferred because it would
             // otherwise have fired invisibly underneath the pause overlay - see handleDrain()'s
             // pendingDrainAction comment.
@@ -12039,18 +12081,58 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }
         }
 
-        function openControlsScreen() {
-            pauseOverlay.style.display = 'none';
+        // Which door the settings/controls panel was entered by, and therefore where BACK goes.
+        // null means the panel is closed.
+        //
+        // EXPLICIT, not derived. The panel is now reachable from two screens, so "go back" has
+        // two different correct answers and there is nothing on the panel itself that can tell
+        // them apart - reading controlsOverlay.style.display would say whether it is open, never
+        // where it came from, and inferring from isPaused would break the moment a deferred drain
+        // resolves during the detour. This is the same lesson the startup phase machine records:
+        // the overlays are a consequence of the state, never its storage.
+        // (controlsReturnTo and isControlsUp are declared at module scope - see them for why.)
+
+        // Every path that takes the panel off the screen goes through here, so controlsReturnTo
+        // can never be left pointing at a screen the player is no longer on (resumeGame() and
+        // startNewGame() both hide this overlay for their own reasons).
+        function closeControlsScreen() {
+            controlsReturnTo = null;
+            controlsOverlay.style.display = 'none';
+        }
+
+        function openControlsScreen(from) {
+            if (isControlsUp()) return;              // idempotent - a double tap must not re-enter
+            controlsReturnTo = from === 'menu' ? 'menu' : 'pause';
+            // ONE panel, two titles. The content is identical; what the player was looking for
+            // when they pressed the button is not.
+            controlsHeading.textContent = controlsReturnTo === 'menu' ? 'SETTINGS' : 'CONTROLS';
+            syncAudioSettingsUi();                   // reflect the persisted values every time
+            if (controlsReturnTo === 'menu') {
+                // The title screen stays UP as far as the game is concerned - the phase is still
+                // MENU, isMenuUp() is still true, and nothing has started. Only its overlay is
+                // taken off the screen, because the settings card would otherwise sit on top of
+                // it and the click-anywhere handler underneath would still be live. Deliberately
+                // NOT hideMenuScreen(), which would move the phase to GAMEPLAY and start the run.
+                menuOverlay.style.display = 'none';
+                setAudioScene('menu');               // the title music keeps playing, unchanged
+            } else {
+                pauseOverlay.style.display = 'none';
+                // Already ducked on the way in, so this is a no-op by musicTarget. Stated rather
+                // than relied on: the gameplay track must stay ducked, not resume or restart.
+                setAudioScene('paused');
+            }
             controlsOverlay.style.display = 'flex';
-            // Controls is only ever reached FROM the pause panel, so the music is already ducked
-            // and this is a no-op by musicTarget. Stated anyway rather than relied on, because
-            // "reachable from the main menu too" is exactly the kind of thing a later screen
-            // gains, and this is then already correct instead of leaking gameplay music.
-            setAudioScene('paused');
         }
 
         function backFromControlsScreen() {
-            controlsOverlay.style.display = 'none';
+            if (!isControlsUp()) return;
+            const returnTo = controlsReturnTo;
+            closeControlsScreen();
+            if (returnTo === 'menu') {
+                menuOverlay.style.display = 'flex';
+                setAudioScene('menu');
+                return;
+            }
             setAudioScene('paused'); // still paused - see openControlsScreen()
             // Also refreshed on the way back from Controls - the panel is being re-shown, and a
             // deferred drain resolved during the detour could have moved the state.
@@ -12207,7 +12289,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             isPaused = false;
             scene.physicsEnabled = true;
             pauseOverlay.style.display = 'none';
-            controlsOverlay.style.display = 'none';
+            closeControlsScreen();
             gameOverOverlay.style.display = 'none';
             gameOverActive = false;
             // PLAY AGAIN / NEW GAME. Reached from game over (music ducked right down) and from
@@ -12219,21 +12301,97 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         document.getElementById('pause-resume-btn').addEventListener('click', resumeGame);
         document.getElementById('pause-newgame-btn').addEventListener('click', startNewGame);
-        document.getElementById('pause-controls-btn').addEventListener('click', openControlsScreen);
-        document.getElementById('controls-back-btn').addEventListener('click', backFromControlsScreen);
+        document.getElementById('pause-controls-btn').addEventListener('click', () => openControlsScreen('pause'));
+        // BACK is inside #controls-overlay, which is a SIBLING of #menu-overlay, so its click
+        // cannot bubble into the title screen's click-anywhere handler. stopPropagation is here
+        // anyway for the same reason the Skip button has it (Phase 2): the guarantee should not
+        // depend on where in the DOM someone later moves this card.
+        document.getElementById('controls-back-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            backFromControlsScreen();
+        });
 
+        // --- Audio settings (Phase 4) -------------------------------------------------------
+        //
         // Mute toggle (improvement-prompts/04-*.md) - reflects the persisted isAudioMuted() state
         // on load, not just after the first toggle, so returning players see their previous
-        // choice immediately rather than a stale "ON" until they touch it once.
+        // choice immediately rather than a stale "ON" until they touch it once. Same id, same
+        // handler shape; it now also carries aria-pressed, and it has two volume sliders under it.
+        //
+        // NO NEW AUDIO STATE LIVES HERE. Every control writes straight through to the Phase 1
+        // controller (setMasterMuted / setMusicVolume / setSfxVolume), which owns the gain stages
+        // AND the persistence. This block only renders that state and reads gestures - which is
+        // why "persisted values restored on load" needs no code of its own beyond
+        // syncAudioSettingsUi(): the getters already return what was stored.
         const muteToggleBtn = document.getElementById('mute-toggle-btn');
+        const musicRange = document.getElementById('music-volume');
+        const sfxRange = document.getElementById('sfx-volume');
+        const musicValueEl = document.getElementById('music-volume-value');
+        const sfxValueEl = document.getElementById('sfx-volume-value');
+
+        // 0-1 in the controller, 0-100 on the slider. Rounded on the way out so the readout can
+        // never show 54.99999.
+        const toPercent = (v) => String(Math.round(v * 100));
+
         function updateMuteButtonLabel() {
-            muteToggleBtn.textContent = isAudioMuted() ? '🔇 SOUND: OFF' : '🔊 SOUND: ON';
+            const muted = isAudioMuted();
+            muteToggleBtn.textContent = muted ? '🔇 SOUND: OFF' : '🔊 SOUND: ON';
+            muteToggleBtn.setAttribute('aria-pressed', muted ? 'true' : 'false');
         }
-        updateMuteButtonLabel();
-        muteToggleBtn.addEventListener('click', () => {
+
+        // Pulls the whole panel back into line with the controller. Called on load and on every
+        // open, so a value changed by any other route (a second tab writing localStorage, a dev
+        // hook, a future hotkey) cannot leave a stale number on screen.
+        function syncAudioSettingsUi() {
+            updateMuteButtonLabel();
+            const music = toPercent(getMusicVolume());
+            const sfx = toPercent(getSfxVolume());
+            musicRange.value = music;
+            musicValueEl.textContent = music;
+            sfxRange.value = sfx;
+            sfxValueEl.textContent = sfx;
+        }
+        syncAudioSettingsUi();
+
+        // stopPropagation on every one of these, and on pointerdown as well as the activation
+        // event. The panel is a sibling of #menu-overlay so nothing bubbles there today, but the
+        // launch/flipper handlers are on WINDOW - a pointerdown that reaches window is exactly
+        // how "adjusting a slider charged the plunger" happens. Same belt-and-braces the intro's
+        // Skip button carries.
+        [muteToggleBtn, musicRange, sfxRange].forEach((el) => {
+            el.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+        });
+
+        muteToggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             setAudioMuted(!isAudioMuted());
             updateMuteButtonLabel();
         });
+
+        // LIVE on 'input' - the volume moves under the player's finger, which is the only way to
+        // set a volume by ear.
+        musicRange.addEventListener('input', () => {
+            const pct = Number(musicRange.value);
+            musicValueEl.textContent = String(pct);
+            setMusicVolume(pct / 100);
+        });
+        sfxRange.addEventListener('input', () => {
+            const pct = Number(sfxRange.value);
+            sfxValueEl.textContent = String(pct);
+            setSfxVolume(pct / 100);
+        });
+
+        // The SFX preview fires on 'change', NOT on 'input'. 'input' fires for every pixel of a
+        // drag, so previewing there would be a machine-gun of clacks; 'change' fires once the
+        // adjustment is finished - on pointer release, and once per keyboard step, which is the
+        // right granularity for both. Deliberately an EXISTING sound rather than a new one: the
+        // SFX palette is not being changed, and the point of the preview is to hear the level the
+        // game will actually play at.
+        sfxRange.addEventListener('change', (e) => {
+            e.stopPropagation();
+            playTargetClackSound();
+        });
+        // Music needs no preview - it is already playing while the slider moves.
 
         // Pause/duplicate-activation audit fix: this used to also listen for 'touchstart'
         // (with e.preventDefault() to suppress the browser's compatibility 'click' that would
@@ -12320,7 +12478,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // above, an e.repeat bail is exactly right here: there is no held-state to latch, and
             // a missed initial keydown just means no pause, never a stuck control.
             if (e.repeat) return;
-            if (controlsOverlay.style.display === 'flex') {
+            if (isControlsUp()) {
                 backFromControlsScreen();
                 return;
             }
@@ -12521,6 +12679,15 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 startup: {
                     getStartupPhase, startupBlocksInput,
                     PHASES: PHASE
+                },
+                // Settings/controls panel (Phase 4), same ?dev=1-only, read-only terms. Exposed
+                // so qa/settings-panel.js can assert WHERE BACK goes rather than only that the
+                // overlay closed - which is the whole thing this pass added and the one thing
+                // element visibility cannot tell you.
+                settings: {
+                    isControlsUp, returnTo() { return controlsReturnTo; },
+                    open(from) { openControlsScreen(from); },
+                    back() { backFromControlsScreen(); }
                 },
                 audio: {
                     unlockAudio, isAudioUnlocked, setAudioScene, getAudioScene,
