@@ -65,9 +65,25 @@ attract-mode camera, mobile touch controls, and menu/pause/controls/game-over sc
 Known gaps and rough edges — see `improvement-prompts/` for the scoped, actionable version of
 each of these:
 
-- Sound effects (launch, flipper, obstacle hits, drain, game-over) are procedurally synthesized via
-  the Web Audio API, with a mute control on the Controls screen (`improvement-prompts/04-*.md`).
-  There's still no background music.
+- Audio is complete. Two music tracks ship with the game — `SPIRITBALL - Cosmic Drift.mp3` on the
+  title/game-over screens and `SPIRITBALL Gameplay - Multiverse Velocity.mp3` in play — crossfading
+  between screens, ducking to 35% while paused or in settings, and fading down (without handing
+  over to the menu track) on game over. Every sound effect is still procedurally synthesized via
+  the Web Audio API: launch, flippers, ball roll, walls, bumpers, slingshots, targets, lanes,
+  orbits, power-ups, missions, bonuses, ball saves, drain and game over, plus interface clicks, a
+  confirm tone, the settings card's open/close, and a quiet coalesced score cue. Music and effects
+  run on separate gain buses under one master, so they are mixed independently.
+- Startup is autoplay-safe by design. Browsers refuse to create an AudioContext or play video with
+  sound before a real user gesture, so a normal load stops on a full-screen **CLICK TO START** /
+  **TOUCH TO START** gate — that one gesture (click, tap, Enter or Space) is what unlocks audio.
+  It then plays `inspiresoftwareintro.mp4`, which has a visible **SKIP** button and also exits on
+  Space/Enter, before the title screen. The intro is never a dead end: a missing file, a codec the
+  browser cannot decode, a rejected `play()` or a stalled download all fall through to the menu by
+  the same path, and no music starts until the menu is reached. Append `?dev=1` to skip the gate
+  and intro (the flow the automated suites use); `?dev=1&intro=1` forces the full sequence.
+- Audio settings live on the SETTINGS screen, reachable from the title screen and as CONTROLS from
+  the pause panel: a sound on/off toggle plus independent music and SFX volume sliders, applied
+  live and remembered across sessions.
 - Mission/rank progression exists: hitting a mission target selects and starts one of 3 missions
   (bumper/comet/re-entry-lane focused), completing it awards a score bonus and advances a
   Space-Cadet-style rank (Cadet through Fleet Admiral), shown on the backglass and as "Final Rank"

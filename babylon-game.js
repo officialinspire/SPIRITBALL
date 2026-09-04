@@ -9254,11 +9254,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // keydown is exactly what cancels a native button's activation - gating after it
             // would leave SOUND and BACK un-pressable by keyboard.
             if (isControlsUp()) return;
-            e.preventDefault(); // stop the page from scrolling on spacebar
             // Phase gate: the gate's own button and the intro's Space handler own this key until
             // the menu exists. Without this, the starting gesture would fall through here and
             // dismiss a menu the player has not been shown yet.
+            //
+            // BEFORE the preventDefault below, and that ordering is load-bearing. This handler is
+            // on WINDOW, so it sees the gate button's Space keydown first; cancelling that keydown
+            // clears the button's pending activation and its keyup then does nothing, which made
+            // Space a dead key on the start gate no matter what the button's own listeners did.
+            // Returning first hands the key back to the platform. There is nothing to scroll while
+            // this is true - the gate and intro are position:fixed inset:0 over a body with no
+            // overflow, asserted in qa/startup-intro.js - and the intro's own Space handler still
+            // cancels the key for itself.
             if (startupBlocksInput()) return;
+            e.preventDefault(); // stop the page from scrolling on spacebar
             // Input-boundary audit fix: a real, physically-held key fires keydown repeatedly
             // (browser-native auto-repeat), not just once on the initial press - confirmed via a
             // simulated real-repeat sequence in Playwright (repeat:true keydowns, matching actual
@@ -12120,11 +12129,28 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }
 
         if (startupGateBtn) {
+            // ONE listener, and deliberately NO keydown handler beside it.
+            //
+            // There used to be one, cancelling the default for Space, Enter and NumpadEnter with
+            // the reasoning that "Space would otherwise scroll the page before the button's own
+            // activation lands". Every part of that was wrong, and it broke both advertised
+            // keyboard gestures:
+            //
+            //   * Enter activates a button on KEYDOWN. Cancelling that keydown does not protect
+            //     the activation, it IS the activation being cancelled.
+            //   * Space activates on keyup, but a cancelled Space keydown also clears the
+            //     button's pending activation, so the keyup then does nothing either.
+            //
+            // So the gate accepted only click and tap, and a keyboard-only player could focus it,
+            // press either advertised key, and sit on the gate forever. Both were measured
+            // failing in qa/startup-intro.js, which now drives all four gestures (click, tap,
+            // Enter, Space) through the real button instead of testing the keys one screen later
+            // on the intro's exit, which is what let this through.
+            //
+            // Nothing replaces it: there is nothing here for Space to scroll. #startup-gate is
+            // position:fixed inset:0 over a body with no margin and no overflow, so the document
+            // has no scrollable extent at the gate at all - asserted, not assumed, by that suite.
             startupGateBtn.addEventListener('click', consumeStartupGate);
-            // Space would otherwise scroll the page before the button's own activation lands.
-            startupGateBtn.addEventListener('keydown', (e) => {
-                if (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter') e.preventDefault();
-            });
         }
 
         if (introSkipBtn) {

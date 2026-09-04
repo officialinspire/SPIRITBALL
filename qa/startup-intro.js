@@ -57,7 +57,11 @@ const snapshot = (page) => page.evaluate(() => {
 });
 
 async function open(browser, query, opts = {}) {
-  const context = await browser.newContext({ viewport: { width: 900, height: 700 } });
+  // hasTouch only when a case actually needs page.tap() - it is what makes touch dispatch
+  // available, and unlike isMobile it does not change the viewport metrics, so the layout the
+  // other cases measure stays identical.
+  const context = await browser.newContext({
+    viewport: { width: 900, height: 700 }, hasTouch: !!opts.touch });
   const page = await context.newPage();
   const errors = [];      // uncaught JS + console errors
   const jsErrors = [];    // uncaught JS only
@@ -175,25 +179,81 @@ const waitPhase = (page, want, timeout = 20000) =>
     await context.close();
   }
 
+  console.log('\n=== EVERY GESTURE THE GATE ADVERTISES ACTUALLY WORKS ===');
+  // This suite claimed the gate "accepts click, tap, Enter or Space" from the start, but only ever
+  // consumed it with a pointer click - the keyboard gestures were tested on the INTRO's exit
+  // instead, one screen too late. That gap hid a real defect: the button's own keydown handler
+  // called preventDefault() for Enter as well as Space, and for a button Enter activates on
+  // KEYDOWN, so cancelling it cancelled the activation. Enter looked wired up and did nothing, and
+  // a keyboard-only player could sit on the gate forever. Each advertised gesture now gets its own
+  // case, driven with no pointer at all where it is a key.
+  for (const [label, activate] of [
+    ['a pointer click', async (page) => page.click('#startup-gate-btn')],
+    ['a tap', async (page) => page.tap('#startup-gate-btn')],
+    ['Enter', async (page) => {
+      await page.evaluate(() => document.getElementById('startup-gate-btn').focus());
+      await page.keyboard.press('Enter');
+    }],
+    ['Space', async (page) => {
+      await page.evaluate(() => document.getElementById('startup-gate-btn').focus());
+      await page.keyboard.press('Space');
+    }]
+  ]) {
+    const { context, page, errors } = await open(browser, '?dev=1&intro=1', {
+      touch: true,   // so page.tap() is available; does not change the other cases
+      route: ['**/inspiresoftwareintro.mp4', () => { /* never respond - hold the intro open */ }]
+    });
+    // The keydown handler that used to break Enter and Space existed to stop Space scrolling the
+    // page. Measured here rather than argued: at the gate the document has no scrollable extent
+    // at all, so there is nothing for the removed handler to have been protecting.
+    const scroll = await page.evaluate(() => ({
+      before: window.scrollY,
+      scrollable: document.documentElement.scrollHeight > window.innerHeight
+    }));
+    await activate(page);
+    await waitPhase(page, 'intro');
+    const s = await snapshot(page);
+    check(`the gate accepts ${label}`, s.phase === 'intro' && s.gateHidden && !s.introHidden, s);
+    const scrolled = await page.evaluate(() => window.scrollY);
+    check(`${label} did not scroll the page`,
+      scroll.scrollable === false && scrolled === scroll.before, { ...scroll, after: scrolled });
+    check(`${label} did not start gameplay`, !s.ballInPlay && !s.menuShown, s);
+    check(`no page errors activating with ${label}`, errors.length === 0, errors);
+    await context.close();
+  }
+
   console.log('\n=== INTRO EXITS ALL CONVERGE ON ONE PATH ===');
-  for (const [label, exit] of [
-    ['ended', async (page) => page.evaluate(() => {
-      const v = document.getElementById('intro-video');
-      v.dispatchEvent(new Event('ended'));
-    })],
-    ['Skip button', async (page) => page.click('#intro-skip-btn')],
-    ['Space', async (page) => page.keyboard.press('Space')],
-    ['Enter', async (page) => page.keyboard.press('Enter')],
-    ['error event', async (page) => page.evaluate(() => {
-      document.getElementById('intro-video').dispatchEvent(new Event('error'));
-    })]
+  // Gate and exit are performed in ONE page.evaluate, with the phase confirmed as 'intro' in
+  // between. Splitting them leaves a CDP round trip - ~560ms on this box - and a routed-to-nothing
+  // video does not reliably stay open that long: Chromium fires 'stalled' with readyState 0,
+  // which beginIntro() correctly treats as "this is not going to happen". That is the product
+  // behaving right, and a suite that races it measures the race instead of the exit. This loop
+  // used to click Skip from node and intermittently found the menu already up.
+  //
+  // The keyboard exits dispatch real KeyboardEvents in-page: the window listener under test reads
+  // e.code, so the event it receives is identical. Genuine browser-native key presses at the GATE
+  // are covered by the section above and by qa/cinematic-audio.js.
+  for (const [label, exitBody] of [
+    ['ended', `document.getElementById('intro-video').dispatchEvent(new Event('ended'))`],
+    ['Skip button', `document.getElementById('intro-skip-btn').click()`],
+    ['Space', `window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true, cancelable: true }))`],
+    ['Enter', `window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter', bubbles: true, cancelable: true }))`],
+    ['error event', `document.getElementById('intro-video').dispatchEvent(new Event('error'))`]
   ]) {
     const { context, page, errors } = await open(browser, '?dev=1&intro=1', {
       route: ['**/inspiresoftwareintro.mp4', () => { /* never respond - see the CODEC NOTE */ }]
     });
-    await page.click('#startup-gate-btn');
-    await waitPhase(page, 'intro');
-    await exit(page);
+    const run = await page.evaluate(async (body) => {
+      document.getElementById('startup-gate-btn').click();
+      await new Promise((r) => setTimeout(r, 120));
+      const phaseAtExit = window.__flipperDebug.startup.getStartupPhase();
+      // eslint-disable-next-line no-new-func
+      new Function(body)();
+      await new Promise((r) => setTimeout(r, 120));
+      return { phaseAtExit, phaseAfter: window.__flipperDebug.startup.getStartupPhase() };
+    }, exitBody);
+    check(`the ${label} exit was fired while the intro was genuinely up`,
+      run.phaseAtExit === 'intro', run);
     await waitPhase(page, 'menu');
     const s = await snapshot(page);
     check(`intro exits to the menu on ${label}`, s.phase === 'menu' && s.menuShown && s.introHidden, s);
@@ -238,9 +298,16 @@ const waitPhase = (page, want, timeout = 20000) =>
     const { context, page, errors } = await open(browser, '?dev=1&intro=1', {
       route: ['**/inspiresoftwareintro.mp4', () => { /* never respond */ }]
     });
-    await page.click('#startup-gate-btn');
-    await waitPhase(page, 'intro');
-    await page.click('#intro-skip-btn');
+    // Gate and Skip in one task - same reason as the exits loop above.
+    const run = await page.evaluate(async () => {
+      document.getElementById('startup-gate-btn').click();
+      await new Promise((r) => setTimeout(r, 120));
+      const phaseAtSkip = window.__flipperDebug.startup.getStartupPhase();
+      document.getElementById('intro-skip-btn').click();
+      await new Promise((r) => setTimeout(r, 120));
+      return { phaseAtSkip };
+    });
+    check('Skip was pressed while the intro was genuinely up', run.phaseAtSkip === 'intro', run);
     await waitPhase(page, 'menu');
     let s = await snapshot(page);
     check('Skip did not fall through and start gameplay',
