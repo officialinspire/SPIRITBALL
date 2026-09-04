@@ -61,6 +61,18 @@ function check(label, cond, detail) {
     const page = await browser.newPage({ viewport: { width: w, height: h }, hasTouch: touch, isMobile: touch });
     page.on('pageerror', (e) => pageErrors.push(`${w}x${h}: ${String(e)}`));
     await page.goto(BASE, { waitUntil: 'load' });
+    // Phase 2 put a startup gate and the INSPIRE intro in front of the title screen on a NORMAL
+    // url, which is the url this suite deliberately uses - it is measuring what a player actually
+    // sees, and switching to ?dev=1 to dodge the gate would quietly stop exercising the real load
+    // path. So press through it the way a player does. (Confirmed against d2ac2bf, the commit
+    // before the gate existed: this suite passed 51/0 there and timed out here purely because the
+    // title screen is now two screens further in, not because anything about the title changed.)
+    //
+    // The intro then plays and exits on its own - on a browser without an H.264 decoder that is
+    // immediate, and on one with it the 'ended'/Skip paths land in the same place. Either way the
+    // wait below is what actually gates the measurements, so no fixed delay is needed here.
+    const gateBtn = await page.$('#startup-gate-btn');
+    if (gateBtn && await gateBtn.isVisible()) await gateBtn.click();
     // The menu is shown by main() after Babylon/Havok finish booting, so the overlay does not
     // exist at load - wait for it rather than for a fixed delay.
     await page.waitForFunction(
