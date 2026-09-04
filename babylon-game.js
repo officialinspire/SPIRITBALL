@@ -789,27 +789,98 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // rather than clicking on/off (see updateRollingSound()'s comment).
     const ROLLING_SOUND_SMOOTHING_S = 0.09;
 
+    // ===================================
+    // SFX VOICE BUDGET AND NODE LIFETIME (Phase 5).
+    //
+    // Every play*Sound() in this file is built from the two primitives below, so these two are
+    // the only places that need to know about either problem - and both problems are real, not
+    // theoretical, on a pinball table:
+    //
+    // 1. POLYPHONY. A ball rattling inside the bumper cluster, or ricocheting between a
+    //    slingshot and a rail, fires a genuine collision every few frames. Each of those is a
+    //    legitimate, correctly-cooled-down event (handlePhysicalHit()'s per-mesh cooldown map
+    //    already stops the SAME fixture retriggering), but nothing stopped twenty DIFFERENT
+    //    fixtures stacking into one saturated wall of noise. A hard voice budget fixes that at
+    //    the source: past the cap a new voice is simply not started. It is inaudible as a loss -
+    //    the 19th simultaneous transient adds nothing to a pile of 18 - and it is the one
+    //    approach that cannot distort the ones already playing.
+    //
+    // 2. NODE LIFETIME. Neither primitive used to disconnect anything. An oscillator that has
+    //    stopped, and a buffer source that has run out of buffer, are both finished as far as
+    //    the graph is concerned but stay attached to their gain node and through it to the SFX
+    //    bus. Over a long session that is a steadily growing fan-in on one node. Both now
+    //    release themselves on 'ended'.
+    //
+    // The release is idempotent and ALSO fires from a timer. onended is the normal path, but it
+    // depends on the context clock actually reaching the stop time - and that clock stops dead
+    // while the tab is hidden (see setAudioHidden()). Without the timer a session backgrounded
+    // mid-effect would come back having permanently lost those slots from the budget.
+    // ===================================
+    const SFX_MAX_VOICES = 18;
+    const SFX_RELEASE_GRACE_MS = 400;  // timer fallback: comfortably after the scheduled stop
+    let sfxActiveVoices = 0;
+
+    // Wires up the one-shot release for a finished voice. Called with the node that reports
+    // 'ended' plus everything that must come out of the graph with it.
+    function releaseSfxVoiceOnEnd(endingNode, durationS, nodes) {
+        let released = false;
+        const release = () => {
+            if (released) return;
+            released = true;
+            sfxActiveVoices = Math.max(0, sfxActiveVoices - 1);
+            nodes.forEach((n) => { try { n.disconnect(); } catch (e) { /* already detached */ } });
+        };
+        endingNode.onended = release;
+        setTimeout(release, durationS * 1000 + SFX_RELEASE_GRACE_MS);
+    }
+
     // A short tone with an exponential decay (percussive "pling" feel), optionally sweeping
     // frequency from freq to opts.freqEnd over the tone's duration - used for the launch (rising
     // sweep) and obstacle hits (flat or slightly falling pitch, varied per type).
+    //
+    // opts.delayS (Phase 5) schedules the note that far into the future ON THE AUDIO CLOCK.
+    //
+    // WHY THAT MATTERS. Every multi-note sting in this file - the game-over sting, the rank-up
+    // fanfare, the bank-clear and combo and skill-shot stings - used to be sequenced with
+    // setTimeout. setTimeout is a main-thread timer: it fires when the render loop next yields,
+    // so its actual accuracy is the frame time. On a comfortable desktop that is a few
+    // milliseconds and nobody notices. On a weak phone mid-multiball, or on the SwiftShader box
+    // this project's QA runs on (~560ms frames, measured), a four-note fanfare whose notes are
+    // 130ms apart does not play as a fanfare at all - the notes arrive whenever the main thread
+    // gets around to them, smeared and out of order relative to their intended rhythm. Scheduling
+    // on ctx.currentTime instead hands the sequence to the audio thread, which is not affected by
+    // frame time at all: the notes land exactly where they were placed no matter what the
+    // renderer is doing. The sounds themselves are unchanged - same pitches, same durations, same
+    // spacing - only the clock they are placed against.
     function playTone(freq, durationS, opts) {
         const ctx = getAudioContext();
         if (!ctx) return;
+        if (sfxActiveVoices >= SFX_MAX_VOICES) return; // see the voice-budget note above
         try {
             const type = (opts && opts.type) || 'sine';
             const freqEnd = (opts && opts.freqEnd) || freq;
             const volume = (opts && opts.volume) || 0.2;
+            const delayS = Math.max(0, (opts && opts.delayS) || 0);
+            const startAt = ctx.currentTime + delayS;
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.type = type;
-            osc.frequency.setValueAtTime(Math.max(freq, 1), ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 1), ctx.currentTime + durationS);
-            gain.gain.setValueAtTime(volume, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + durationS);
+            osc.frequency.setValueAtTime(Math.max(freq, 1), startAt);
+            osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 1), startAt + durationS);
+            // Silent until its own start time, then the usual decay. Without this first step a
+            // delayed note sits at full gain from the moment it is scheduled, which on a shared
+            // bus is an audible DC-ish step before the note itself.
+            gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+            gain.gain.setValueAtTime(volume, startAt);
+            gain.gain.exponentialRampToValueAtTime(0.001, startAt + durationS);
             osc.connect(gain);
             gain.connect(sfxGainNode); // SFX bus (was masterGainNode) - see the three-stage note above
-            osc.start();
-            osc.stop(ctx.currentTime + durationS);
+            // Counted and armed BEFORE start(), so a throw below cannot leave the budget claimed
+            // by a voice that never played.
+            sfxActiveVoices++;
+            releaseSfxVoiceOnEnd(osc, delayS + durationS, [osc, gain]);
+            osc.start(startAt);
+            osc.stop(startAt + durationS);
         } catch (e) { /* decorative only - never let a failure break gameplay */ }
     }
 
@@ -819,6 +890,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     function playNoiseClick(durationS, volume) {
         const ctx = getAudioContext();
         if (!ctx) return;
+        if (sfxActiveVoices >= SFX_MAX_VOICES) return;
         try {
             const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * durationS));
             const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
@@ -832,7 +904,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             gain.gain.value = volume;
             source.connect(gain);
             gain.connect(sfxGainNode); // SFX bus (was masterGainNode)
+            sfxActiveVoices++;
+            releaseSfxVoiceOnEnd(source, durationS, [source, gain]);
             source.start();
+            // Explicit stop as well as the buffer simply running out: a one-shot source fires
+            // 'ended' either way, but scheduling the stop makes the release deterministic rather
+            // than dependent on the buffer's exact length in frames.
+            source.stop(ctx.currentTime + durationS);
         } catch (e) { /* ignore */ }
     }
 
@@ -913,19 +991,20 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     }
 
     function playGameOverSound() {
-        // Three-note descending sting.
+        // Three-note descending sting. Scheduled on the audio clock, not setTimeout - see
+        // playTone()'s opts.delayS comment for why every multi-note sting here moved.
         playTone(392, 0.18, { type: 'triangle', volume: 0.16 });
-        setTimeout(() => playTone(330, 0.18, { type: 'triangle', volume: 0.16 }), 180);
-        setTimeout(() => playTone(220, 0.4, { type: 'triangle', volume: 0.16 }), 360);
+        playTone(330, 0.18, { type: 'triangle', volume: 0.16, delayS: 0.18 });
+        playTone(220, 0.4, { type: 'triangle', volume: 0.16, delayS: 0.36 });
     }
 
     // Ascending fanfare (the reverse shape of playGameOverSound()'s descending sting) for mission
     // completion/rank-up (improvement-prompts/05-*.md) - the biggest positive beat the game has.
     function playRankUpSound() {
         playTone(392, 0.15, { type: 'square', volume: 0.15 });
-        setTimeout(() => playTone(523, 0.15, { type: 'square', volume: 0.15 }), 130);
-        setTimeout(() => playTone(659, 0.15, { type: 'square', volume: 0.15 }), 260);
-        setTimeout(() => playTone(784, 0.35, { type: 'square', volume: 0.17 }), 390);
+        playTone(523, 0.15, { type: 'square', volume: 0.15, delayS: 0.13 });
+        playTone(659, 0.15, { type: 'square', volume: 0.15, delayS: 0.26 });
+        playTone(784, 0.35, { type: 'square', volume: 0.17, delayS: 0.39 });
     }
 
     // Giant Saturn hit (board redesign) - a single big, low-then-high "boom" distinct from the
@@ -939,7 +1018,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // playRankUpSound()'s longer fanfare so the two "good news" stings don't sound identical.
     function playPowerUpSound() {
         playTone(500, 0.12, { type: 'sine', freqEnd: 900, volume: 0.18 });
-        setTimeout(() => playTone(700, 0.18, { type: 'sine', freqEnd: 1200, volume: 0.16 }), 90);
+        playTone(700, 0.18, { type: 'sine', freqEnd: 1200, volume: 0.16, delayS: 0.09 });
     }
 
     // Orbit entrance - a short, quiet rising sweep, just enough to confirm "the shot registered"
@@ -955,7 +1034,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // the ear can tell them apart, matching this file's existing per-obstacle pitch convention.
     function playOrbitCompleteSound(pitchBase) {
         playTone(pitchBase, 0.16, { type: 'sine', freqEnd: pitchBase * 1.8, volume: 0.17 });
-        setTimeout(() => playTone(pitchBase * 1.5, 0.14, { type: 'triangle', volume: 0.15 }), 100);
+        playTone(pitchBase * 1.5, 0.14, { type: 'triangle', volume: 0.15, delayS: 0.1 });
     }
 
     // VISION GATE capture - a multi-layered "portal reveal," deliberately the longest and most
@@ -964,8 +1043,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // distinct in shape from every other sound here, none of which use more than two layers.
     function playVisionGateSound() {
         playTone(160, 0.5, { type: 'sawtooth', freqEnd: 420, volume: 0.16 });
-        setTimeout(() => playTone(660, 0.3, { type: 'sine', freqEnd: 990, volume: 0.13 }), 150);
-        setTimeout(() => playTone(880, 0.35, { type: 'triangle', freqEnd: 660, volume: 0.12 }), 300);
+        playTone(660, 0.3, { type: 'sine', freqEnd: 990, volume: 0.13, delayS: 0.15 });
+        playTone(880, 0.35, { type: 'triangle', freqEnd: 660, volume: 0.12, delayS: 0.3 });
         playNoiseClick(0.15, 0.08);
     }
 
@@ -975,8 +1054,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // distinct from playOrbitCompleteSound()'s sweep-then-chime.
     function playTargetBankCompleteSound() {
         playTone(440, 0.14, { type: 'square', volume: 0.16 });
-        setTimeout(() => playTone(660, 0.14, { type: 'square', volume: 0.16 }), 110);
-        setTimeout(() => playTone(880, 0.22, { type: 'square', volume: 0.18 }), 220);
+        playTone(660, 0.14, { type: 'square', volume: 0.16, delayS: 0.11 });
+        playTone(880, 0.22, { type: 'square', volume: 0.18, delayS: 0.22 });
     }
 
     // Rollover-lane bank cleared (user-requested upgrade) - two rising triangle sweeps plus a
@@ -985,8 +1064,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // with different pitches.
     function playLaneBankCompleteSound() {
         playTone(300, 0.16, { type: 'triangle', freqEnd: 600, volume: 0.17 });
-        setTimeout(() => playTone(500, 0.16, { type: 'triangle', freqEnd: 1000, volume: 0.18 }), 120);
-        setTimeout(() => playTone(750, 0.28, { type: 'sine', volume: 0.2 }), 240);
+        playTone(500, 0.16, { type: 'triangle', freqEnd: 1000, volume: 0.18, delayS: 0.12 });
+        playTone(750, 0.28, { type: 'sine', volume: 0.2, delayS: 0.24 });
         playNoiseClick(0.1, 0.1);
     }
 
@@ -1007,10 +1086,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const basePitch = 480 + tier * 90;
         playTone(basePitch, 0.1, { type: 'sine', freqEnd: basePitch * 1.4, volume: 0.14 });
         if (tier >= 2) {
-            setTimeout(() => playTone(basePitch * 1.3, 0.12, { type: 'sine', volume: 0.15 }), 80);
+            playTone(basePitch * 1.3, 0.12, { type: 'sine', volume: 0.15, delayS: 0.08 });
         }
         if (tier >= 3) {
-            setTimeout(() => playTone(basePitch * 1.6, 0.14, { type: 'triangle', volume: 0.16 }), 160);
+            playTone(basePitch * 1.6, 0.14, { type: 'triangle', volume: 0.16, delayS: 0.16 });
         }
     }
 
@@ -1023,7 +1102,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const notes = 3 - laneIndex;
         const basePitch = 700 - laneIndex * 60;
         for (let i = 0; i < notes; i++) {
-            setTimeout(() => playTone(basePitch * (1 + i * 0.35), 0.12, { type: 'triangle', freqEnd: basePitch * (1 + i * 0.35) * 1.3, volume: 0.16 }), i * 90);
+            playTone(basePitch * (1 + i * 0.35), 0.12, { type: 'triangle', freqEnd: basePitch * (1 + i * 0.35) * 1.3, volume: 0.16, delayS: i * 0.09 });
         }
     }
 
@@ -1033,7 +1112,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // backglass text registers.
     function playBallSaveSound() {
         playTone(300, 0.3, { type: 'sine', freqEnd: 700, volume: 0.16 });
-        setTimeout(() => playTone(900, 0.18, { type: 'sine', volume: 0.18 }), 220);
+        playTone(900, 0.18, { type: 'sine', volume: 0.18, delayS: 0.22 });
     }
 
     // Outlane kickback fired (fairness mechanics, user-requested) - a mechanical clack (reusing
@@ -1042,7 +1121,151 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     // from playLaunchSound()'s own sweep so the two don't sound interchangeable.
     function playKickbackSound() {
         playNoiseClick(0.05, 0.14);
-        setTimeout(() => playTone(260, 0.16, { type: 'sawtooth', freqEnd: 620, volume: 0.17 }), 30);
+        playTone(260, 0.16, { type: 'sawtooth', freqEnd: 620, volume: 0.17, delayS: 0.03 });
+    }
+
+    // ===================================
+    // INTERFACE SOUNDS (Phase 5).
+    //
+    // The table had a voice for every physical event and none at all for the interface, so a
+    // player navigating menus heard nothing until the ball was already moving. These three fill
+    // that in, and they are deliberately the quietest and shortest family in the file: interface
+    // feedback confirms an input landed, it is not an event in the game world. All three are
+    // built from the same two primitives as everything else and therefore sit on the SFX bus, so
+    // the SFX slider and the master mute apply to them instantly like every other effect.
+    // ===================================
+
+    // Any ordinary button. A tiny tick with a short falling sine under it - the sound of a
+    // switch closing, at roughly half the level of the lightest gameplay sound (the rollover
+    // click), because it plays far more often than any of them.
+    function playUiClickSound() {
+        playNoiseClick(0.012, 0.05);
+        playTone(420, 0.045, { type: 'sine', freqEnd: 360, volume: 0.07 });
+    }
+
+    // The one button on a screen that commits: START, RESUME, PLAY AGAIN. Rises where the click
+    // above falls, and adds a second note - the same "two notes, upward" grammar the game
+    // already uses for good news (playPowerUpSound, playBallSaveSound), scaled right down so it
+    // reads as a confirmation and not as an award.
+    function playUiConfirmSound() {
+        playTone(420, 0.09, { type: 'triangle', freqEnd: 620, volume: 0.12 });
+        playTone(760, 0.13, { type: 'sine', volume: 0.1, delayS: 0.07 });
+    }
+
+    // A card turning over. `opening` is the ONLY difference between the two directions: the
+    // sweep runs up to reveal and back down to put away, so open and close are audibly a pair
+    // rather than two unrelated noises.
+    //
+    // WHAT THIS IS FOR. There is no card mechanic in this game, and this pass deliberately did
+    // not invent one. The sound exists because the settings/controls panel is a card that turns
+    // over - it is called from openControlsScreen()/backFromControlsScreen(), which are the real
+    // .overlay-card transitions - and it is written as a general helper taking a direction
+    // rather than as playSettingsOpenSound(), so that if a genuine card event is ever added it
+    // already has its voice and does not need a second, near-identical one.
+    function playCardFlipSound(opening) {
+        playNoiseClick(0.05, 0.07);
+        const from = opening ? 300 : 620;
+        const to = opening ? 620 : 300;
+        playTone(from, 0.11, { type: 'triangle', freqEnd: to, volume: 0.08 });
+    }
+
+    // ===================================
+    // UI SOUND DELEGATION (Phase 5).
+    //
+    // ONE listener, on document, installed exactly once for the life of the page - which is the
+    // requirement, and also the only arrangement that stays correct here. The alternative, a
+    // listener per button attached when a screen opens, accumulates: this game reopens the pause
+    // panel and the settings card many times in a run, and every reopen would add another copy
+    // of the same handler to the same node, so a button that made one sound on the first visit
+    // would make five on the fifth. Nothing needs to be attached or detached at all - the
+    // buttons are all in the document from first paint, so one delegated handler covers every
+    // screen including any added later.
+    //
+    // CAPTURE PHASE, deliberately. Several of these buttons stop their own click from
+    // propagating - the settings button must not reach the title screen's click-anywhere
+    // handler, Skip must not reach the canvas - and a bubble-phase listener on document would
+    // simply never see those clicks. A capture listener runs before the target's own handler, so
+    // it sees every one.
+    //
+    // Two opt-outs, both declared in the markup rather than as an id list here, so a future
+    // button opts itself in or out without this function changing:
+    //   data-ui-sound="confirm" - the one committing button on a screen (START, RESUME, PLAY
+    //                             AGAIN) gets the confirm sound instead of the click.
+    //   data-ui-sound="none"    - the button's transition already has its own voice (the three
+    //                             that open or close the settings card) or must stay silent (the
+    //                             startup gate, which is followed by the intro).
+    // ===================================
+    const UI_SOUND_REPEAT_GUARD_MS = 60;
+    let uiSoundDelegationInstalled = false;
+    let lastUiSoundMs = 0;
+
+    function installUiSoundDelegation() {
+        if (uiSoundDelegationInstalled) return; // the accumulation guard, stated once
+        uiSoundDelegationInstalled = true;
+        document.addEventListener('click', (e) => {
+            const target = e.target;
+            if (!target || typeof target.closest !== 'function') return;
+            const btn = target.closest('button');
+            if (!btn) return;
+            // Screens only. The in-game pause button and the dev panel are not menu chrome and
+            // are deliberately left alone.
+            if (!btn.closest('.screen-overlay, .startup-overlay')) return;
+            const mode = btn.dataset ? btn.dataset.uiSound : undefined;
+            if (mode === 'none') return;
+            // One press must not sound twice. A real tap on some engines produces a synthesized
+            // click alongside the genuine one, and a keyboard activation produces a click of its
+            // own on top of the keydown - this file already documents both hazards for the pause
+            // button. A short guard collapses either pair into a single sound, and is far below
+            // the interval at which a player can deliberately press two different buttons.
+            const now = performance.now();
+            if (now - lastUiSoundMs < UI_SOUND_REPEAT_GUARD_MS) return;
+            lastUiSoundMs = now;
+            if (mode === 'confirm') playUiConfirmSound();
+            else playUiClickSound();
+        }, true);
+    }
+
+    // ===================================
+    // SCORE GAIN (Phase 5) - the one sound here that is a REACTION to a number rather than to an
+    // event, and the one most able to turn the table into noise if done naively.
+    //
+    // Two rules keep it out of the way:
+    //
+    // 1. IT IS THE QUIETEST SOUND IN THE FILE (0.035-0.065, against the rollover click's 0.08
+    //    and the bonus tick's 0.09). Every scoring event ALREADY has its own impact sound -
+    //    bumper, slingshot, target, Saturn, orbit - and those are the sounds the player is
+    //    listening to. This sits underneath them as a sense of value, not as another hit.
+    //
+    // 2. IT IS COALESCED, NOT THROTTLED. A burst of scoring inside SCORE_SFX_WINDOW_MS produces
+    //    exactly one voice whose pitch reflects the WHOLE burst, rather than the first hit's
+    //    points with the rest discarded. That is why the window is trailing-edge: the impact
+    //    sound for the first hit has already fired at t=0, so nothing about the response feels
+    //    delayed, and waiting lets the pitch mean something.
+    //
+    // Pitch moves under an octave across four decades of points, which is the "modestly scaled"
+    // part - a 10-point rollover and a 5000-point Saturn hit are distinguishable but the second
+    // is not four times the sound of the first.
+    // ===================================
+    const SCORE_SFX_WINDOW_MS = 110;
+    let scoreSfxPendingPoints = 0;
+    let scoreSfxTimer = null;
+
+    function playScoreGainSound(points) {
+        const t = Math.min(1, Math.max(0, Math.log10(Math.max(points, 1)) / 4)); // 1..10000 -> 0..1
+        const pitch = 520 + t * 340;
+        playTone(pitch, 0.06, { type: 'sine', freqEnd: pitch * 1.18, volume: 0.035 + t * 0.03 });
+    }
+
+    function queueScoreGainSound(points) {
+        if (!(points > 0)) return;
+        scoreSfxPendingPoints += points;
+        if (scoreSfxTimer !== null) return; // a window is already open - fold into it, don't start a second
+        scoreSfxTimer = setTimeout(() => {
+            scoreSfxTimer = null;
+            const total = scoreSfxPendingPoints;
+            scoreSfxPendingPoints = 0;
+            playScoreGainSound(total);
+        }, SCORE_SFX_WINDOW_MS);
     }
 
     // ===================================
@@ -9614,13 +9837,21 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // (every ordinary hit legitimately gets the temporary scoreMultiplier power-up while it's
         // running - that's its whole point). The end-of-ball bonus count is the one exception -
         // see startBonusCount()/updateBonusCount()'s own comments for why it passes false.
-        function addScore(points, applyMultiplier = true) {
+        // `silentSfx` exists for exactly one caller: the end-of-ball bonus count, which pays
+        // itself into the score one tick at a time and already has playBonusTickSound() as its
+        // voice. Without it, every tick would fire a score chime as well and the bonus count -
+        // the one moment in the game that is deliberately a rhythm - would be two sounds per
+        // tick fighting each other. A parameter rather than a bonusCount.active check because
+        // startBonusCount()'s reduced-motion path pays out BEFORE it sets that flag, so the
+        // flag would have missed exactly one of the three payments.
+        function addScore(points, applyMultiplier = true, silentSfx = false) {
             const delta = applyMultiplier ? points * scoreMultiplier : points;
             score += delta;
             lastScoreDelta = delta;
             lastScoreTotal = score;
             setScore(score);
             if (delta > 0) pulseScoreHud(delta);
+            if (delta > 0 && !silentSfx) queueScoreGainSound(delta);
             if (score > backglass.state.highScore) {
                 backglass.state.highScore = score;
                 writeHighScoreToStorage(score); // high-score audit fix - see its own comment; a throwing/unavailable browser keeps the in-memory record for this session without crashing
@@ -9675,7 +9906,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // pause landing in the same instant can't skip the completion callback.
                 // Scoring-accounting audit fix - see updateBonusCount()'s own call for why this
                 // bypasses scoreMultiplier.
-                addScore(total, false);
+                addScore(total, false, true); // silent: the bonus count owns its own voice - see addScore()
                 backglass.showMessage('BONUS x' + ballBonus.multiplierX + ': ' + total.toLocaleString(), BONUS_COUNT_REDUCED_MOTION_MS);
                 bonusCount.active = true;
                 bonusCount.ticksRemaining = 0;
@@ -9730,7 +9961,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // payout on top of ballBonus.multiplierX. Bypassing scoreMultiplier here makes the
             // bonus count always pay out exactly points*multiplierX, matching what the on-screen
             // "BONUS x{multiplierX}" message already claims.
-            addScore(step, false);
+            addScore(step, false, true); // silent: playBonusTickSound() below is this beat's only voice
             playBonusTickSound();
             // The last tick holds the same climbing-number format every other tick uses, not the
             // words 'BONUS AWARDED' it used to swap in. That swap threw away the one number the
@@ -12122,12 +12353,19 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 setAudioScene('paused');
             }
             controlsOverlay.style.display = 'flex';
+            // The real .overlay-card transition - this is the card turning over, and it is the
+            // whole reason playCardFlipSound() exists (see its own comment for why it is written
+            // as a reusable direction-taking helper rather than a settings-specific sound). The
+            // three buttons that reach this screen carry data-ui-sound="none" in index.html so
+            // this is the ONE sound the transition makes, not a click stacked on top of a flip.
+            playCardFlipSound(true);
         }
 
         function backFromControlsScreen() {
             if (!isControlsUp()) return;
             const returnTo = controlsReturnTo;
             closeControlsScreen();
+            playCardFlipSound(false); // the card turning back - see openControlsScreen()
             if (returnTo === 'menu') {
                 menuOverlay.style.display = 'flex';
                 setAudioScene('menu');
@@ -12298,6 +12536,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // the duplicate-music bug this arrangement exists to make impossible.
             setAudioScene('gameplay');
         }
+
+        // One delegated listener for every screen button's click sound - see
+        // installUiSoundDelegation() for why it is delegated rather than per-button, and why it
+        // is installed exactly once.
+        installUiSoundDelegation();
 
         document.getElementById('pause-resume-btn').addEventListener('click', resumeGame);
         document.getElementById('pause-newgame-btn').addEventListener('click', startNewGame);
@@ -12688,6 +12931,23 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     isControlsUp, returnTo() { return controlsReturnTo; },
                     open(from) { openControlsScreen(from); },
                     back() { backFromControlsScreen(); }
+                },
+                // SFX layer (Phase 5), same ?dev=1-only terms. The REAL gameplay functions are
+                // exposed, not wrappers that replay a sound: qa/sfx-layer.js drives
+                // handleLaunchRelease/activateFlipper/addScore/collectPowerUp/handlePhysicalHit/
+                // handleTriggerHit exactly as the game does and counts what the audio graph
+                // actually built, so a sound that stopped being called from its real site fails
+                // the suite. voices() is the budget/leak readout.
+                sfx: {
+                    MAX_VOICES: SFX_MAX_VOICES,
+                    voices() { return sfxActiveVoices; },
+                    scorePending() { return scoreSfxPendingPoints; },
+                    SCORE_WINDOW_MS: SCORE_SFX_WINDOW_MS,
+                    playUiClickSound, playUiConfirmSound, playCardFlipSound,
+                    playScoreGainSound, queueScoreGainSound,
+                    handleLaunchRelease, activateFlipper, addScore, collectPowerUp,
+                    handlePhysicalHit, handleTriggerHit,
+                    startBonusCount, bonusCount
                 },
                 audio: {
                     unlockAudio, isAudioUnlocked, setAudioScene, getAudioScene,

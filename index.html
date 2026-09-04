@@ -3126,7 +3126,7 @@
          listeners that could disagree with each other. -->
     <div id="startup-gate" class="startup-overlay" role="dialog" aria-modal="true"
          aria-labelledby="startup-gate-label" hidden>
-        <button type="button" id="startup-gate-btn" class="startup-gate-btn">
+        <button type="button" id="startup-gate-btn" class="startup-gate-btn" data-ui-sound="none">
             <span class="startup-gate-mark" aria-hidden="true">◈</span>
             <span id="startup-gate-label" class="startup-gate-label">CLICK TO START</span>
             <span class="startup-gate-sub">Sound will be enabled</span>
@@ -3142,7 +3142,7 @@
          aria-label="Intro video" hidden>
         <video id="intro-video" class="intro-video" playsinline preload="auto"
                disablepictureinpicture></video>
-        <button type="button" id="intro-skip-btn" class="intro-skip-btn">SKIP ⏭</button>
+        <button type="button" id="intro-skip-btn" class="intro-skip-btn" data-ui-sound="none">SKIP ⏭</button>
     </div>
 
     <!-- aria-live regions (improvement-prompts/10-*.md): role="status" + aria-live="polite" on
@@ -3285,7 +3285,11 @@
                  button and clicking the backdrop remain literally the same code path.
                  #menu-start-label is what babylon-game.js writes; the anywhere-line is static so
                  a textContent write cannot wipe it. -->
-            <button type="button" class="start-instructions" id="menu-start-instructions">
+            <!-- data-ui-sound: read by installUiSoundDelegation() in babylon-game.js. "confirm"
+                 is the one committing button on a screen; "none" means the transition the button
+                 causes already has its own voice, so a click on top of it would be two sounds
+                 for one press. -->
+            <button type="button" class="start-instructions" id="menu-start-instructions" data-ui-sound="confirm">
                 <span id="menu-start-label">PRESS SPACE TO START</span>
                 <span class="start-anywhere sa-desktop">or click anywhere</span>
                 <!-- Not "or tap anywhere": the touch label above is already "TAP TO START", and
@@ -3297,7 +3301,7 @@
                  click from reaching the overlay's click-anywhere handler (see babylon-game.js) -
                  without that, opening settings would also dismiss the title screen underneath it.
                  Deliberately secondary in weight: a title screen has one primary action. -->
-            <button type="button" class="title-settings-btn" id="menu-settings-btn">SETTINGS</button>
+            <button type="button" class="title-settings-btn" id="menu-settings-btn" data-ui-sound="none">SETTINGS</button>
             <p class="title-hint">
                 <span class="hint-desktop">&#8592; &#8594; FLIPPERS &nbsp;&middot;&nbsp; SPACE LAUNCH &nbsp;&middot;&nbsp; ESC PAUSE</span>
                 <span class="hint-touch">&#9664; &#9654; BUTTONS FLIP &nbsp;&middot;&nbsp; HOLD &#9889; TO LAUNCH</span>
@@ -3328,8 +3332,8 @@
                 <h1 id="pause-overlay-heading">VISION PAUSED</h1>
             </div>
             <div class="pause-actions">
-                <button id="pause-resume-btn" class="pause-btn pause-btn-primary">RESUME</button>
-                <button id="pause-controls-btn" class="pause-btn pause-btn-secondary">CONTROLS</button>
+                <button id="pause-resume-btn" class="pause-btn pause-btn-primary" data-ui-sound="confirm">RESUME</button>
+                <button id="pause-controls-btn" class="pause-btn pause-btn-secondary" data-ui-sound="none">CONTROLS</button>
                 <!-- "NEW GAME", not "NEW VISION", of the two the prompt offered: a vision IS a
                      mission in this game (MISSION_DEFS), and the HUD says "VISION: CHAKRA
                      AWAKENING" while one is running - so "NEW VISION" on the one destructive
@@ -3413,7 +3417,7 @@
                            min="0" max="100" step="1" value="100">
                 </div>
             </section>
-            <button id="controls-back-btn">◄ BACK</button>
+            <button id="controls-back-btn" data-ui-sound="none">◄ BACK</button>
         </div>
     </div>
 
@@ -3475,7 +3479,7 @@
                  same request asks for concise over mystical, and this is the one control on the
                  screen - an action label has to say what the button does. The themed register is
                  carried by the heading and the state row, where it costs the player nothing. -->
-            <button type="button" class="over-btn" id="gameover-play-again-btn">PLAY AGAIN</button>
+            <button type="button" class="over-btn" id="gameover-play-again-btn" data-ui-sound="confirm">PLAY AGAIN</button>
 
             <!-- Detail readout. Kept, but demoted: the requested hierarchy promotes exactly one
                  of these (Visions Completed) into the summary above, and the rest are a run
