@@ -77,8 +77,21 @@ const EARN_BONUS = `
 // Drives the ball into the real drain trigger with real velocity, stepping physics by hand so this
 // costs negligible wall clock - the render-loop-driven sequence it kicks off then has its whole
 // real-time window ahead of it. Same staging qa/regression-suite.js already uses.
+//
+// Returns the score and the bonus pool as they stood at the instant the drain was staged, so a
+// payout assertion can compare against the state the sequence actually starts from. Sampling
+// those two from a separate page.evaluate() is a race the test loses: the ball is live until this
+// runs, this sandbox renders at ~1.6fps, and a single frame in that gap is enough for another
+// major shot to land - which both raises the score and grows the pool the drain is about to pay.
+// That is exactly how this read false once the plunger was retuned and launched balls started
+// travelling far enough to hit Saturn twice (observed: pool 500 at a sample 1.4s earlier, 1000
+// by the drain, so a correct 1000 payout looked like a 4000 one).
 const FORCE_DRAIN = `
   const dbg = window.__flipperDebug;
+  const atDrain = {
+    score: parseInt(document.getElementById('hud-score').textContent, 10) || 0,
+    total: window.__endOfBallDebug.bonusTotal()
+  };
   const ball = dbg.mainBall;
   const engine = dbg.scene.getPhysicsEngine();
   const drainMesh = dbg.scene.getMeshByName('drainZone');
@@ -91,6 +104,7 @@ const FORCE_DRAIN = `
     dbg.updateBallPhysics(ball, 16);
     engine._step(16 / 1000);
   }
+  atDrain;
 `;
 
 async function launchBall(page) {
@@ -287,7 +301,7 @@ async function main() {
       total: window.__endOfBallDebug.bonusTotal()
     }));
     await armSequenceTrace(page);
-    await page.evaluate(FORCE_DRAIN);
+    const atDrain = await page.evaluate(FORCE_DRAIN);
     const r = await watchSequence(page, 12000);
     desktopWithBonus = r;
     console.log('  beats  :', JSON.stringify(r.beats));
@@ -325,8 +339,9 @@ async function main() {
       msgTexts(r).find((m) => m.startsWith('BALL ') && m !== 'BALL LOST'));
     check('the sequence ends, and ends with the ball back at the plunger',
       !r.stillActive && r.ballAtPlunger, { stillActive: r.stillActive, ballAtPlunger: r.ballAtPlunger });
-    check('bonus paid exactly points x multiplier, once', r.score - before.score === before.total,
-      { before: before.score, after: r.score, expected: before.total });
+    // Against the state at the drain, not the state 1.4s earlier - see FORCE_DRAIN's comment.
+    check('bonus paid exactly points x multiplier, once', r.score - atDrain.score === atDrain.total,
+      { before: atDrain.score, after: r.score, expected: atDrain.total, sampledEarlier: before });
     check('a life was lost', r.lives === cfg.startingLives - 1, r.lives);
     // Not "the beat lasted 800ms" - at ~1.6fps a beat is one or two frames and its wall-clock
     // duration is frame time, not budget. What IS checkable here is that the machine never arms a
