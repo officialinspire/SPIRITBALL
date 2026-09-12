@@ -8864,6 +8864,55 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }
         }
 
+        // A launched ball that comes back DOWN the shooter lane and stops - re-arm the plunger
+        // instead of leaving the player with a dead table.
+        //
+        // The shooter lane now feeds the right orbit (see PLUNGER_MIN_POWER_MS's comment in
+        // config.js), so "not enough to finish the orbit" has exactly one outcome: the ball rolls
+        // back down the orbit, back down the lane, and settles against the plunger again - but
+        // with ballInPlay still true, because handleLaunchRelease() set it and nothing since has
+        // drained. In that state the launch controls are dimmed and refuse input (both handlers
+        // return early on ballInPlay), the ball is where no flipper can reach it, and the drain
+        // trigger is on the other side of a wall, so nothing can ever clear it: a dead table, not
+        // a lost ball. updateBallPhysics()'s anti-stuck kick does not rescue it either - its
+        // escape vector is centerward-and-downhill, which inside this lane means straight into
+        // launchLaneWall and back onto the plunger, escalating but never leaving.
+        //
+        // The retuned launch makes this rare rather than routine (measured 0-1 in 17 across the
+        // shipped power range, against every start offset in the lane), but rare is the wrong
+        // target for a state the player cannot act their way out of. A real machine has the same
+        // situation and the same answer: the ball sits in the shooter lane and you plunge again.
+        //
+        // Deliberately routed through resetBallToPlunger() rather than a bare `ballInPlay = false`
+        // - the ball never reached play, so the skill-shot and ball-save windows armed by the
+        // launch should be reset for the next plunge, and that function is the one authoritative
+        // definition of "ball is sitting on the plunger, ready". The window it consumes (the
+        // launch's own ball save) is preserved by ballSave.usedThisLife, same as any other reset.
+        const SHOOTER_LANE_RETURN_SPEED_MS = STUCK_SPEED_THRESHOLD_MS * 4; // ~0.15 m/s - settled, not merely slow
+        const SHOOTER_LANE_RETURN_TIME_MS = 350; // under STUCK_TIME_THRESHOLD_MS, so this resolves it before the anti-stuck kick starts rattling
+        // Inboard face of launchLaneWall and the top of the lane: inside both is inside the lane.
+        const SHOOTER_LANE_INNER_X_M = toWorldX(LANE_INNER_WALL_X_PX) + (LANE_INNER_WALL_WIDTH_PX * PX_TO_M) / 2;
+        const SHOOTER_LANE_TOP_Z_M = toWorldZ(LANE_WALL_Z_TOP_PX);
+        let shooterLaneReturnMs = 0;
+        function updateShooterLaneReturn(deltaMs) {
+            if (!ballInPlay || visionGate.active) {
+                shooterLaneReturnMs = 0;
+                return;
+            }
+            const pos = mainBall.mesh.position;
+            const v = mainBall.aggregate.body.getLinearVelocity();
+            const inLane = pos.x > SHOOTER_LANE_INNER_X_M && pos.z < SHOOTER_LANE_TOP_Z_M;
+            if (!inLane || Math.hypot(v.x, v.y, v.z) > SHOOTER_LANE_RETURN_SPEED_MS) {
+                shooterLaneReturnMs = 0;
+                return;
+            }
+            shooterLaneReturnMs += deltaMs;
+            if (shooterLaneReturnMs < SHOOTER_LANE_RETURN_TIME_MS) return;
+            shooterLaneReturnMs = 0;
+            resetBallToPlunger();
+            backglass.showMessage('PLUNGE AGAIN', 900);
+        }
+
         function resetBallToPlunger() {
             // Interruption-lifecycle audit fix - an active Vision Gate capture holds the ball
             // kinematic (ANIMATED) and owns a bunch of its own timers/visuals; this used to be
@@ -8968,7 +9017,16 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             }
             // +Z = up-table, matching launchBall()'s velocityY = -power under the toWorldZ()
             // sign flip (02-*.md); velocityX keeps the same sign/scale relationship as the 2D
-            // version's -(150 + power*0.08) kick - see PLUNGER_HORIZONTAL_BASE_MS's comment.
+            // version's -(150 + power*0.08) kick - see PLUNGER_HORIZONTAL_BASE_MS's comment,
+            // which is also where the current board's answer to it lives (both of its constants
+            // are 0 today, so this is a straight shot up the lane into the right orbit's mouth;
+            // the expression stays because the constants, not this line, are the tuning knob).
+            //
+            // Linear velocity only, deliberately: a plunger strikes a resting ball and imparts
+            // pure translation, no spin. Friction then takes the ball to rolling at 5/7 of this
+            // speed, which is exactly what PLUNGER_MIN_POWER_MS's range is calibrated against -
+            // launching with a matching no-slip spin here would make every plunge ~29% stronger
+            // than that calibration assumes.
             const velocityZ = plungerPower;
             const velocityX = -(PLUNGER_HORIZONTAL_BASE_MS + plungerPower * PLUNGER_HORIZONTAL_RATIO);
             mainBall.aggregate.body.setLinearVelocity(new BABYLON.Vector3(velocityX, 0, velocityZ));
@@ -13022,6 +13080,19 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 // own - gravity's table tilt keeps a genuinely free ball moving above
                 // STUCK_SPEED_THRESHOLD_MS almost immediately unless something is actually
                 // blocking it, which is exactly the state this mechanism exists to rescue.
+                if (!visionGate.active && ballInPlay) {
+                    // BEFORE updateBallPhysics(), deliberately, and it can clear ballInPlay.
+                    // Both read the same "settled" condition, and on a long frame both windows
+                    // (SHOOTER_LANE_RETURN_TIME_MS 350, STUCK_TIME_THRESHOLD_MS 450) can elapse
+                    // inside one deltaMs - so ordering, not just the shorter window, is what
+                    // decides which one gets the ball. Measured with the order reversed: on a
+                    // ~5fps headless frame the anti-stuck kick fired first, left ~0.52 m/s on the
+                    // body, and that speed then reset this timer every single frame - the ball
+                    // never got re-armed at all. Running first means a ball parked in the shooter
+                    // lane is handed back to the plunger before the kick that cannot free it is
+                    // ever considered, at any frame rate. See updateShooterLaneReturn()'s comment.
+                    updateShooterLaneReturn(deltaMs);
+                }
                 if (!visionGate.active && ballInPlay) {
                     updateBallPhysics(mainBall, deltaMs);
                 } else if (!ballInPlay) {

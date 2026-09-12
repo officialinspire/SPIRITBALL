@@ -1782,8 +1782,41 @@ export const PLUNGER_CHARGE_TIME_MS = 2000; // same charge window as CONFIG.plun
 // pass). MAX stays at 1600 - already comfortably clears with room to spare, and raising it
 // further would start colliding with MAX_BALL_SPEED_MS's anti-tunneling ceiling for little
 // benefit.
-export const PLUNGER_MIN_POWER_MS = 1200 * PX_TO_M; // ~1.13 m/s
-export const PLUNGER_MAX_POWER_MS = 1600 * PX_TO_M; // ~1.51 m/s - comfortably under MAX_BALL_SPEED_MS
+//
+// PLAYTEST BUG FIX (user-reported, both mobile and desktop: "the ball never leaves the lane and
+// always drains/falls back"). Raised again, 1200/1600 -> 1700/2200, because the shooter lane no
+// longer empties into open playfield - it feeds the RIGHT ORBIT. The orbit-geometry pass
+// (ORBIT_ARC_RADIUS_M and the tangent-arc rebuild after it) put the right orbit's entrance
+// directly above this lane's exit: measured on the shipped build, launchLaneWall ends at
+// z=-0.161 and the orbit's own entry rails pick the ball straight up from there, so a launched
+// ball is now committed to climbing the full orbit - z=-0.2525 at rest to the top arc at
+// z=+0.42, ~0.67m of uphill - before it can rejoin the playfield at all. There is no shorter
+// way out for it.
+//
+// 1600 could not do that, and neither could anything in the old range. A plunger imparts pure
+// translation, no spin (handleLaunchRelease() sets linear velocity only; resetBallToPlunger()
+// zeroes angular velocity just before it), so the launched ball first SLIDES and friction takes
+// it to rolling at 5/7 of its launch speed - a 29% loss before the climb even starts. 1600 ->
+// 1.51 m/s -> ~1.08 m/s rolling, which buys ~0.45m of climb: the ball stalls around z=+0.20,
+// half way up the orbit, and rolls back down the orbit and the shooter lane onto the plunger,
+// or out of the orbit's mouth into the right outlane. That is both halves of the report at once.
+//
+// Re-measured on the current build, real launch velocities stepped through Havok at a fixed
+// 1/60 from the real rest position, n=17 starting offsets per cell (+-5mm across the lane).
+// "reach" is the same metric PLUNGER_HORIZONTAL_BASE_MS's table uses: did the ball leave the
+// lane AND come down somewhere a flipper could hit it?
+//
+//   launch speed   1.51    1.61    1.70    1.79    1.89    1.98    2.08    2.17    2.27    2.36
+//   (px/s)         1600    1700    1800    1900    2000    2100    2200    2300    2400    2500
+//   reach /17      15      17      14      17      16      16      16      14      9       6
+//
+// The window is real on both sides: below ~1.6 m/s the ball cannot finish the orbit, and above
+// ~2.1 m/s it starts coming off the top arc hard enough to be thrown back DOWN the orbit lane
+// (the "neverLeftLane" failures at 2400/2500), so more power is not simply better. 1700/2200
+// sits inside it with margin at both ends, and 2200 -> 2.08 m/s stays well under
+// MAX_BALL_SPEED_MS's 2.55 anti-tunneling ceiling. Zero tunneling events across the whole sweep.
+export const PLUNGER_MIN_POWER_MS = 1700 * PX_TO_M; // ~1.61 m/s - the weakest plunge that still completes the right orbit
+export const PLUNGER_MAX_POWER_MS = 2200 * PX_TO_M; // ~2.08 m/s - comfortably under MAX_BALL_SPEED_MS
 // launchBall()'s horizontal kick (-(150 + power*0.08)) ported the same way: a fixed base plus
 // a ratio of the power itself, so proportionally weaker/stronger launches still curve the same
 // relative amount.
@@ -1830,8 +1863,41 @@ export const PLUNGER_MAX_POWER_MS = 1600 * PX_TO_M; // ~1.51 m/s - comfortably u
 // This is a narrow empirical pocket, not a smooth optimum - 118 with the same ratio collapses
 // back to 1/20. Do not nudge either constant without re-running that reach measurement. The
 // formula's shape is unchanged; both constants keep their original meaning, just gentler.
-export const PLUNGER_HORIZONTAL_BASE_MS = 106 * PX_TO_M; // was 150 - see the block comment above
-export const PLUNGER_HORIZONTAL_RATIO = 0.05; // was 0.08
+//
+// PLAYTEST BUG FIX, and the second half of the "ball never leaves the lane" report above: the
+// pocket 106/0.05 sat in no longer exists, so the kick is now ZERO. Everything the paragraphs
+// above describe was measured against a playfield that has since been rebuilt - the pocket was
+// defined by rightGuide's lower end (already gone by the time it was written) and then by the
+// first orbit guides that replaced it, and the tangent-arc orbit rebuild moved those too. On the
+// current board the shooter lane's exit is the right orbit's mouth (see the power block above),
+// which is straight ahead of the resting ball: any inboard kick at all aims the launch at the
+// side of that mouth rather than into it, and the ball rattles off the orbit's inner rail and
+// dies instead of taking the lane.
+//
+// Re-measured exactly as before - the same reach metric, real launch velocities stepped through
+// Havok at 1/60, n=5 starting offsets per cell:
+//
+//   base (ratio 0.05, except the 0 row which is 0/0)
+//                   1400 (below min)  1700 (min)     1900           2200 (full)
+//   0                   4/5           5/5            5/5            5/5      <- shipped
+//   40                  0/5           3/5            2/5            2/5
+//   80                  2/5           1/5            5/5            1/5
+//   106                 2/5           2/5            3/5            2/5      <- old values
+//   140                 2/5           3/5            2/5            4/5
+//   180                 1/5           2/5            1/5            3/5
+//
+// A second pass over the small-kick end (base 20 at ratio 0.01, base 40 at ratio 0.02, powers
+// 1400-2200) behaves the same way: every nonzero cell lands at or below the 0/0 column, and the
+// shortfall grows with the kick. There is no gentler version of the old aim that survives.
+//
+// Zero is the only column that is reliable at every charge level, and it is reliable because it
+// is now the aimed shot: straight up the lane, straight into the orbit. Note this reverses the
+// "removing the kick entirely is NOT the fix" note above, which was true of the board that
+// existed when it was written and is not true of this one. The constants are kept rather than
+// deleted so the formula in handleLaunchRelease() keeps its shape and a future board layout can
+// re-tune them - with a fresh reach measurement, exactly as the paragraphs above insist.
+export const PLUNGER_HORIZONTAL_BASE_MS = 0; // was 106 - see the block comment above
+export const PLUNGER_HORIZONTAL_RATIO = 0; // was 0.05
 
 // ===================================
 // Upper-lane skill shot (user-requested) - turns the plunger's existing variable charge
