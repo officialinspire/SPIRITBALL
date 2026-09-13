@@ -409,29 +409,43 @@ async function runGameplay(browser) {
 
   // --- skill shot ---
   {
+    // Rewritten with the skill shot itself: the tiers used to be three trigger volumes the ball
+    // rolled through, and this checked that touching one recorded a pending result. There are no
+    // such triggers now - a tier is chosen from the plunger charge at release and collected by
+    // the ball completing the RIGHT ORBIT (see SKILL_SHOT_TIERS in js/config.js). So the
+    // equivalent check is that the collecting trigger pays an armed tier, which is what this now
+    // does. Depth-first coverage of the mechanic - the bands, the arming, the two ways of not
+    // collecting - lives in qa/skill-shot.js, which needs no hand-patched hook to run.
+    //
     // Arm, fire the trigger, AND read the result all inside one single evaluate() call - this
     // sandbox's headless software rendering can occasionally produce one very large single-frame
     // deltaMs between two separate evaluate() round-trips (a real, if rare, possibility on
-    // overloaded real hardware too), which would legitimately expire the 2s skill-shot window via
+    // overloaded real hardware too), which would legitimately expire the skill-shot window via
     // updateSkillShot()'s own unclamped countdown before a later call gets to it. That's correct
     // behavior for a real stall, not a bug - keeping it to one call eliminates any gap for the
-    // render loop to interleave, isolating the actual thing under test (does the trigger get
-    // recorded at all).
+    // render loop to interleave, isolating the actual thing under test.
     const skillShotAfter = await page.evaluate((expr) => {
       const h = window.__qaHook;
+      h.ballInPlay = true; // collecting is gated on it - a drained ball crossing the orbit pays nothing
       h.skillShot.active = true;
+      h.skillShot.tierIndex = 0;
       // Deliberately generous, not the real SKILL_SHOT_WINDOW_MS - this check is isolating
-      // "does the trigger get recorded at all", not the countdown's own decay rate (which is
+      // "does the collecting trigger pay", not the countdown's own decay rate (which is
       // exercised, and already known to be timing-sensitive in this sandbox, elsewhere). A short
       // window here was observed to occasionally race against a single large sandbox frame delta
       // and self-expire between arming and the trigger call, even within one synchronous
       // evaluate() - see this block's comment above.
       h.skillShot.remainingMs = 999999;
-      h.skillShot.bestLaneIndex = null;
+      const scoreBefore = h.score;
       h.handleTriggerHit(eval(expr));
-      return { active: h.skillShot.active, bestLaneIndex: h.skillShot.bestLaneIndex };
-    }, findKind('skillShotLane'));
-    check('GAMEPLAY', 'skill shot: skillShotLane trigger records a result', skillShotAfter.bestLaneIndex !== null, skillShotAfter);
+      return { active: h.skillShot.active, scoreBefore, score: h.score };
+    // The RIGHT side specifically - the left orbit's completion trigger shares this kind and is
+    // not the collecting one, so findKind()'s "first mesh of this kind" is not good enough here.
+    }, `(() => { const h = window.__qaHook; return h.scene.meshes.find(m => m.metadata && m.metadata.kind === 'orbitCompletion' && m.metadata.side === 'right'); })()`);
+    // Scored, not counted: the orbit branch itself pays nothing here (no entrance was crossed, so
+    // it is not armed and returns before scoring), which makes the whole delta the skill shot's.
+    check('GAMEPLAY', 'skill shot: the right orbit collects an armed tier',
+      skillShotAfter.score > skillShotAfter.scoreBefore && skillShotAfter.active === false, skillShotAfter);
   }
 
   check('QUALITY', 'GAMEPLAY session: no uncaught page errors', pageErrors.length === 0, pageErrors);

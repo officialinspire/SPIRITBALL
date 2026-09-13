@@ -1588,7 +1588,7 @@ export const VISION_GATE_RADIUS_M = 0.011; // the actual capture trigger
 // all sits AT the mouth and says "there is a thing here"; nothing said where to shoot it from.
 // This is the lane, on the centre spine, running up to the mouth - the same floor-tint idiom the
 // orbits, the target bank, Saturn and the comet all use, so the board's five aimable shots are
-// marked the same way. Narrow on purpose: 38mm keeps it clear of skillShotLane0's insert at
+// marked the same way. Narrow on purpose: 38mm keeps it clear of the SUPER tier's insert at
 // x 0.020, and a wide bright strip on the centre line would read as an invitation to a shot whose
 // capture band is 4-8 degrees. Decorative only, height 0.001 at y 0.0012.
 export const VISION_GATE_APPROACH_TINT = { x: 0, z: 0.019, width: 0.038, length: 0.047 };
@@ -1900,33 +1900,67 @@ export const PLUNGER_HORIZONTAL_BASE_MS = 0; // was 106 - see the block comment 
 export const PLUNGER_HORIZONTAL_RATIO = 0; // was 0.05
 
 // ===================================
-// Upper-lane skill shot (user-requested) - turns the plunger's existing variable charge
-// power into an actual mechanic: three small lanes just past the shooter lane's exit, in the
-// real gap between the bumper cluster's two rows (BUMPER_CLUSTER has one bumper at z=-0.02
-// and a pair at z=0.06 - this sits at z=0.02, comfortably clear of both), reward depending on
-// which one the ball's first clean launch passes through.
+// Skill shot (user-requested) - turns the plunger's existing variable charge power into an
+// actual mechanic: three reward tiers, and how long you hold the plunger picks which one.
+// Three inserts by the shooter lane show the tiers; the one you are currently charging into
+// lights as you hold, so the choice is visible before you let go. Releasing arms that tier,
+// and the ball collects it by actually completing the right orbit - so the reward is chosen
+// by the release and paid for by the shot.
 //
-// The geometry below was chosen by direct trajectory sampling (Playwright: launching the
-// ball at a spread of real charge durations and recording its actual position over time),
-// the same empirical-not-assumed approach this file already uses for its guide-rail/orbit-
-// rotation geometry - NOT by retuning any plunger constant (PLUNGER_MIN_POWER_MS/MAX_POWER_MS/
-// HORIZONTAL_BASE_MS/HORIZONTAL_RATIO above are all untouched). That sampling turned up
-// something genuinely useful for the "full power shouldn't be optimal" requirement: a bare-
-// minimum tap AND a full-power launch both consistently landed in the easiest, outermost
-// lane, while only a calibrated MID-range charge reliably reached the two better, more
-// central lanes - so holding for maximum power is not the winning strategy here, a
-// deliberately-timed medium charge is.
+// REDESIGNED, and the reason is worth recording because the old design read as correct and
+// was not. It was three physical lanes side by side at z=0.02, awarded by which one the
+// launched ball rolled through, with the geometry below "chosen by direct trajectory
+// sampling ... a bare-minimum tap AND a full-power launch both consistently landed in the
+// easiest, outermost lane, while only a calibrated MID-range charge reliably reached the two
+// better, more central lanes". All of that was true of the board it was measured on. The
+// orbit rebuild then put the right orbit's mouth directly above the shooter lane's exit (see
+// PLUNGER_MIN_POWER_MS's comment), which walled those three lanes off from the launch
+// entirely: the ball is committed to the orbit and passes up its channel at x 0.18-0.22,
+// while the lanes sit inboard of the orbit's own inner rail at x 0.02-0.15. Measured on the
+// shipped build - 45 launches across five charge levels - the skill shot lanes were reached
+// by a launched ball 4 times, all of them at t=2.4-2.8s, i.e. by a ball that had already been
+// round the orbit and come back down, not by a launch at all. Worse, the window was already
+// closed by then: every single launch crosses the right orbit's completion trigger at t=0.3s,
+// and any trigger that was not a skill shot lane closed the window. So the feature could not
+// pay, and on the rare occasion it did it was paying for a random rollover.
+//
+// Why the tiers are charge bands now and not a new set of lanes somewhere the ball does go.
+// The ball's path up the orbit is clean and repeatable, but where it comes OFF the top arc is
+// not: the same launch speed with the ball started 3mm further across the lane exits the arc
+// somewhere else entirely (measured: at 25% charge, two of three start offsets came down the
+// left orbit at x=-0.21 and the third came down the middle at x=-0.065). No lane placed in the
+// upper board can be selected by charge, because charge does not determine where the ball
+// ends up - it is a coin flip, and a coin flip is not a skill shot. Charge itself IS
+// repeatable and it is the thing the player controls precisely, so that is what the tiers
+// read. Same three rewards, same three inserts, same "a deliberately-timed medium charge
+// beats holding for maximum power" intent the original had - now actually deliverable.
 // ===================================
-export const SKILL_SHOT_WINDOW_MS = 2500; // short, per the request - how long the window stays armed after a launch
+export const SKILL_SHOT_WINDOW_MS = 2500; // short, per the request - how long the armed tier stays collectable after a launch
 export const SKILL_SHOT_Z_M = 0.02;
-export const SKILL_SHOT_DEPTH_M = 0.03;
-export const SCORE_SKILL_SHOT_SUPER = 2500; // hardest to reach (innermost lane) - biggest reward
+// The charge the SUPER band is centred on. Deliberately the middle of the range rather than
+// either end: both extremes are what a player does by accident (an instant tap, or holding
+// until the meter pins), so neither may be the best reward - the original design's own
+// requirement, kept.
+export const SKILL_SHOT_TARGET_CHARGE = 0.5;
+export const SCORE_SKILL_SHOT_SUPER = 2500; // narrowest band - biggest reward
 export const SCORE_SKILL_SHOT_MID = 1500;
-export const SCORE_SKILL_SHOT_SAFE = 800; // where both a weak tap and a full-power launch tend to land
-export const SKILL_SHOT_LANES = [
-    { x: 0.04, halfWidth: 0.02, label: 'SUPER SKILL SHOT', points: SCORE_SKILL_SHOT_SUPER },
-    { x: 0.08, halfWidth: 0.02, label: 'SKILL SHOT', points: SCORE_SKILL_SHOT_MID },
-    { x: 0.125, halfWidth: 0.025, label: 'LAUNCH SHOT', points: SCORE_SKILL_SHOT_SAFE }
+export const SCORE_SKILL_SHOT_SAFE = 800; // everything else, including a bare tap and a pinned meter
+// `band` is the widest distance from SKILL_SHOT_TARGET_CHARGE that still selects this tier,
+// as a fraction of the full charge window - so with PLUNGER_CHARGE_TIME_MS at 2000ms, SUPER's
+// 0.05 is a 200ms release window and MID's 0.18 is 720ms wide (less SUPER's share of it).
+// 200ms is tight but fair: it is roughly a human's release precision, and both mobile and
+// desktop drive the same charge clock, so neither input is favoured. The last tier's band
+// must be >= 0.5 so that some tier always matches, whatever the charge.
+// `x`/`halfWidth` are unchanged - they are where each tier's insert sits on the playfield,
+// which is all they were ever really doing once the trigger volumes came out.
+export const SKILL_SHOT_TIERS = [
+    { x: 0.04, halfWidth: 0.02, band: 0.05, label: 'SUPER SKILL SHOT', points: SCORE_SKILL_SHOT_SUPER },
+    { x: 0.08, halfWidth: 0.02, band: 0.18, label: 'SKILL SHOT', points: SCORE_SKILL_SHOT_MID },
+    // 'SAFE SHOT', not the 'LAUNCH SHOT' this tier used to be called. Two reasons, both from the
+    // redesign: it is no longer the lane a plain launch happens to land in, it is the tier you get
+    // for not timing the release - and the launch message now names the tier it armed, which made
+    // the old name read back as "LAUNCH! LAUNCH SHOT".
+    { x: 0.125, halfWidth: 0.025, band: 1, label: 'SAFE SHOT', points: SCORE_SKILL_SHOT_SAFE }
 ];
 
 // ===================================

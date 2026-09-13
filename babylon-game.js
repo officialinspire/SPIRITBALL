@@ -97,8 +97,8 @@ import {
     BALL_REST_Z_PX, BALL_REST_Z_M, BALL_REST_Y_M, LANE_INNER_WALL_X_PX, LANE_INNER_WALL_WIDTH_PX,
     LANE_WALL_Z_TOP_PX, LANE_WALL_Z_BOTTOM_PX, PLUNGER_CHARGE_TIME_MS, PLUNGER_MIN_POWER_MS,
     PLUNGER_MAX_POWER_MS, PLUNGER_HORIZONTAL_BASE_MS, PLUNGER_HORIZONTAL_RATIO, SKILL_SHOT_WINDOW_MS,
-    SKILL_SHOT_Z_M, SKILL_SHOT_DEPTH_M, SCORE_SKILL_SHOT_SUPER, SCORE_SKILL_SHOT_MID,
-    SCORE_SKILL_SHOT_SAFE, SKILL_SHOT_LANES, BALL_SAVE_WINDOW_MS, BALL_SAVE_RETURN_DELAY_MS,
+    SKILL_SHOT_Z_M, SCORE_SKILL_SHOT_SUPER, SCORE_SKILL_SHOT_MID,
+    SCORE_SKILL_SHOT_SAFE, SKILL_SHOT_TIERS, SKILL_SHOT_TARGET_CHARGE, BALL_SAVE_WINDOW_MS, BALL_SAVE_RETURN_DELAY_MS,
     KICKBACK_SIDE, KICKBACK_INWARD_SPEED_MS, KICKBACK_UPTABLE_BIAS_MS, PLUNGER_REST_Z_M,
     PLUNGER_TRAVEL_M, SCORE_ATTACK_BUMPER, SCORE_BOSS_BUMPER, SCORE_COMET,
     SCORE_MISSION_TARGET, SCORE_TARGET_BANK_COMPLETE, SCORE_REENTRY_LANE, SCORE_LANE_BANK_COMPLETE,
@@ -1014,11 +1014,10 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         }
     }
 
-    // Upper-lane skill shot award (user-requested) - laneIndex 0 (SUPER SKILL SHOT, the hardest/
-    // best lane) gets the biggest three-note fanfare; laneIndex 2 (LAUNCH SHOT, the easy/common
-    // lane) gets a single short chime - so the sound itself telegraphs which tier was hit, same
-    // "bigger achievement, bigger sting" scaling as playComboSound()/playRankUpSound(), just keyed
-    // by lane instead of tier.
+    // Skill shot award (user-requested) - tier 0 (SUPER SKILL SHOT, the hardest/best) gets the
+    // biggest three-note fanfare; tier 2 (SAFE SHOT, the one you get for not timing the release)
+    // gets a single short chime - so the sound itself telegraphs which tier was collected, same
+    // "bigger achievement, bigger sting" scaling as playComboSound()/playRankUpSound().
     function playSkillShotSound(laneIndex) {
         const notes = 3 - laneIndex;
         const basePitch = 700 - laneIndex * 60;
@@ -7031,40 +7030,29 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const ballSaveLampMesh = addPlayfieldInsert(scene, 'ballSaveLamp', ballSaveLampMat,
             insertCollarMat, LANE_TRIGGER_WIDTH_M * 0.7, toWorldX(BALL_REST_X_PX) - 0.035, BALL_REST_Z_M);
 
-        // Upper-lane skill shot (user-requested) - see SKILL_SHOT_LANES' own block comment (near
-        // its declaration) for the full geometry reasoning. Same invisible-unless-dev trigger +
-        // always-visible lamp insert split as the inlane/outlane rollovers just above; the lamp
-        // starts dim/off (armSkillShot()/endSkillShot() in main() toggle it per-ball) since
-        // these lanes only matter for the short window right after a launch.
-        const skillShotLaneMeshes = [];
+        // Skill shot tier inserts (user-requested) - see SKILL_SHOT_TIERS' own block comment (near
+        // its declaration) for what the mechanic is and why it was redesigned. These are the
+        // player-facing display for it: three inserts by the shooter lane, one per reward tier,
+        // lit as the plunger charges into that tier's band and left blinking on the armed one
+        // until the shot is collected (previewSkillShotTier()/armSkillShot() in main()).
+        //
+        // NO TRIGGER VOLUMES. There used to be one invisible-unless-dev trigger box per tier
+        // here, on the same "trigger + lamp insert" split the inlane/outlane rollovers still use,
+        // because a tier was a lane the ball rolled through. It is not any more - the tier is
+        // chosen at the moment of release - and leaving the boxes in would have been worse than
+        // dead weight: measured on the shipped board, the only thing that ever crossed them was a
+        // ball coming back down from the orbit two and a half seconds after the launch, which is
+        // to say they awarded skill shots for something that was not a skill shot.
         const skillShotLampMeshes = [];
-        SKILL_SHOT_LANES.forEach((laneDef, i) => {
+        SKILL_SHOT_TIERS.forEach((tierDef, i) => {
             const lampMat = new BABYLON.PBRMaterial('skillShotLampMat' + i, scene);
             lampMat.emissiveColor = COLOR_SKILL_SHOT_LAMP.scale(0.12); // faint glow at rest, like a real backlit-but-unlit insert
-            // Up-table arrow: a skill shot is a lane the player aims the launched ball INTO, so
-            // here the legend marks the shot, the opposite of the inlane/outlane arrows.
+            // Up-table arrow, kept: these inserts still read as "the launch pays out up there",
+            // the opposite of the inlane/outlane arrows.
             styleInsertLampMat(lampMat, COLOR_SKILL_SHOT_LAMP, insertLensTextures.up);
             const lamp = addPlayfieldInsert(scene, 'skillShotLamp' + i, lampMat, insertCollarMat,
-                laneDef.halfWidth * 2 * 0.5, laneDef.x, SKILL_SHOT_Z_M);
+                tierDef.halfWidth * 2 * 0.5, tierDef.x, SKILL_SHOT_Z_M);
             skillShotLampMeshes.push(lamp);
-
-            const triggerMat = new BABYLON.PBRMaterial('skillShotTriggerMat' + i, scene);
-            triggerMat.albedoColor = new BABYLON.Color3(1, 0.4, 0.6);
-            triggerMat.alpha = 0.35;
-            triggerMat.emissiveColor = new BABYLON.Color3(0.6, 0.15, 0.3);
-            const trigger = BABYLON.MeshBuilder.CreateBox('skillShotLane' + i, {
-                width: laneDef.halfWidth * 2,
-                height: 0.02,
-                depth: SKILL_SHOT_DEPTH_M
-            }, scene);
-            trigger.position.set(laneDef.x, 0.01, SKILL_SHOT_Z_M);
-            trigger.material = triggerMat;
-            trigger.isVisible = devMode;
-            debugTriggerMeshes.push(trigger);
-            trigger.metadata = { kind: 'skillShotLane', index: i, lamp };
-            const skillShotAggregate = new BABYLON.PhysicsAggregate(trigger, BABYLON.PhysicsShapeType.BOX, { mass: 0 }, scene);
-            skillShotAggregate.shape.isTrigger = true;
-            skillShotLaneMeshes.push(trigger);
         });
 
         // Upper-table LEFT ORBIT / RIGHT ORBIT shots - see ORBITS' block comment (near its
@@ -7768,7 +7756,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // the bumper this dodged is no longer there. The position is KEPT anyway: pulled forward
         // it now sits at the mouth of the right corridor, ahead of the power-up orb's new spot at
         // (0.075, 0.080), which is exactly where a "SKILL SHOT" callout wants to be read from.
-        const skillShotLabel = createLabelPlane(scene, 'SKILL SHOT', SKILL_SHOT_LANES[1].x, SKILL_SHOT_Z_M - 0.06, '#ff3366');
+        const skillShotLabel = createLabelPlane(scene, 'SKILL SHOT', SKILL_SHOT_TIERS[1].x, SKILL_SHOT_Z_M - 0.06, '#ff3366');
         skillShotLabel.position.y = 0.05;
         createLabelPlane(scene, 'KICKBACK', kickbackMirror * OUTLANE_TRIGGER_X_M, LANE_Z_BOTTOM_M - 0.03, '#ff5500');
         // Subtle emissive lane-flow markers (visual-polish pass, user-requested) - unlike every
@@ -7984,7 +7972,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // register every lamp mesh (sideLaneLampMeshes/orbitLampMeshes: {id, mesh} pairs, the rest:
         // plain mesh arrays/refs) against the centralized lamp system (see createLampSystem()).
         return {
-            missionTargetMeshes, missionTargetLamps, shotChainLamps, reentryLaneMeshes, skillShotLaneMeshes, skillShotLampMeshes,
+            missionTargetMeshes, missionTargetLamps, shotChainLamps, reentryLaneMeshes, skillShotLampMeshes,
             sideLaneLampMeshes, orbitLampMeshes, debugTriggerMeshes,
             kickbackLampMesh, ballSaveLampMesh, saturnRings, saturnRim, cometTailMeshes, powerUpMesh, visionGateMesh: ring,
             visionGateHalo: halo, visionGateCollarMesh: collar, visionGateThroat: throat, visionGateBeacon: beacon
@@ -8946,13 +8934,13 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             launchBtn.style.setProperty('--charge-pct', 0);
             setLaunchReady(true);
             setControlsDimmed(false);
-            // Upper-lane skill shot (user-requested) - defensive, unconditional reset, same
-            // pattern as the Vision Gate's own motion-type restore here: correct no-op if no
-            // shot is pending, and guarantees a dev "RESET BALL TO PLUNGER" tap or any other path
-            // into this function can never leave a stale window (or lit lamps) armed for the
-            // next ball. Force-reset, not endSkillShot() - a hard reset shouldn't retroactively
-            // award whatever lane happened to be pending.
-            forceResetSkillShot();
+            // Skill shot (user-requested) - defensive, unconditional reset, same pattern as the
+            // Vision Gate's own motion-type restore here: correct no-op if no shot is pending,
+            // and guarantees a dev "RESET BALL TO PLUNGER" tap or any other path into this
+            // function can never leave a stale window (or a lit insert) armed for the next ball.
+            // Close, never collect - a hard reset shouldn't retroactively pay a tier the ball
+            // never went and earned.
+            closeSkillShot();
             // Ball save (fairness mechanics, user-requested) - same defensive, unconditional
             // reset for the same reason: no path into this function should ever leave a stale
             // window armed for whatever ball is about to start. Deliberately does NOT touch
@@ -9038,23 +9026,30 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             launchBtn.style.setProperty('--charge-pct', 0);
             setLaunchReady(false);
             setControlsDimmed(true);
-            // Upper-lane skill shot (user-requested) - armed on every launch, not just the first
-            // of the game; "award once per ball" is enforced by skillShot.active itself (see its
-            // own block comment), not by anything here. Folded into the existing LAUNCH! message
-            // rather than a second showMessage() call right after it, which would just silently
-            // overwrite it (showMessage() has no queue - see its own comment).
-            armSkillShot();
+            // Hoisted above the arming below, which needs it too: the skill shot's tier is chosen
+            // from exactly the same charge number that scales the shake, the punch and the
+            // haptic, so there is one definition of "how hard was this plunge" and not two.
+            const powerPercent = (plungerPower - PLUNGER_MIN_POWER_MS) / (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS);
+            // Skill shot (user-requested) - armed on every launch, not just the first of the
+            // game; "award once per ball" is enforced by skillShot.active itself (see its own
+            // block comment), not by anything here.
+            const skillShotTier = armSkillShot(powerPercent);
             // Ball save (fairness mechanics, user-requested) - armed on every launch too;
             // armBallSave() itself is what refuses to re-arm once used this life (see its own
             // comment), so no extra guard is needed here.
             armBallSave();
-            backglass.showMessage('LAUNCH! SKILL SHOT READY', 900);
+            // Names the tier the release actually bought rather than the old generic "SKILL SHOT
+            // READY", because with the redesign that is now settled information at this exact
+            // moment and it is the feedback the mechanic lives on - a player cannot learn where
+            // the SUPER band is without being told which band they just hit. Folded into the
+            // LAUNCH! message rather than a second showMessage() right after it, which would just
+            // silently overwrite it (showMessage() has no queue - see its own comment).
+            backglass.showMessage('LAUNCH! ' + skillShotTier.label, 900);
 
             // Power-scaled shake, matching launchBall()'s shakeIntensity = 0.002 + powerPercent*0.005
             // in ../index.js, plus a 3D-only push-in toward the ball (no 2D equivalent - that
             // camera couldn't move through space at all) - both new beats the doc calls out
             // explicitly for this stage.
-            const powerPercent = (plungerPower - PLUNGER_MIN_POWER_MS) / (PLUNGER_MAX_POWER_MS - PLUNGER_MIN_POWER_MS);
             triggerCameraShake(150, 0.002 + powerPercent * 0.005);
             triggerCameraPunch(300, cameraForwardDir.scale(0.02 + powerPercent * 0.02));
             vibrateDevice(20 + Math.round(powerPercent * 40)); // matches launchBall()'s power-scaled vibrate() in ../index.js
@@ -9300,6 +9295,12 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 plungerPower = PLUNGER_MIN_POWER_MS;
                 plunger.chargePercent = 0;
                 launchBtn.style.setProperty('--charge-pct', 0);
+                // The charge is being abandoned, not released, so nothing gets armed - drop the
+                // tier preview with it. Without this the insert the player happened to be
+                // charging into would stay lit over a plunger that is no longer charging,
+                // promising a reward that was never armed. Safe unconditionally: it is a no-op
+                // when nothing is previewing (see previewSkillShotTier()).
+                previewSkillShotTier(null);
             }
         }
         window.addEventListener('blur', () => {
@@ -9463,25 +9464,25 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         const comboProgress = COMBO_DEFS.map(() => ({ index: 0, lastAtMs: 0 }));
         const comboStreak = { tier: 0, lastAtMs: 0 };
 
-        // Upper-lane skill shot state (user-requested) - `active` is the real gate checked in
-        // handleTriggerHit()'s 'skillShotLane' branch and armed only by handleLaunchRelease()
-        // below (once per launch); `remainingMs` is the short timeout, counted down by
-        // updateSkillShot() from the render loop like every other continuous per-ball timer here
-        // (updatePowerUp()/updateDropTargetBank()/updateBonusCount()) rather than a bare
-        // setTimeout, so it pauses correctly with everything else instead of burning down during
-        // a paused game.
+        // Skill shot state (user-requested) - see SKILL_SHOT_TIERS' own block comment in
+        // js/config.js for the mechanic and why it was redesigned. `active` is the real gate:
+        // armed only by handleLaunchRelease() (once per launch), and resolved exactly once, by
+        // collectSkillShot() or closeSkillShot(). `remainingMs` is the short timeout, counted
+        // down by updateSkillShot() from the render loop like every other continuous per-ball
+        // timer here (updatePowerUp()/updateDropTargetBank()/updateBonusCount()) rather than a
+        // bare setTimeout, so it pauses correctly with everything else instead of burning down
+        // during a paused game.
         //
-        // `bestLaneIndex` is why a lane touch doesn't resolve the shot immediately: the three
-        // lanes sit side by side at the same depth (see SKILL_SHOT_LANES), the ball always
-        // travels across them in the same right-to-left order, and they're pure detectors (not
-        // physical blockers) - so a shot that carries far enough legitimately crosses more than
-        // one lane's trigger in a row. Each touch only ever UPGRADES bestLaneIndex to the better
-        // lane (see the 'skillShotLane' branch below); the window closing - via endSkillShot(),
-        // on a timeout or the ball entering normal play (the guard near the top of
-        // handlePhysicalHit()/handleTriggerHit()) - is what actually awards whichever lane ended
-        // up best, so "where the first clean launch lands" means the FURTHEST lane it reached,
-        // not just whichever one happened to be geometrically nearest.
-        const skillShot = { active: false, remainingMs: 0, bestLaneIndex: null };
+        // `tierIndex` is decided at RELEASE, from the charge, not discovered later from where the
+        // ball went - that is the whole redesign. The window that follows is not "which tier will
+        // the ball find", it is "will this plunge actually make the shot it was aimed at": the
+        // tier is collected by the ball completing the right orbit, and by nothing else.
+        const skillShot = { active: false, remainingMs: 0, tierIndex: null };
+        // Which tier's insert is lit RIGHT NOW while the plunger is being held, so the player can
+        // see the reward they are charging into before they let go. Null when nothing is lit.
+        // Kept separate from skillShot.tierIndex on purpose: this one changes continuously during
+        // a hold and means nothing has been decided yet, that one is a committed result.
+        let skillShotPreviewIndex = null;
 
         // BALL SAVE state (fairness mechanics, user-requested) - `active`/`remainingMs` are the
         // live grace window, same render-loop-driven countdown idiom as skillShot above
@@ -10887,62 +10888,89 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             comboStreak.lastAtMs = 0;
         }
 
-        // BLINK while active - a real "shoot now" window, matching a classic machine's blinking
-        // time-limited insert rather than a plain steady light.
-        function setSkillShotLampsLit(lit) {
+        // Which reward the current charge is sitting in. First tier whose band contains the
+        // charge wins, so the narrow SUPER band is tested before the wide ones it sits inside -
+        // which is why SKILL_SHOT_TIERS has to stay ordered best-first. The last tier's band
+        // covers the whole range (see its own comment), so this always returns a real index.
+        function skillShotTierForCharge(chargePercent) {
+            const deviation = Math.abs(chargePercent - SKILL_SHOT_TARGET_CHARGE);
+            const index = SKILL_SHOT_TIERS.findIndex((tier) => deviation <= tier.band);
+            return index === -1 ? SKILL_SHOT_TIERS.length - 1 : index;
+        }
+
+        // Steady ON for the one tier the player is currently charging into, OFF for the rest -
+        // the classic "the lit insert walks as you hold" look. Steady rather than BLINK on
+        // purpose: blinking is this board's language for a live time-limited window (the armed
+        // shot below, the ball save), and nothing is at stake yet while the plunger is still down.
+        // Idempotent and cheap enough to call every frame, but it early-returns on an unchanged
+        // index anyway so a held plunger is not re-setting three lamp modes 60 times a second.
+        function previewSkillShotTier(index) {
+            if (skillShotPreviewIndex === index) return;
+            skillShotPreviewIndex = index;
             obstacles.skillShotLampMeshes.forEach((_, i) => {
-                lampSystem.setLampMode('skillShot' + i, lit ? LAMP_MODE.BLINK : LAMP_MODE.OFF);
+                lampSystem.setLampMode('skillShot' + i, i === index ? LAMP_MODE.ON : LAMP_MODE.OFF);
             });
         }
 
         // Called once, from handleLaunchRelease() - "award once per ball" starts here, since this
-        // is the only place that ever sets `active` true.
-        function armSkillShot() {
+        // is the only place that ever sets `active` true. The charge decides the tier here and
+        // now; nothing after this point can change which reward is on offer, only whether the
+        // ball earns it. BLINK on the armed insert alone - a real "make this shot now" window,
+        // matching a classic machine's blinking time-limited insert.
+        function armSkillShot(chargePercent) {
+            const index = skillShotTierForCharge(chargePercent);
             skillShot.active = true;
             skillShot.remainingMs = SKILL_SHOT_WINDOW_MS;
-            skillShot.bestLaneIndex = null;
-            setSkillShotLampsLit(true);
+            skillShot.tierIndex = index;
+            previewSkillShotTier(null); // clear the hold-time preview before the armed lamp takes over
+            obstacles.skillShotLampMeshes.forEach((_, i) => {
+                lampSystem.setLampMode('skillShot' + i, i === index ? LAMP_MODE.BLINK : LAMP_MODE.OFF);
+            });
+            return SKILL_SHOT_TIERS[index];
         }
 
-        // Closes the window - from a timeout, or the ball entering normal play - and awards
-        // whichever lane ended up best (see skillShot's own block comment for why a lane touch
-        // only upgrades bestLaneIndex instead of resolving immediately). Silent if no lane was
-        // ever reached (bestLaneIndex stays null): a plain timeout/normal-play exit with no
-        // skill-shot contact at all is a routine, expected outcome on most launches, not a
-        // failure worth announcing - the lamps simply going dark is the whole cue for that case.
-        function endSkillShot() {
+        // Pays the armed tier. Called from exactly one place - the right orbit's completion
+        // trigger in handleTriggerHit() - because completing the right orbit is what the plunge
+        // is FOR on this board (the shooter lane feeds it; see PLUNGER_MIN_POWER_MS's comment in
+        // js/config.js). Measured on the shipped build, every launch at every charge level
+        // crosses that trigger, and crosses it first, at t=0.3-0.4s: so this pays a plunge that
+        // did its job, and does not pay one that dribbled back down the lane.
+        function collectSkillShot() {
             if (!skillShot.active) return;
-            skillShot.active = false;
-            setSkillShotLampsLit(false);
-            if (skillShot.bestLaneIndex !== null) {
-                const laneDef = SKILL_SHOT_LANES[skillShot.bestLaneIndex];
-                addScore(laneDef.points);
-                stats.skillShotsAwarded++;
-                // Bonus/multiplier subsystem (established pattern) - a skill shot is a deliberate
-                // "major shot," on top of (not instead of) the addScore() above.
-                ballBonus.points += BONUS_MAJOR_SHOT_AMOUNT;
-                backglass.showMessage(laneDef.label + '! +' + laneDef.points, 1200);
-                triggerCameraShake(150, 0.004);
-                triggerCameraPunch(200, cameraForwardDir.scale(0.012));
-                playSkillShotSound(skillShot.bestLaneIndex);
-            }
-            skillShot.bestLaneIndex = null;
+            const tierIndex = skillShot.tierIndex;
+            const tierDef = SKILL_SHOT_TIERS[tierIndex];
+            closeSkillShot(); // clears tierIndex, hence the local copies above
+            addScore(tierDef.points);
+            stats.skillShotsAwarded++;
+            // Bonus/multiplier subsystem (established pattern) - a skill shot is a deliberate
+            // "major shot," on top of (not instead of) the addScore() above.
+            ballBonus.points += BONUS_MAJOR_SHOT_AMOUNT;
+            backglass.showMessage(tierDef.label + '! +' + tierDef.points, 1200);
+            triggerCameraShake(150, 0.004);
+            triggerCameraPunch(200, cameraForwardDir.scale(0.012));
+            playSkillShotSound(tierIndex);
         }
 
-        // Hard reset (dev "RESET BALL TO PLUNGER" button, a drain, or a new game via
-        // resetBallToPlunger() below) - deliberately does NOT award even if a lane had already
-        // been reached; the ball never got to actually finish that shot.
-        function forceResetSkillShot() {
+        // Closes the window without paying - a timeout, the ball reaching anything else first, or
+        // a hard reset (the dev "RESET BALL TO PLUNGER" button, a drain, a new game). Silent by
+        // design: a launch that does not collect is a routine, expected outcome, not a failure
+        // worth announcing, and the armed insert going dark is the whole cue for it. Also the
+        // one place that clears the charge-time preview, so no path can leave an insert lit with
+        // nothing armed.
+        function closeSkillShot() {
             skillShot.active = false;
-            skillShot.bestLaneIndex = null;
+            skillShot.tierIndex = null;
             skillShot.remainingMs = 0;
-            setSkillShotLampsLit(false);
+            skillShotPreviewIndex = null;
+            obstacles.skillShotLampMeshes.forEach((_, i) => {
+                lampSystem.setLampMode('skillShot' + i, LAMP_MODE.OFF);
+            });
         }
 
         function updateSkillShot(deltaMs) {
             if (!skillShot.active) return;
             skillShot.remainingMs -= deltaMs;
-            if (skillShot.remainingMs <= 0) endSkillShot();
+            if (skillShot.remainingMs <= 0) closeSkillShot();
         }
 
         // BLINK while active - a real time-limited window, same reasoning as the skill-shot lamps.
@@ -11012,14 +11040,14 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function handlePhysicalHit(mesh) {
             const meta = mesh.metadata;
             if (!meta) return;
-            // Upper-lane skill shot (user-requested): any real contact other than a structural
-            // wall means the ball has left its clean post-launch arc and entered normal play -
-            // close the window (awarding the best lane reached, if any - see endSkillShot()).
-            // Checked before the cooldown gate below on purpose: even an on-cooldown hit (e.g.
-            // grazing a bumper mid-cooldown) is still evidence normal play has started. 'wall' is
-            // exempt - guide rails/dividers are structural, not a deliberate shot, and a clean
-            // skill-shot launch can legitimately graze one.
-            if (skillShot.active && meta.kind !== 'wall') endSkillShot();
+            // Skill shot (user-requested): any real contact other than a structural wall means
+            // the ball has left its clean post-launch arc and entered normal play, so the armed
+            // tier expires unpaid - it is collected at the right orbit or not at all (see
+            // collectSkillShot()). Checked before the cooldown gate below on purpose: even an
+            // on-cooldown hit (e.g. grazing a bumper mid-cooldown) is still evidence normal play
+            // has started. 'wall' is exempt - guide rails/dividers are structural, not a
+            // deliberate shot, and the launch runs the orbit's rails the whole way round.
+            if (skillShot.active && meta.kind !== 'wall') closeSkillShot();
             // Phantom-scoring audit fix: handleDrain() sets ballInPlay=false the instant the ball
             // first enters the drain trigger, but the ball itself isn't teleported away until
             // resetBallToPlunger() actually runs - up to BALL_SAVE_RETURN_DELAY_MS/1500ms later
@@ -11131,11 +11159,23 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 });
                 if (triggerEnterLog.length > 300) triggerEnterLog.shift();
             }
-            // Upper-lane skill shot (user-requested) - same "any real contact ends the window"
-            // reasoning as handlePhysicalHit()'s guard; 'skillShotLane' is exempt since touching
-            // one only ever upgrades the pending result (its own branch below), never closes the
-            // window by itself.
-            if (skillShot.active && meta.kind !== 'skillShotLane') endSkillShot();
+            // Skill shot (user-requested) - the armed tier resolves on the FIRST trigger the ball
+            // reaches, one way or the other, which is the same "any real contact ends the window"
+            // reasoning as handlePhysicalHit()'s guard with one trigger exempted: the right
+            // orbit's completion, which is the shot the plunge is aimed at and so pays out
+            // instead of expiring (see collectSkillShot()). Measured on the shipped board, a
+            // launch reaches that trigger first every time, at every charge level - so in
+            // practice this line is the launch either making its shot or not.
+            //
+            // ballInPlay is part of the collect condition, not just a general guard: handleDrain()
+            // clears it the instant the ball enters the drain trigger, but the ball keeps rolling
+            // for up to ~1.5s afterwards and can cross the right orbit on the way (the same
+            // phantom-scoring window the ballInPlay check further down exists for). A drained ball
+            // wandering through the orbit has not made a skill shot - close it unpaid.
+            if (skillShot.active) {
+                if (ballInPlay && meta.kind === 'orbitCompletion' && meta.side === 'right') collectSkillShot();
+                else closeSkillShot();
+            }
             if (meta.kind === 'drainZone') {
                 handleDrain();
                 return;
@@ -11152,20 +11192,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // trigger that sets ballInPlay=false in the first place is unaffected by its own guard.
             if (!ballInPlay) return;
             if (isOnCooldown(mesh)) return;
-            if (meta.kind === 'skillShotLane') {
-                // Doesn't score or close the window here - see skillShot's own block comment for
-                // why: the three lanes sit side by side and the ball always crosses them in the
-                // same order, so a shot that carries far enough legitimately touches more than
-                // one. Only upgrade to this lane if it's worth more than whatever's pending, then
-                // acknowledge the touch with a brief flash (stays lit, doesn't dim - the window
-                // is still open) rather than the full award feedback, which only fires once,
-                // in endSkillShot(), when the window actually closes.
-                if (!skillShot.active) return;
-                if (skillShot.bestLaneIndex === null || SKILL_SHOT_LANES[meta.index].points > SKILL_SHOT_LANES[skillShot.bestLaneIndex].points) {
-                    skillShot.bestLaneIndex = meta.index;
-                }
-                lampSystem.flashLamp('skillShot' + meta.index, 150, new BABYLON.Color3(1, 1, 1));
-            } else if (meta.kind === 'missionTarget') {
+            if (meta.kind === 'missionTarget') {
                 // Drop-target bank upgrade: the trigger volume never moves once a target drops
                 // (see buildObstacles()'s comment - only the flag mesh sinks, in
                 // updateDropTargetBank()), so the ball can keep overlapping a dropped target's
@@ -12738,6 +12765,28 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     getStartupPhase, startupBlocksInput,
                     PHASES: PHASE
                 },
+                // Skill shot (user-requested), same ?dev=1-only, read-only terms as everything
+                // else on this hook. Exposed so qa/skill-shot.js can assert the band boundaries
+                // exactly and see which tier a real plunge armed - neither of which is
+                // recoverable from outside: the bands are a pure function of charge with no
+                // visible edge, and the armed tier is a lit insert among three that a pixel
+                // sample can only tell apart by brightness. `tiers` is published rather than
+                // restated in the test so the two cannot drift apart. No setters - nothing here
+                // can arm, collect or cancel a shot.
+                skillShot: {
+                    tiers: SKILL_SHOT_TIERS,
+                    targetCharge: SKILL_SHOT_TARGET_CHARGE,
+                    tierForCharge: skillShotTierForCharge,
+                    state() {
+                        return {
+                            active: skillShot.active,
+                            tierIndex: skillShot.tierIndex,
+                            previewIndex: skillShotPreviewIndex,
+                            remainingMs: skillShot.remainingMs,
+                            awarded: stats.skillShotsAwarded
+                        };
+                    }
+                },
                 // Settings/controls panel (Phase 4), same ?dev=1-only, read-only terms. Exposed
                 // so qa/settings-panel.js can assert WHERE BACK goes rather than only that the
                 // overlay closed - which is the whole thing this pass added and the one thing
@@ -12961,8 +13010,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                 statusPendingVGateEject.textContent = pendingVisionGateEject ? 'yes' : 'no';
 
                 statusSkillShot.textContent = skillShot.active
-                    ? 'active (' + (skillShot.remainingMs / 1000).toFixed(1) + 's)'
-                    : 'off';
+                    ? SKILL_SHOT_TIERS[skillShot.tierIndex].label + ' armed (' + (skillShot.remainingMs / 1000).toFixed(1) + 's)'
+                    : (skillShotPreviewIndex === null ? 'off' : SKILL_SHOT_TIERS[skillShotPreviewIndex].label + ' (charging)');
 
                 const orbitRemaining = (armedAt) => armedAt === null
                     ? '—'
@@ -13147,6 +13196,11 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
                     // Touch-controls visual polish - drives .launch-btn.pressed's own charge-scaled
                     // glow in index.html, reusing this same real chargePercent (not a new value).
                     launchBtn.style.setProperty('--charge-pct', chargePercent);
+                    // Skill shot (user-requested) - light the tier this charge is currently sitting
+                    // in, so the reward on offer is visible BEFORE the player commits to it. Same
+                    // chargePercent again, not a second reading of the clock: the insert that is
+                    // lit at the instant of release is exactly the tier armSkillShot() will arm.
+                    previewSkillShotTier(skillShotTierForCharge(chargePercent));
                 }
                 updatePlungerVisual(plunger);
             }
