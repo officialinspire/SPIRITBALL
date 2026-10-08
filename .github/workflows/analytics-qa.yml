@@ -31,5 +31,5 @@ jobs:
               -e "s|executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',||" \
               qa/game-over.js > qa/game-over-ci.cjs
           node qa/game-over-ci.cjs
-      - run: node qa/analytics-browser.mjs
+      - run: node qa/analytics-safety.mjs && node qa/analytics-browser.mjs
         if: always()

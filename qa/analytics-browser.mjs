@@ -44,11 +44,7 @@ const EARN = `
 `;
 const BACK = `(!window.__endOfBallDebug.sequence.active && window.__flipperDebug.mainBall.mesh.position.y > 0.005)`;
 
-try {
-  const { page, context } = await newPage({ width: 1280, height: 800 });
-  await page.mouse.click(640, 400);
-  await page.waitForFunction(() => getComputedStyle(document.getElementById('menu-overlay')).display === 'none');
-  await page.waitForTimeout(2200);
+async function playToOver(page) {
   let earned = false;
   for (let i = 0; i < 25; i++) {
     const state = await page.evaluate(`({ over: getComputedStyle(document.getElementById('gameover-overlay')).display !== 'none', inPlay: window.__flipperDebug.isBallInPlay(), back: ${BACK} })`);
@@ -80,6 +76,14 @@ try {
     }
     await page.waitForTimeout(400);
   }
+}
+
+try {
+  const { page, context } = await newPage({ width: 1280, height: 800 });
+  await page.mouse.click(640, 400);
+  await page.waitForFunction(() => getComputedStyle(document.getElementById('menu-overlay')).display === 'none');
+  await page.waitForTimeout(2200);
+  await playToOver(page);
   assert.equal(await page.locator('#gameover-overlay').evaluate((el) => getComputedStyle(el).display !== 'none'), true);
   await page.waitForTimeout(400);
   for (const name of ['game_opened', 'game_started', 'game_over']) {
@@ -91,12 +95,23 @@ try {
   assert.ok(events.every((item) => item.properties.$process_person_profile === false && item.properties.$geoip_disable === true));
   assert.equal(new Set(events.map((item) => item.distinct_id)).size, 1);
   assert.equal(errors.length, 0, errors.join(' | '));
+  assert.equal(events.filter((e) => e.event === 'high_score_achieved').length, 1);
+  assert.equal(events.find((e) => e.event === 'high_score_achieved').properties.high_score, over.properties.score);
+  await page.evaluate(() => window.dispatchEvent(new ErrorEvent('error', { error: new TypeError('PRIVATE QA MESSAGE') })));
+  for (let i = 0; i < 50 && !events.some((e) => e.event === 'error_encountered'); i++) await page.waitForTimeout(100);
+  const error = events.find((e) => e.event === 'error_encountered');
+  assert.equal(error.properties.error_name, 'TypeError');
+  assert.equal(error.properties.game_state, 'game_over');
+  assert.ok(!JSON.stringify(events).includes('PRIVATE QA MESSAGE'));
   await context.close();
 
   fail = true;
   const mobile = await newPage({ width: 390, height: 844 }, true);
   await mobile.page.touchscreen.tap(195, 420);
   await mobile.page.waitForFunction(() => getComputedStyle(document.getElementById('menu-overlay')).display === 'none');
+  await mobile.page.waitForTimeout(2200);
+  await playToOver(mobile.page);
+  assert.equal(await mobile.page.locator('#gameover-overlay').evaluate((el) => getComputedStyle(el).display !== 'none'), true);
   assert.equal(errors.length, 0, errors.join(' | '));
   await mobile.context.close();
   console.log('SPIRITBALL analytics browser QA passed.');

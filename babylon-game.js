@@ -122,7 +122,7 @@ import {
 // file header for why it stays BABYLON-free, and SKINS.md at the repo root for the full asset-
 // folder spec this powers. Imported the same bare-identifier way as js/config.js above.
 import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
-import { initAnalytics, trackGameEvent } from './js/analytics.js';
+import { initAnalytics, trackGameEvent, setAnalyticsContext } from './js/analytics.js';
 
 initAnalytics();
 
@@ -11768,6 +11768,8 @@ initAnalytics();
 
         let isPaused = false;
         let gameOverActive = false;
+        setAnalyticsContext(() => ({ mode: 'pinball', game_state: gameOverActive ? 'game_over' : isPaused ? 'paused' : startupPhase,
+            score, high_score: backglass.state.highScore, round: stats.missionsCompleted, level: mission.rank + 1 }));
 
         // Bug fix (repo audit): #loading-panel (index.html) is visible from the very first paint,
         // with zero JS needed to reveal it - see its own CSS comment for why. This is the one
