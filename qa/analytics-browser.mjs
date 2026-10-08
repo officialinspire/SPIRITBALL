@@ -99,8 +99,8 @@ try {
   await mobile.page.waitForFunction(() => getComputedStyle(document.getElementById('menu-overlay')).display === 'none');
   assert.equal(errors.length, 0, errors.join(' | '));
   await mobile.context.close();
-  console.log(`ANALYTICS_QA_CAPTURE ${JSON.stringify(events)}`);
   console.log('SPIRITBALL analytics browser QA passed.');
 } finally {
+  console.log(`ANALYTICS_QA_CAPTURE ${JSON.stringify(events)}`);
   await browser.close();
 }

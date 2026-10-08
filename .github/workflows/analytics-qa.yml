@@ -25,10 +25,11 @@ jobs:
           done
           cat /tmp/spiritball-qa.log
           exit 1
-      - run: node qa/analytics-browser.mjs
       - name: Existing game-over and high-score regression suite
         run: |
           sed -e "s|require('/opt/node22/lib/node_modules/playwright')|require('playwright')|" \
               -e "s|executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',||" \
               qa/game-over.js > qa/game-over-ci.cjs
           node qa/game-over-ci.cjs
+      - run: node qa/analytics-browser.mjs
+        if: always()
