@@ -1295,7 +1295,6 @@ initAnalytics();
         const memory = navigator.deviceMemory || 2;
         const isLowEnd = /Android\s[1-6]\.|iPhone\s[1-7]\.|iPad\s[1-5]\./i.test(navigator.userAgent);
         let score = 0;
-        let analyticsRun = 0;
         if (cores >= 8) score += 3;
         else if (cores >= 4) score += 2;
         else if (cores >= 2) score += 1;
@@ -9362,6 +9361,7 @@ initAnalytics();
         // values themselves ("COLLISION_STARTED" etc.) are part of the same source and not at risk
         // of changing independently, so comparing against them directly sidesteps that question.
         let score = 0;
+        let analyticsRun = 0;
         // High-score audit fix: addScore() keeps backglass.state.highScore synced to `score` in
         // real time (as soon as either is exceeded, both read the same value from then on) - by
         // Game Over time, `score === backglass.state.highScore` is true both when this GAME
