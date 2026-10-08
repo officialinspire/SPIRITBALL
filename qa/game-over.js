@@ -78,6 +78,7 @@ const EARN = `
 async function newGamePage(browser, { w = 1280, h = 800 } = {}) {
   const touch = w < 500;
   const page = await browser.newPage({ viewport: { width: w, height: h }, hasTouch: touch, isMobile: touch });
+  await page.addInitScript(() => Object.defineProperty(navigator, 'globalPrivacyControl', { value: true }));
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   await page.goto(`http://localhost:${PORT}/index.html?dev=1`, { waitUntil: 'load' });

@@ -122,6 +122,9 @@ import {
 // file header for why it stays BABYLON-free, and SKINS.md at the repo root for the full asset-
 // folder spec this powers. Imported the same bare-identifier way as js/config.js above.
 import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
+import { initAnalytics, trackGameEvent, setAnalyticsContext } from './js/analytics.js';
+
+initAnalytics();
 
 (function () {
     'use strict';
@@ -9358,6 +9361,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         // values themselves ("COLLISION_STARTED" etc.) are part of the same source and not at risk
         // of changing independently, so comparing against them directly sidesteps that question.
         let score = 0;
+        let analyticsRun = 0;
         // High-score audit fix: addScore() keeps backglass.state.highScore synced to `score` in
         // real time (as soon as either is exceeded, both read the same value from then on) - by
         // Game Over time, `score === backglass.state.highScore` is true both when this GAME
@@ -10315,6 +10319,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // Light the objective's own hardware, once, so the text above has something on the
             // table to point at. Runs last so it lands with the message rather than before it.
             cueMissionObjective(index);
+            trackGameEvent('round_started', { round: stats.missionsCompleted + 1, mode: 'vision', level: mission.rank + 1, score });
         }
 
         // Called from the hit handlers below with the scoring category that just happened
@@ -10353,6 +10358,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             backglass.state.rank = RANK_NAMES[mission.rank];
             backglass.state.rankColor = STATE_COLORS[mission.rank];
             addScore(MISSION_COMPLETE_BONUS);
+            trackGameEvent('round_completed', { round: stats.missionsCompleted, mode: 'vision', level: mission.rank + 1, score, high_score: backglass.state.highScore });
             // Bonus/multiplier subsystem (user-requested) - a "substantial" contribution to the
             // hidden end-of-ball pool, on top of (not instead of) the immediate MISSION_COMPLETE_
             // BONUS above. Doesn't touch mission/rank state or messaging at all - purely additive.
@@ -11762,6 +11768,8 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         let isPaused = false;
         let gameOverActive = false;
+        setAnalyticsContext(() => ({ mode: 'pinball', game_state: gameOverActive ? 'game_over' : isPaused ? 'paused' : startupPhase,
+            score, high_score: backglass.state.highScore, round: stats.missionsCompleted, level: mission.rank + 1 }));
 
         // Bug fix (repo audit): #loading-panel (index.html) is visible from the very first paint,
         // with zero JS needed to reveal it - see its own CSS comment for why. This is the one
@@ -11828,6 +11836,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
         function hideMenuScreen() {
             if (startupPhase !== PHASE.MENU) return;
             setStartupPhase(PHASE.GAMEPLAY);
+            trackGameEvent('game_started', { mode: 'pinball', score: 0 }, ++analyticsRun);
             menuUp = false;
             // Crossfade the title track out under the run's track. Not a stop-then-start: both
             // ramps run together over the same 700ms (see AUDIO_SCENES), so there is no gap at
@@ -12382,6 +12391,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
             // source, so this rides that one gain back up. No second source is created, which is
             // the duplicate-music bug this arrangement exists to make impossible.
             setAudioScene('gameplay');
+            trackGameEvent('game_started', { mode: 'pinball', score: 0 }, ++analyticsRun);
         }
 
         document.getElementById('pause-resume-btn').addEventListener('click', resumeGame);
@@ -12615,6 +12625,9 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
 
         function showGameOverScreen() {
             gameOverActive = true;
+            const result = { mode: 'pinball', score, high_score: backglass.state.highScore, round: stats.missionsCompleted, level: mission.rank + 1 };
+            trackGameEvent('game_over', result, analyticsRun);
+            if (newHighScoreThisGame) trackGameEvent('high_score_achieved', result, analyticsRun);
             playGameOverSound();
             // Down, not away: the run's track stays the live source at a low duck rather than
             // handing over to the menu track. The player has not gone back to the menu - they are
@@ -13253,6 +13266,7 @@ import { SKIN_ASSET_BASE, SKIN_MANIFEST } from './js/skins.js';
     }
 
     main().catch((err) => {
+        trackGameEvent('error_encountered', { error_type: 'startup_error', error_name: err?.name === 'Error' ? 'Error' : 'UnknownError' }, 'startup_error');
         // Reactive fallback for SIMD-incompatible browsers/devices the proactive iOS-version
         // check above doesn't specifically name (e.g. an old desktop browser or unusual WebView)
         // - any Havok init failure whose message mentions WASM/WebAssembly/SIMD is treated as a

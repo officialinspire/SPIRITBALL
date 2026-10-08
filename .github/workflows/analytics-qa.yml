@@ -1,0 +1,35 @@
+name: Analytics gameplay QA
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-save --package-lock=false playwright@1.55.0
+      - run: npx playwright install --with-deps chromium
+      - name: Serve static game
+        run: |
+          python3 -m http.server 8973 > /tmp/spiritball-qa.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8973/index.html >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/spiritball-qa.log
+          exit 1
+      - name: Existing game-over and high-score regression suite
+        run: |
+          sed -e "s|require('/opt/node22/lib/node_modules/playwright')|require('playwright')|" \
+              -e "s|executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',||" \
+              qa/game-over.js > qa/game-over-ci.cjs
+          node qa/game-over-ci.cjs
+      - run: node qa/analytics-safety.mjs && node qa/analytics-browser.mjs
+        if: always()
