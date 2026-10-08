@@ -32,6 +32,16 @@ const DRAIN = `
     dbg.updateHitCooldowns(16); dbg.updateBallPhysics(ball, 16); engine._step(16 / 1000);
   }
 `;
+const EARN = `
+  const dbg = window.__flipperDebug, scene = dbg.scene;
+  const saturn = scene.getMeshByName('saturn');
+  const ball = dbg.mainBall, body = ball.aggregate.body;
+  const from = saturn.absolutePosition.clone(); from.z -= 0.06; from.y = 0.0135;
+  ball.mesh.setAbsolutePosition(from);
+  ball.mesh.computeWorldMatrix(true);
+  body.setAngularVelocity(new BABYLON.Vector3(0, 0, 0));
+  body.setLinearVelocity(new BABYLON.Vector3(0, 0, 1.1));
+`;
 const BACK = `(!window.__endOfBallDebug.sequence.active && window.__flipperDebug.mainBall.mesh.position.y > 0.005)`;
 
 try {
@@ -39,6 +49,7 @@ try {
   await page.mouse.click(640, 400);
   await page.waitForFunction(() => getComputedStyle(document.getElementById('menu-overlay')).display === 'none');
   await page.waitForTimeout(2200);
+  let earned = false;
   for (let i = 0; i < 25; i++) {
     const state = await page.evaluate(`({ over: getComputedStyle(document.getElementById('gameover-overlay')).display !== 'none', inPlay: window.__flipperDebug.isBallInPlay(), back: ${BACK} })`);
     if (state.over) break;
@@ -49,6 +60,7 @@ try {
       await page.keyboard.up('Space');
       await page.waitForTimeout(400);
       if (!await page.evaluate(() => window.__flipperDebug.isBallInPlay())) continue;
+      if (!earned) { await page.evaluate(EARN); await page.waitForTimeout(1400); earned = true; }
     }
     await page.evaluate(DRAIN);
     try {
@@ -59,6 +71,10 @@ try {
         positionY: window.__flipperDebug.mainBall.mesh.position.y,
         sequence: window.__endOfBallDebug.sequence,
         overlay: getComputedStyle(document.getElementById('gameover-overlay')).display,
+        pause: getComputedStyle(document.getElementById('pause-overlay')).display,
+        lives: document.getElementById('hud-lives').textContent,
+        visibility: document.visibilityState,
+        phase: window.__flipperDebug.startup.getStartupPhase(),
       }));
       throw new Error(`drain ${i}: ${JSON.stringify(state)}; ${error.message}`);
     }
