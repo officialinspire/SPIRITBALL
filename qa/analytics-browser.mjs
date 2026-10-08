@@ -38,6 +38,7 @@ try {
   const { page, context } = await newPage({ width: 1280, height: 800 });
   await page.mouse.click(640, 400);
   await page.waitForFunction(() => getComputedStyle(document.getElementById('menu-overlay')).display === 'none');
+  await page.waitForTimeout(2200);
   for (let i = 0; i < 14; i++) {
     const state = await page.evaluate(`({ over: getComputedStyle(document.getElementById('gameover-overlay')).display !== 'none', inPlay: window.__flipperDebug.isBallInPlay(), back: ${BACK} })`);
     if (state.over) break;
@@ -49,7 +50,17 @@ try {
       await page.waitForTimeout(400);
     }
     await page.evaluate(DRAIN);
-    await page.waitForFunction(`getComputedStyle(document.getElementById('gameover-overlay')).display !== 'none' || ${BACK}`, null, { timeout: 20000, polling: 80 });
+    try {
+      await page.waitForFunction(`getComputedStyle(document.getElementById('gameover-overlay')).display !== 'none' || ${BACK}`, null, { timeout: 20000, polling: 80 });
+    } catch (error) {
+      const state = await page.evaluate(() => ({
+        inPlay: window.__flipperDebug.isBallInPlay(),
+        positionY: window.__flipperDebug.mainBall.mesh.position.y,
+        sequence: window.__endOfBallDebug.sequence,
+        overlay: getComputedStyle(document.getElementById('gameover-overlay')).display,
+      }));
+      throw new Error(`drain ${i}: ${JSON.stringify(state)}; ${error.message}`);
+    }
     await page.waitForTimeout(400);
   }
   assert.equal(await page.locator('#gameover-overlay').evaluate((el) => getComputedStyle(el).display !== 'none'), true);
