@@ -39,7 +39,7 @@ try {
   await page.mouse.click(640, 400);
   await page.waitForFunction(() => getComputedStyle(document.getElementById('menu-overlay')).display === 'none');
   await page.waitForTimeout(2200);
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 25; i++) {
     const state = await page.evaluate(`({ over: getComputedStyle(document.getElementById('gameover-overlay')).display !== 'none', inPlay: window.__flipperDebug.isBallInPlay(), back: ${BACK} })`);
     if (state.over) break;
     if (!state.inPlay) {
@@ -48,6 +48,7 @@ try {
       await page.waitForTimeout(220);
       await page.keyboard.up('Space');
       await page.waitForTimeout(400);
+      if (!await page.evaluate(() => window.__flipperDebug.isBallInPlay())) continue;
     }
     await page.evaluate(DRAIN);
     try {
