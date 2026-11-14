@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-const source = fs.readFileSync(new URL('../js/analytics.js', import.meta.url), 'utf8').replaceAll('export function ', 'function ');
+const attributionSource = fs.readFileSync(new URL('../js/attribution.js', import.meta.url), 'utf8').replaceAll('export function ', 'function ');
+const trackerSource = fs.readFileSync(new URL('../js/analytics.js', import.meta.url), 'utf8').replaceAll('export function ', 'function ').replace(/^import \{ createAttribution \} from '\.\/attribution\.js';\r?\n/, '');
+const source = attributionSource + '\n' + trackerSource;
 function harness(fetch, navigator = {}) {
   const tasks = [], requests = [], listeners = {};
   const sandbox = { navigator, fetch: (...args) => { requests.push(args); return fetch(...args); },
